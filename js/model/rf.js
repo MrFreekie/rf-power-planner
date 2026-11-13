@@ -19,6 +19,7 @@
 //  * Body loss applied = environment.bodyLossDb + rx.bodyLossDb.
 
 import { CABLES, ANTENNAS, SURFACES, MATERIALS } from './library.js';
+import { formatLength } from './units.js';
 import { RX_PRESETS, RX_DEFAULTS, EXTERNAL_NOISE_FIGURE_600MHZ_DB, cascadeIip3Dbm as stagesIip3Dbm } from './rx-params.js';
 
 let ZP = {};
@@ -581,7 +582,7 @@ export function solveLink(scene, link) {
   const iem = link.kind === 'iem';
   if (iem) chainSteps(); // transmitter -> chain -> Tx antenna
   step('Tx antenna gain', direct._gt);
-  step('Free-space loss', -fspl);
+  step(`Free-space loss (${formatLength(distanceM, scene && scene.units && scene.units.length)})`, -fspl);
   if (directWallDb) step('Wall transmission', -directWallDb);
   if (Math.abs(multipathDb) > 1e-9) step('Multipath (coherent sum)', multipathDb);
   step('Rx antenna gain', direct._gr);
