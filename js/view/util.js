@@ -68,6 +68,7 @@ export function findItem(scene, id) {
     if (link.id === id) return { type: 'link', link, item: link };
   }
   for (const r of scene.reflectors || []) if (r.id === id) return { type: 'reflector', item: r };
+  for (const p of scene.platforms || []) if (p.id === id) return { type: 'platform', item: p };
   return null;
 }
 /** The link the side view and detail overlays follow: the selection's link, else the first link. */
@@ -79,6 +80,7 @@ export function selectableIds(scene) {
   const ids = [];
   for (const l of scene.links || []) ids.push(l.tx.id, l.rx.id);
   for (const r of scene.reflectors || []) ids.push(r.id);
+  for (const p of scene.platforms || []) ids.push(p.id);
   return ids;
 }
 

@@ -10,6 +10,9 @@ import { rxConfig } from '../rxTracker.js';
 import { RX_PRESETS } from '../model/rx-params.js';
 import { setInterferer, setAntennaBChainMode, setAntennaBOrientation } from '../actions.js';
 import { effectiveAntennaB } from '../model/diversity.js';
+import { floorHeightAt } from '../model/floor.js';
+import { PLATFORM_MATERIALS } from '../model/scene.js';
+import { setStage, addPlatform, updatePlatform, removePlatform } from '../actions.js';
 import { setImdPreset, setImdCombiner, setImdPim, addImdTransmitter, removeImdTransmitter, updateImdTransmitter } from '../actions.js';
 
 const IMD_PRESETS = [['mic-rack-typical', 'Mic rack, typical'], ['iem-combiner-no-isolation', 'IEM combiner, no isolation'],
@@ -31,7 +34,7 @@ const KIND_NAMES = {
   attenuator: 'Attenuator', splitter: 'Splitter', combiner: 'Combiner',
 };
 const PREVIEW_KINDS = new Set(['splitter', 'combiner']);
-const SECTION_FOR = { tx: 'tx', rx: 'rx', reflector: 'refl', link: 'link' };
+const SECTION_FOR = { tx: 'tx', rx: 'rx', reflector: 'refl', link: 'link', platform: 'plats' };
 
 export function mountInspector({ container, store }) {
   container.classList.add('inspector');
@@ -40,7 +43,7 @@ export function mountInspector({ container, store }) {
   let updaters = [];
   let refs = {};
   let session = 0; // bumped on focus so each editing burst is its own undo step
-  const open = { chainB: true, imd: true, link: true, tx: false, rx: false, env: false, chain: true, refl: false, paths: false };
+  const open = { stage: false, plats: false, chainB: true, imd: true, link: true, tx: false, rx: false, env: false, chain: true, refl: false, paths: false };
   let lastSel = Symbol('none');
 
   const getCtx = () => {
@@ -223,8 +226,14 @@ export function mountInspector({ container, store }) {
     frag.append(
       lenLink(`${who}-x`, 'Position x (stage right)', `${who}.pos.x`, -50, 100),
       lenLink(`${who}-y`, 'Position y (toward audience)', `${who}.pos.y`, -50, 100),
-      lenLink(`${who}-z`, 'Height z', `${who}.pos.z`, 0, 50),
+      lenLink(`${who}-z`, 'Height above floor', `${who}.pos.z`, 0, 50),
     );
+    const hint = el('p', 'hint');
+    updaters.push((cc) => {
+      const pos = cc.link[who].pos, fl = floorHeightAt(cc.scene, pos.x, pos.y);
+      hint.textContent = `Floor beneath: ${lengthToUi(fl, cc.lu).toFixed(2)} ${cc.lu}. Absolute height above the ground: ${lengthToUi(fl + pos.z, cc.lu).toFixed(2)} ${cc.lu}.`;
+    });
+    frag.append(hint);
     return frag;
   }
 
@@ -240,10 +249,20 @@ export function mountInspector({ container, store }) {
     const link = c.link;
     const heading = el('h2', null, 'Inspector');
     const who = c.found
-      ? el('p', 'insp-who', c.found.type === 'reflector' ? `Selected: reflector "${c.found.item.name}"`
+      ? el('p', 'insp-who', c.found.type === 'platform' ? `Selected: platform "${c.found.item.name}"` : c.found.type === 'reflector' ? `Selected: reflector "${c.found.item.name}"`
         : c.found.type === 'link' ? `Selected: link "${link.name}"` : `Selected: ${c.found.type === 'tx' ? 'transmitter' : 'receiver'} "${c.found.item.name}"`)
       : el('p', 'insp-who', `Nothing selected: editing link "${link.name}"`);
     container.append(heading, who);
+
+    // Stage and platforms
+    const sb = section('stage', 'Stage', 'Item heights are measured from the floor beneath them: the deck, or the top of the platform they stand on.');
+    const stageNum = (key, label, field, min, max) => numberField({
+      key, label, decimals: 2, min: (cc) => lengthToUi(min, cc.lu), max: (cc) => lengthToUi(max, cc.lu), step: (cc) => (cc.lu === 'ft' ? 0.5 : 0.1), unit: (cc) => cc.lu,
+      get: (cc) => lengthToUi(cc.scene.stage[field] ?? 0, cc.lu), set: (cc, v, o) => setStage(store, { [field]: lengthFromUi(v, cc.lu) }, o),
+    });
+    sb.append(stageNum('stage-w', 'Stage width', 'width', 0.5, 500), stageNum('stage-d', 'Stage depth', 'depth', 0.5, 500), stageNum('stage-h', 'Deck height above the ground', 'heightM', 0, 20));
+    const plb = section('plats', 'Platforms', 'A platform is a raised block on the stage (drum riser, choir steps). Its top height is measured from the ground.');
+    buildPlatforms(plb, c);
 
     // Link
     const lb = section('link', 'Link');
@@ -487,7 +506,7 @@ export function mountInspector({ container, store }) {
       }
     });
 
-    const secs = ['link', 'tx', 'rx', 'env', 'chain', ...(refs.chainB ? ['chainB'] : []), 'refl', 'paths'];
+    const secs = ['stage', 'plats', 'link', 'tx', 'rx', 'env', 'chain', ...(refs.chainB ? ['chainB'] : []), 'refl', 'paths'];
     if (c.scene.imd && c.scene.imd.enabled) { buildImd(section('imd', 'Intermod demo'), c); secs.unshift('imd'); }
     container.append(...secs.map((n) => refs[n].details));
   }
@@ -542,6 +561,46 @@ export function mountInspector({ container, store }) {
       body.append(box);
     });
     body.append(button('Add transmitter', 'imd-add', () => { const id = addImdTransmitter(store); if (id) store.select(id); }));
+  }
+
+  function buildPlatforms(body, c) {
+    const list = el('ul', 'refl-list');
+    (c.scene.platforms || []).forEach((p) => {
+      const li = el('li');
+      const b = button(p.name || 'Platform', `plat:${p.id}`, () => store.select(p.id));
+      b.setAttribute('aria-pressed', String(c.sel === p.id));
+      li.append(b); list.append(li);
+    });
+    if (!(c.scene.platforms || []).length) body.append(el('p', 'hint', 'No platforms. Add one to put a riser on the stage.'));
+    body.append(list);
+    body.append(button('Add platform', 'plat-add', () => { const id = addPlatform(store); if (id) store.select(id); }));
+    const p0 = c.found?.type === 'platform' ? c.found.item : null;
+    if (!p0) return;
+    const id = p0.id;
+    const P = (cc) => (cc.scene.platforms || []).find((q) => q.id === id);
+    const len = (key, label, field, min, max) => numberField({
+      key: `plat-${key}`, label, decimals: 2, min: (cc) => lengthToUi(min, cc.lu), max: (cc) => lengthToUi(max, cc.lu), step: (cc) => (cc.lu === 'ft' ? 0.5 : 0.1), unit: (cc) => cc.lu,
+      get: (cc) => lengthToUi(P(cc)?.[field] ?? 0, cc.lu), set: (cc, v, o) => updatePlatform(store, id, { [field]: lengthFromUi(v, cc.lu) }, o),
+    });
+    const form = el('div', 'refl-form');
+    form.append(
+      textField({ key: 'plat-name', label: 'Name', get: (cc) => P(cc)?.name, set: (cc, v, o) => updatePlatform(store, id, { name: v }, o) }),
+      selectField({
+        key: 'plat-mat', label: 'Material', options: PLATFORM_MATERIALS.map((m) => [m, (SURFACES[m] || MATERIALS[m] || {}).name || m]),
+        get: (cc) => P(cc)?.material, set: (cc, v) => updatePlatform(store, id, { material: v }),
+      }),
+      len('x', 'Position x', 'x', -500, 1000), len('y', 'Position y', 'y', -500, 1000),
+      len('w', 'Width', 'width', 0.1, 500), len('d', 'Depth', 'depth', 0.1, 500),
+      len('top', 'Top height above the ground', 'topM', 0.05, 30),
+    );
+    const rise = el('p', 'hint');
+    updaters.push((cc) => {
+      const p = P(cc); if (!p) { rise.textContent = ''; return; }
+      const below = floorHeightAt({ ...cc.scene, platforms: (cc.scene.platforms || []).filter((q) => q.id !== id) }, p.x + p.width / 2, p.y + p.depth / 2);
+      rise.textContent = `Rise above the surface below: ${lengthToUi(p.topM - below, cc.lu).toFixed(2)} ${cc.lu} (the surface under its centre is ${lengthToUi(below, cc.lu).toFixed(2)} ${cc.lu} high).`;
+    });
+    form.append(rise, button('Remove platform', 'plat-remove', () => { removePlatform(store, id); store.select(null); }, { cls: 'danger' }));
+    body.append(form);
   }
 
   function buildChain(body, c, target = 'main') {
@@ -747,6 +806,7 @@ export function mountInspector({ container, store }) {
       c.link.chain.map((x, i) => `${x.id || i}:${x.kind}`),
       c.link.kind !== 'iem' && c.link.rx.diversity && c.link.rx.diversity.enabled && c.link.rx.diversity.antennaB ? (Array.isArray(c.link.rx.diversity.antennaB.chain) ? c.link.rx.diversity.antennaB.chain.map((x, i) => `${x.id || i}:${x.kind}`) : 'same') : null,
       c.scene.reflectors.map((r) => `${r.id}:${r.name}`),
+      (c.scene.platforms || []).map((p) => `${p.id}:${p.name}`),
       c.scene.imd && c.scene.imd.enabled ? c.scene.imd.transmitters.map((t) => t.id) : null,
     ]);
   }

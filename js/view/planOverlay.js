@@ -1,6 +1,6 @@
 // Plan-view overlays for multi-antenna zones: coverage heat map (offscreen, re-blitted), zone polygons,
 // branch antenna icons with cable tags, legend and label collision avoidance.
-import { haloText, setFont } from './util.js';
+import { haloText, setFont, strokeHatchRect } from './util.js';
 import { classify, parseColor, covView } from './coverageUi.js';
 import { chainLossDb } from '../model/rf.js';
 import { CABLES } from '../model/library.js';
@@ -234,6 +234,57 @@ export function drawRxCableTags(ctx, th, vp, link, placer, lengthUnit = 'm', can
     ctx.restore();
     haloText(ctx, th, text, tx, y, { px: 11, weight: '600', color: th.ink });
   }
+}
+
+/** Raised platforms (and the deck height label): hatched blocks, darker the higher they are, with corner handles. */
+export function drawPlatforms(ctx, th, vp, scene, sel, handles, lengthUnit = 'm') {
+  const plats = (scene.platforms || []).slice().sort((a, b) => a.topM - b.topM);
+  const deckH = (scene.stage && scene.stage.heightM) || 0;
+  if (!plats.length && !deckH) return;
+  const maxTop = Math.max(deckH, ...plats.map((p) => p.topM), 0.1);
+  for (const p of plats) {
+    const a = vp.worldToScreen(p.x, p.y), b = vp.worldToScreen(p.x + p.width, p.y + p.depth);
+    const w = b.x - a.x, h = b.y - a.y, selected = sel === p.id;
+    ctx.save();
+    ctx.fillStyle = `rgba(29,39,51,${(0.05 + 0.2 * (p.topM / maxTop)).toFixed(3)})`; ctx.fillRect(a.x, a.y, w, h);
+    strokeHatchRect(ctx, a.x, a.y, w, h, th.inkSoft, 6);
+    ctx.strokeStyle = th.ink; ctx.lineWidth = selected ? 2.6 : 1.5; ctx.strokeRect(a.x, a.y, w, h);
+    ctx.restore();
+    const label = `${p.name}: top ${formatLength(p.topM, lengthUnit)}`;
+    setFont(ctx, th, 11, '600');
+    if (w > ctx.measureText(label).width + 6 || selected) haloText(ctx, th, label, a.x + w / 2, a.y + h / 2 + 4, { align: 'center', px: 11, weight: '600' });
+    else if (w > 24) haloText(ctx, th, formatLength(p.topM, lengthUnit), a.x + w / 2, a.y + h / 2 + 4, { align: 'center', px: 10, weight: '600' });
+    handles.push({ kind: 'platBody', itemId: p.id, rect: [a.x, a.y, b.x, b.y], sx: a.x + w / 2, sy: a.y + h / 2, r: 0, wx: p.x, wy: p.y });
+    [[p.x, p.y], [p.x + p.width, p.y], [p.x + p.width, p.y + p.depth], [p.x, p.y + p.depth]].forEach(([wx, wy], i) => {
+      const s2 = vp.worldToScreen(wx, wy);
+      ctx.fillStyle = selected ? th.ink : th.paper; ctx.strokeStyle = th.ink; ctx.lineWidth = 1.2;
+      ctx.fillRect(s2.x - 3.5, s2.y - 3.5, 7, 7); ctx.strokeRect(s2.x - 3.5, s2.y - 3.5, 7, 7);
+      handles.push({ kind: 'platCorner', corner: i, itemId: p.id, sx: s2.x, sy: s2.y, r: 10, pri: 1, wx, wy });
+    });
+  }
+}
+
+/** Small elevation legend: deck and platform tops, lowest first. */
+export function drawElevationLegend(ctx, th, w, scene, lengthUnit = 'm') {
+  const deckH = (scene.stage && scene.stage.heightM) || 0;
+  const plats = (scene.platforms || []).slice().sort((a, b) => a.topM - b.topM);
+  if (!plats.length && !deckH) return;
+  const rows = [['ground (audience)', 0]];
+  if (deckH) rows.push(['stage deck', deckH]);
+  plats.slice(0, 4).forEach((p) => rows.push([p.name, p.topM]));
+  if (plats.length > 4) rows.push([`+${plats.length - 4} more`, NaN]);
+  setFont(ctx, th, 11);
+  const bw = Math.max(...rows.map(([t, v]) => ctx.measureText(`${t} ${Number.isFinite(v) ? formatLength(v, lengthUnit) : ''}`).width)) + 26;
+  const x = w - bw - 8, y = 8;
+  ctx.save(); ctx.fillStyle = th.paper; ctx.globalAlpha = 0.9; ctx.fillRect(x - 4, y, bw + 4, rows.length * 15 + 18); ctx.globalAlpha = 1;
+  ctx.fillStyle = th.inkSoft; ctx.textAlign = 'left'; ctx.fillText('Elevation', x, y + 12);
+  const max = Math.max(deckH, ...plats.map((p) => p.topM), 0.1);
+  rows.forEach(([t, v], i) => {
+    const yy = y + 18 + i * 15;
+    if (Number.isFinite(v)) { ctx.fillStyle = `rgba(29,39,51,${(0.05 + 0.2 * (v / max)).toFixed(3)})`; ctx.fillRect(x, yy - 9, 14, 11); ctx.strokeStyle = th.ink; ctx.lineWidth = 0.8; ctx.strokeRect(x + 0.5, yy - 8.5, 13, 10); }
+    ctx.fillStyle = th.ink; ctx.fillText(`${t} ${Number.isFinite(v) ? formatLength(v, lengthUnit) : ''}`, x + 20, yy);
+  });
+  ctx.restore();
 }
 
 /** Label collision avoidance: reserve rectangles, then find a free vertical offset for a new label. */

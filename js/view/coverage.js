@@ -91,7 +91,7 @@ export function mountCoverage({ container, store }) {
     cHeat.checked = !!covView.show; cTint.checked = !!covView.tint; cZones.checked = !!covView.zones;
     modeSel.value = scene.coverage?.mode || 'power';
     const cov = link ? coverage.get(link.id) : null;
-    prog.textContent = !link ? 'No link.' : !cov ? 'Coverage is computed for in-ear monitor links and for scenes with zones.' : cov.computing ? `Computing coverage ${Math.round((cov.progress || 0) * 100)}%...` : `Coverage grid ${cov.cellM} m cells${cov.undersampled ? ' (coarse: estimates only)' : ''}${cov.fineCoverage === 'zones-only' ? ', fine pass in zones only' : ''}.`;
+    prog.textContent = !link ? 'No link.' : !cov ? 'Coverage is computed for in-ear monitor links and for scenes with zones.' : cov.computing ? `Computing coverage ${Math.round((cov.progress || 0) * 100)}%...` : `Coverage grid ${cov.cellM} m cells, receiver height ${Number.isFinite(cov.rxHeight) ? cov.rxHeight.toFixed(2) : '-'} m above the floor${cov.undersampled ? ' (coarse: estimates only)' : ''}${cov.fineCoverage === 'zones-only' ? ', fine pass in zones only' : ''}.`;
     const sel = store.getSelection();
     tbody.textContent = '';
     const zones = scene.zones || [];

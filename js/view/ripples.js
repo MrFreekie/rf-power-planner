@@ -15,6 +15,7 @@
 import { antennaGainDb, floorReflection, reflectorCoefficient } from '../model/rf.js';
 import { solveCached, statusColor, setFont, haloText } from './util.js';
 import { gateOf } from './squelchUi.js';
+import { floorHeightAt } from '../model/floor.js';
 import { parseColor } from './coverageUi.js';
 import * as M from './rippleMath.js';
 
@@ -353,12 +354,16 @@ export function createRipples({ store }) {
     if (!e) return;
     const azU = Math.atan2(geom.u.x, geom.u.y) / DEG;
     const fy = vp.worldToScreen(0, 0).y;
-    const zr = link.rx.pos.z, zt = link.tx.pos.z;
+    // heights above the ground: item height plus the floor beneath it; the reflecting plane is the floor at the specular point
+    const zrAbs = link.rx.pos.z + floorHeightAt(scene, link.rx.pos.x, link.rx.pos.y), ztAbs = link.tx.pos.z + floorHeightAt(scene, link.tx.pos.x, link.tx.pos.y);
+    let hr = floorHeightAt(scene, link.tx.pos.x, link.tx.pos.y);
+    { const rs = solveCached(scene, link); const fp = rs && rs.paths && rs.paths.find((q) => q.kind === 'floor'); const bp = fp && fp.points && fp.points[1]; if (bp) hr = floorHeightAt(scene, bp.x, bp.y); }
+    const zr = zrAbs, zt = ztAbs;
     const horiz = geom.D;
     // floor reflection at the grazing angle of the real Tx -> floor -> Rx path
     let gm = 0.5, gph = Math.PI;
     try {
-      const gr = floorReflection(env.floor, env.polarisation || 'vertical', Math.atan2(zt + zr, Math.max(horiz, 1e-6)) / DEG, link.freqMHz);
+      const gr = floorReflection(env.floor, env.polarisation || 'vertical', Math.atan2((zt - hr) + (zr - hr), Math.max(horiz, 1e-6)) / DEG, link.freqMHz);
       gm = Math.hypot(gr.re, gr.im); gph = Math.atan2(gr.im, gr.re);
     } catch { /* default */ }
     const lambda = M.wavelengthM(link.freqMHz);
@@ -368,8 +373,9 @@ export function createRipples({ store }) {
       if (needField(scene, vp, link.id, 'side')) {
         const rgb = parseColor(th.ink, inkRgb); inkRgb[0] = rgb[0]; inkRgb[1] = rgb[1]; inkRgb[2] = rgb[2];
         nSrc = 0;
-        srcs[0] = 0; srcs[1] = zt; srcs[2] = 0; srcs[3] = 1; srcs[4] = 0;
-        srcs[5] = 0; srcs[6] = -zt; srcs[7] = 0; srcs[8] = env.model === 'free-space' ? 0 : gm; srcs[9] = gph; nSrc = 2;
+        const sT = geom.sTx ?? 0;
+        srcs[0] = sT; srcs[1] = zt; srcs[2] = 0; srcs[3] = 1; srcs[4] = 0;
+        srcs[5] = sT; srcs[6] = 2 * hr - zt; srcs[7] = 0; srcs[8] = env.model === 'free-space' ? 0 : gm; srcs[9] = gph; nSrc = 2;
         const k = TWO_PI / lambda;
         paintField(w, h, (px) => (px - vp.origin.x) / vp.pxPerM, (px, py) => -((py - vp.origin.y) / vp.pxPerM), (X, Y) => Y >= 0, k, 0);
       }
@@ -382,23 +388,26 @@ export function createRipples({ store }) {
     ctx.save();
     ctx.beginPath(); ctx.rect(0, 0, w, fy); ctx.clip(); // only above the floor
     ctx.lineCap = 'butt';
-    const c = vp.worldToScreen(0, -zt);
+    const sTx = geom.sTx ?? 0, sRx = geom.sRx ?? geom.D;
+    const c = vp.worldToScreen(sTx, -zt);
     P.cx = c.x; P.cy = c.y; P.table = table; P.idx = null; P.mirror = false; P.planMode = false; P.extra = 0;
     P.spacingM = sp.spacingM; P.pxPerM = vp.pxPerM; P.maxRpx = farthest(c.x, c.y, w, h); P.cap = MAX_RINGS; P.refD = Math.max(sp.spacingM, 0.5);
     setRingStyle(ctx, th, e, muted);
     strokeRings(ctx);
     if (env.model !== 'free-space') {
-      const ic = vp.worldToScreen(0, zt); // image source below the floor
+      const ic = vp.worldToScreen(sTx, -(2 * hr - zt)); // image source below the local floor plane
+      ctx.save(); ctx.beginPath(); ctx.rect(0, 0, w, vp.worldToScreen(0, -hr).y); ctx.clip(); // reflected rings live above the local floor plane
       P.cx = ic.x; P.cy = ic.y; P.mirror = true; P.extra = -20 * Math.log10(Math.max(gm, 0.05)) + 3; P.maxRpx = farthest(ic.x, ic.y, w, h); P.cap = 36;
       setRingStyle(ctx, th, e, muted);
       strokeRings(ctx);
+      ctx.restore();
       P.mirror = false; P.extra = 0;
     }
     ctx.restore();
     const d = Math.hypot(horiz, zr - zt);
     const a = M.ringArrival(d, phase, sp.spacingM, vp.pxPerM, 7);
     const res = solveCached(scene, link);
-    const rp = vp.worldToScreen(horiz, -zr);
+    const rp = vp.worldToScreen(sRx, -zr);
     arrival(ctx, th, rp.x, rp.y, a, res && res.status, muted);
     label(ctx, th, w, h, lambda, sp.multiple);
   }

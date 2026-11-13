@@ -4,7 +4,7 @@ import { buildExample } from './examples.js';
 import { IMD_PRESETS, COMBINER_PRESETS } from './model/imd-params.js';
 import { startWalk, stopWalk } from './walk.js';
 import { effectiveAntennaB } from './model/diversity.js';
-import { createDefaultScene, createDefaultLink, createChainItem, createReflector, createBranch, createZone, createImdTransmitter, defaultImdTransmitters, newId } from './model/scene.js';
+import { createDefaultScene, createDefaultLink, createChainItem, createReflector, createBranch, createZone, createPlatform, STAGE_LIMITS, PLATFORM_LIMITS, PLATFORM_MATERIALS, createImdTransmitter, defaultImdTransmitters, newId } from './model/scene.js';
 
 const UNSAFE = new Set(['__proto__', 'prototype', 'constructor']);
 
@@ -466,4 +466,80 @@ export function setAntennaBOrientation(store, linkId, orientation, o = {}) {
     const el = Number.isFinite(orientation.el) ? orientation.el : cur.el;
     ab.orientation = { az: ((az % 360) + 360) % 360, el: Math.max(-90, Math.min(90, el)) };
   }, opts(o));
+}
+
+// ---- stage size, deck height and raised platforms ---------------------------------------------------------------
+// pos.z of every item is the height above the LOCAL floor (the deck, or the top of the platform it stands on).
+
+const clampTo = (v, [lo, hi]) => Math.min(hi, Math.max(lo, v));
+const fin = Number.isFinite;
+
+/** setStage(store, { width?, depth?, heightM? }, { coalesce }): values are clamped to 0.5..500 m (size) and 0..20 m (deck height). */
+export function setStage(store, partial = {}, o = {}) {
+  return store.update((d) => {
+    if (fin(partial.width)) d.stage.width = clampTo(partial.width, STAGE_LIMITS.size);
+    if (fin(partial.depth)) d.stage.depth = clampTo(partial.depth, STAGE_LIMITS.size);
+    if (fin(partial.heightM)) d.stage.heightM = clampTo(partial.heightM, STAGE_LIMITS.heightM);
+    else if (!fin(d.stage.heightM)) d.stage.heightM = 0;
+  }, opts(o));
+}
+
+/**
+ * addPlatform(store, partial?) -> id (null at the 50-platform limit). Default: 2 x 2 m wooden riser on the stage,
+ * 0.4 m above the deck, offset a little from the previous one so new platforms do not hide each other.
+ */
+export function addPlatform(store, partial = {}) {
+  let id = null;
+  store.update((d) => {
+    if (!Array.isArray(d.platforms)) d.platforms = [];
+    if (d.platforms.length >= PLATFORM_LIMITS.max) return;
+    const n = d.platforms.length;
+    const base = createPlatform({
+      name: `Platform ${n + 1}`,
+      x: Math.max(0, (d.stage.width - 2) / 2 + 0.5 * n), y: Math.max(0, (d.stage.depth - 2) / 2 + 0.5 * n),
+      topM: (d.stage.heightM || 0) + 0.4,
+    });
+    const p = { ...base };
+    if (typeof partial.name === 'string') p.name = partial.name;
+    if (typeof partial.id === 'string' && partial.id && !d.platforms.some((x) => x.id === partial.id)) p.id = partial.id;
+    for (const k of ['x', 'y']) if (fin(partial[k])) p[k] = clampTo(partial[k], PLATFORM_LIMITS.coord);
+    for (const k of ['width', 'depth']) if (fin(partial[k])) p[k] = clampTo(partial[k], PLATFORM_LIMITS.size);
+    if (fin(partial.topM)) p.topM = clampTo(partial.topM, PLATFORM_LIMITS.topM);
+    if (PLATFORM_MATERIALS.includes(partial.material)) p.material = partial.material;
+    d.platforms.push(p);
+    id = p.id;
+  });
+  return id;
+}
+
+/** updatePlatform(store, id, { name?, material?, x?, y?, width?, depth?, topM? }, { coalesce }): numbers are clamped, bad values ignored. */
+export function updatePlatform(store, id, partial = {}, o = {}) {
+  return store.update((d) => {
+    const p = (d.platforms || []).find((x) => x.id === id);
+    if (!p) return;
+    if (typeof partial.name === 'string') p.name = partial.name;
+    if (PLATFORM_MATERIALS.includes(partial.material)) p.material = partial.material;
+    for (const k of ['x', 'y']) if (fin(partial[k])) p[k] = clampTo(partial[k], PLATFORM_LIMITS.coord);
+    for (const k of ['width', 'depth']) if (fin(partial[k])) p[k] = clampTo(partial[k], PLATFORM_LIMITS.size);
+    if (fin(partial.topM)) p.topM = clampTo(partial.topM, PLATFORM_LIMITS.topM);
+  }, opts(o));
+}
+
+export function removePlatform(store, id) {
+  const r = store.update((d) => {
+    const i = (d.platforms || []).findIndex((x) => x.id === id);
+    if (i >= 0) d.platforms.splice(i, 1);
+  });
+  if (store.getSelection() === id) store.select(null);
+  return r;
+}
+
+/** movePlatform(store, id, { x?, y? }, { coalesce }): moves the corner (x, y) of the platform; drags pass a coalesce key. */
+export function movePlatform(store, id, pos = {}, o = {}) {
+  return updatePlatform(store, id, { x: pos.x, y: pos.y }, o);
+}
+
+/** resizePlatform(store, id, { width?, depth? }, { coalesce }) */
+export function resizePlatform(store, id, size = {}, o = {}) {
+  return updatePlatform(store, id, { width: size.width, depth: size.depth }, o);
 }

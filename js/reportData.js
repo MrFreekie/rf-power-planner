@@ -1,6 +1,6 @@
 // Report data: everything a printable link-budget report needs, as plain data. Pure (no DOM).
 //   buildReportData(scene, linkId, results = {}) -> {
-//     title, date, scenario: [{label, value}], assumptions: [string], waterfall: [{label, valueDbm, deltaDb, valueText, deltaText}],
+//     title, date, scenario: [{label, value}], platforms: [{name, x, y, width, depth, topM, material, text}], assumptions: [string], waterfall: [{label, valueDbm, deltaDb, valueText, deltaText}],
 //     margin: {marginDb, status, rxPowerDbm, inputPowerDbm, sensitivityDbm, text}, warnings: [{kind, severity, text}],
 //     zones: [{name, passFraction, pass, minDbm, requiredDbm, text}], intermod: [{product, channel, offsetKHz, ciDb, severity, text}],
 //     disclaimer }
@@ -24,7 +24,7 @@ export function buildReportData(scene, linkId, results = {}) {
   const link = (scene.links || []).find((l) => l.id === linkId) || (scene.links || [])[0];
   const u = scene.units || { power: 'dBm', length: 'm' };
   const out = {
-    title: link ? `Link budget: ${link.name}` : 'Link budget', date: dateText(results.now), scenario: [], assumptions: [], waterfall: [],
+    title: link ? `Link budget: ${link.name}` : 'Link budget', date: dateText(results.now), scenario: [], platforms: [], assumptions: [], waterfall: [],
     margin: null, warnings: [], zones: [], intermod: [], disclaimer: DISCLAIMER,
   };
   if (!link) {
@@ -45,7 +45,8 @@ export function buildReportData(scene, linkId, results = {}) {
   S.push({ label: 'Transmitter', value: `${link.tx.name}, ${pw(link.tx.powerDbm)}, antenna ${link.tx.antenna.type}` });
   S.push({ label: 'Receiver', value: `${link.rx.name}, sensitivity ${pw(link.rx.sensitivityDbm)}, antenna ${link.rx.antenna.type}` });
   if (res) S.push({ label: 'Distance', value: formatLength(res.distanceM, u.length) });
-  S.push({ label: 'Stage', value: `${formatLength(scene.stage.width, u.length)} by ${formatLength(scene.stage.depth, u.length)}` });
+  const deck = fin(scene.stage.heightM) ? scene.stage.heightM : 0;
+  S.push({ label: 'Stage', value: `${formatLength(scene.stage.width, u.length)} by ${formatLength(scene.stage.depth, u.length)}${deck > 0 ? `, deck ${formatLength(deck, u.length)} above ground` : ''}` });
   S.push({ label: 'Chain', value: (link.chain || []).length ? link.chain.map((c) => (c.kind === 'cable' ? `${c.cableType} ${formatLength(c.lengthM, u.length)}` : c.kind)).join(', ') : 'none' });
   if (Array.isArray(link.branches) && link.branches.length > 1) S.push({ label: 'Transmit antennas', value: `${link.branches.length} branches through a splitter` });
   if (link.rx.diversity && link.rx.diversity.enabled) S.push({ label: 'Receive diversity', value: `${link.rx.diversity.mode}` });
@@ -54,6 +55,13 @@ export function buildReportData(scene, linkId, results = {}) {
   // assumptions
   const A = out.assumptions;
   A.push(env.model === 'free-space' ? 'Propagation: free space (no ground or wall reflections).' : `Propagation: two-ray with ${env.floor} floor, ${env.polarisation} polarisation, plus single-bounce reflections from ${(scene.reflectors || []).length} wall(s); paths are summed coherently.`);
+  const plats = Array.isArray(scene.platforms) ? scene.platforms : [];
+  A.push(`Item heights are measured above the local floor (${deck > 0 ? `the stage deck, ${formatLength(deck, u.length)} above ground, or ` : 'the stage floor or '}the top of the platform an item stands on); the ground is the reference for reflections.`);
+  out.platforms = plats.map((p) => ({
+    name: p.name, x: p.x, y: p.y, width: p.width, depth: p.depth, topM: p.topM, material: p.material,
+    text: `${p.name}: ${formatLength(p.width, u.length)} by ${formatLength(p.depth, u.length)} at (${p.x}, ${p.y}), top ${formatLength(p.topM, u.length)} above ground, ${p.material}.`,
+  }));
+  if (plats.length) A.push(`${plats.length} raised platform(s) change the floor height and add reflecting surfaces; see the platform table.`);
   A.push(`Carrier frequency ${link.freqMHz} MHz; distances in metres internally, displayed in ${u.length}; powers displayed in ${u.power}.`);
   const bodyEnv = env.bodyLossDb || 0, bodyRx = link.rx.bodyLossDb || 0;
   A.push(`Body loss is added on top of the antenna pattern: ${bodyEnv} dB scene-wide plus ${bodyRx} dB at the receiver (${bodyEnv + bodyRx} dB total); fade margin ${env.fadeMarginDb || 0} dB.`);

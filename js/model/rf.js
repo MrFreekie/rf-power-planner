@@ -20,6 +20,7 @@
 
 import { CABLES, ANTENNAS, SURFACES, MATERIALS } from './library.js';
 import { formatLength } from './units.js';
+import { hasFloorFeatures, floorHeightAt, floorSurfaceAt, absolutePos, allReflectors, chordsThrough, floorZoneFraction } from './floor.js';
 import { RX_PRESETS, RX_DEFAULTS, EXTERNAL_NOISE_FIGURE_600MHZ_DB, cascadeIip3Dbm as stagesIip3Dbm } from './rx-params.js';
 
 let ZP = {};
@@ -204,7 +205,7 @@ function wallFrame(w) {
 const wallDist = (w, fr, P) => (P.x - w.p1.x) * fr.nx + (P.y - w.p1.y) * fr.ny;
 
 function mirror(plane, P) {
-  if (plane.type === 'floor') return { x: P.x, y: P.y, z: -P.z };
+  if (plane.type === 'floor') return { x: P.x, y: P.y, z: 2 * (plane.h || 0) - P.z };
   const d = wallDist(plane.w, plane.fr, P);
   return { x: P.x - 2 * d * plane.fr.nx, y: P.y - 2 * d * plane.fr.ny, z: P.z };
 }
@@ -213,12 +214,12 @@ function mirror(plane, P) {
 // and within the wall's length and zMin..zMax for walls).
 function hitPlane(plane, A, B) {
   let fa, fb;
-  if (plane.type === 'floor') { fa = A.z; fb = B.z; }
+  if (plane.type === 'floor') { fa = A.z - (plane.h || 0); fb = B.z - (plane.h || 0); }
   else { fa = wallDist(plane.w, plane.fr, A); fb = wallDist(plane.w, plane.fr, B); }
   if (!(fa * fb < 0)) return null;
   const t = fa / (fa - fb);
   const H = { x: A.x + t * (B.x - A.x), y: A.y + t * (B.y - A.y), z: A.z + t * (B.z - A.z) };
-  if (plane.type === 'floor') { H.z = 0; return H; }
+  if (plane.type === 'floor') { H.z = plane.h || 0; return H; }
   const s = (H.x - plane.w.p1.x) * plane.fr.tx + (H.y - plane.w.p1.y) * plane.fr.ty;
   if (s < 0 || s > plane.fr.len) return null;
   if (H.z < plane.w.zMin || H.z > plane.w.zMax) return null;
@@ -261,26 +262,58 @@ function buildPath(kind, via, planes, points) {
  * Direct, floor, each valid single-wall bounce and floor+wall (either order) paths.
  * With environment.model === 'free-space' only the direct path is returned.
  */
+// Attach the Fresnel-zone fraction (only when below 1) so solveLink can scale the path amplitude.
+function withFraction(path, r) {
+  if (r.fraction !== undefined && r.fraction < 1 - 1e-12) path.floorFraction = r.fraction;
+  return path;
+}
+
 export function tracePaths(scene, link) {
-  const tx = link.tx.pos, rx = link.rx.pos;
+  // Positions are heights above the LOCAL floor (deck / platform); path points are absolute (above ground).
+  const tx = absolutePos(scene, link.tx.pos), rx = absolutePos(scene, link.rx.pos);
   const paths = [buildPath('direct', null, [], [tx, rx])];
   if (scene.environment && scene.environment.model === 'free-space') return paths;
 
-  const floor = { type: 'floor' };
-  if (tx.z >= 0 && rx.z >= 0 && tx.z + rx.z > 0) {
-    const pts = unfold([floor], tx, rx);
-    if (pts) paths.push(buildPath('floor', null, [floor], pts));
-  }
-  for (const w of scene.reflectors || []) {
+  // Floor reflection with a locally varying floor. Candidate plane heights come from up to 3 passes: start at the floor height
+  // under the Tx/Rx midpoint, unfold, look up the floor height at the specular point, repeat. Near a deck edge the passes can
+  // alternate between two planes, so EVERY visited plane gives a candidate path, each weighted by the fraction of its first
+  // Fresnel zone that really lies on that plane (floorZoneFraction): a reflection from a deck that is not under the specular
+  // point is dropped or weak, the weights vary smoothly with position (no multi-dB jump at the edge) and both planes
+  // contribute near the boundary. A flat floor gives the single plane h = 0 with weight 1 and exactly the classic image formula.
+  const hasFloor = hasFloorFeatures(scene);
+  const floorCandidates = (seq) => {
+    const fi = seq.indexOf('floor');
+    const seen = [];
+    const out = [];
+    let h = floorHeightAt(scene, (tx.x + rx.x) / 2, (tx.y + rx.y) / 2);
+    for (let it = 0; it < 3; it++) {
+      if (seen.some((x) => Math.abs(x - h) < 1e-9)) break;
+      seen.push(h);
+      const planes = seq.map((q) => (q === 'floor' ? { type: 'floor', h } : q));
+      const pts = unfold(planes, tx, rx);
+      if (!pts) break;
+      const H = pts[fi + 1];
+      const cand = { pts, planes, h };
+      if (hasFloor) {
+        cand.fraction = floorZoneFraction(scene, tx, rx, H, h, link.freqMHz || 600);
+        if (cand.fraction >= 1e-3) out.push(cand);
+      } else out.push(cand);
+      const hn = floorHeightAt(scene, H.x, H.y);
+      if (Math.abs(hn - h) < 1e-9) break;
+      h = hn;
+    }
+    return out;
+  };
+  for (const c of floorCandidates(['floor'])) paths.push(withFraction(buildPath('floor', null, c.planes, c.pts), c));
+  for (const w of allReflectors(scene)) {
     const fr = wallFrame(w);
     if (!fr) continue;
     const wall = { type: 'wall', w, fr };
-    let pts = unfold([wall], tx, rx);
+    const pts = unfold([wall], tx, rx);
     if (pts) paths.push(buildPath('wall', w.id, [wall], pts));
     if (tx.z < 0 || rx.z < 0) continue;
-    for (const seq of [[wall, floor], [floor, wall]]) {
-      pts = unfold(seq, tx, rx);
-      if (pts) paths.push(buildPath('floor-wall', w.id, seq, pts));
+    for (const seq of [[wall, 'floor'], ['floor', wall]]) {
+      for (const c of floorCandidates(seq)) paths.push(withFraction(buildPath('floor-wall', w.id, c.planes, c.pts), c));
     }
   }
   return paths;
@@ -351,7 +384,7 @@ export function pathWallLoss(scene, points, freqMHz) {
   let lossDb = 0;
   const crossed = [];
   const detail = [];
-  const walls = scene.reflectors || [];
+  const walls = allReflectors(scene);
   for (const w of walls) {
     const fr = wallFrame(w);
     if (!fr) continue;
@@ -363,13 +396,24 @@ export function pathWallLoss(scene, points, freqMHz) {
       const hx = A.x + t * (B.x - A.x), hy = A.y + t * (B.y - A.y), hz = (A.z || 0) + t * ((B.z || 0) - (A.z || 0));
       const sPos = (hx - w.p1.x) * fr.tx + (hy - w.p1.y) * fr.ty;
       if (sPos < 0 || sPos > fr.len || hz < w.zMin || hz > w.zMax) continue;
+      if (w.riser) continue; // a riser face's through-loss is the platform obstruction (chord loss below), not counted twice
       const info = wallTransmissionInfo(w, freqMHz);
       lossDb += info.lossDb;
       crossed.push(w.id);
       detail.push({ id: w.id, material: w.material, ...info });
     }
   }
-  return { lossDb, crossed, detail };
+  // Platform / deck obstruction: interface + dB per metre of chord inside each (merged) solid body, per leg.
+  let platformLossDb = 0;
+  const platforms = [];
+  for (let i = 1; i < points.length; i++) {
+    for (const c of chordsThrough(scene, points[i - 1], points[i], freqMHz)) {
+      platformLossDb += c.lossDb;
+      platforms.push({ ...c, leg: i - 1 });
+    }
+  }
+  lossDb += platformLossDb;
+  return { lossDb, crossed, detail, platformLossDb, platforms };
 }
 
 // ---------------------------------------------------------------- cables and chains
@@ -540,15 +584,16 @@ export function solveLink(scene, link) {
       const len = Math.hypot(dx, dy, dz);
       let g;
       if (r.type === 'floor') {
-        g = floorReflection(env.floor, pol, Math.asin(Math.min(Math.abs(dz) / len, 1)) / DEG, f);
+        g = floorReflection(floorSurfaceAt(scene, r.point.x, r.point.y), pol, Math.asin(Math.min(Math.abs(dz) / len, 1)) / DEG, f);
       } else {
-        const w = scene.reflectors.find((x) => x.id === r.via);
+        const w = allReflectors(scene).find((x) => x.id === r.via);
         const fr = wallFrame(w);
         const cosInc = Math.min(Math.abs(dx * fr.nx + dy * fr.ny) / len, 1);
         g = reflectorCoefficient(w.material, Math.acos(cosInc) / DEG, pol, f);
       }
       [re, im] = [re * g.re - im * g.im, re * g.im + im * g.re];
     });
+    if (p.floorFraction !== undefined) amp *= p.floorFraction; // reflection partly beyond the plane's edge (deck / platform)
     const wl = pathWallLoss(scene, p.points, f); // transmission through walls the legs cross
     if (wl.lossDb) amp *= Math.pow(10, -wl.lossDb / 20);
     const ph = -2 * Math.PI * p.lengthM / lambda; // propagation phase e^{-jkd}
@@ -557,6 +602,7 @@ export function solveLink(scene, link) {
     sumRe += cre; sumIm += cim;
     return {
       ...p, ...(wl.lossDb ? { wallLossDb: wl.lossDb, crossedWalls: wl.crossed, wallLossDetail: wl.detail } : {}),
+      ...(wl.platformLossDb ? { platformLossDb: wl.platformLossDb, platformChords: wl.platforms } : {}),
       gainDb: db20(Math.hypot(cre, cim)), phaseRad: Math.atan2(cim, cre), _gt: gt, _gr: gr,
     };
   });
@@ -564,7 +610,7 @@ export function solveLink(scene, link) {
   const direct = paths[0];
   const relBase = direct.gainDb;
   paths.forEach((p) => { p.relDb = p.gainDb - relBase; });
-  const distanceM = distance3D(link.tx.pos, link.rx.pos);
+  const distanceM = distance3D(absolutePos(scene, link.tx.pos), absolutePos(scene, link.rx.pos));
   const fspl = fsplDb(distanceM, f);
   const total = Math.hypot(sumRe, sumIm);
   const directAmp = Math.pow(10, direct.gainDb / 20);
@@ -583,7 +629,9 @@ export function solveLink(scene, link) {
   if (iem) chainSteps(); // transmitter -> chain -> Tx antenna
   step('Tx antenna gain', direct._gt);
   step(`Free-space loss (${formatLength(distanceM, scene && scene.units && scene.units.length)})`, -fspl);
-  if (directWallDb) step('Wall transmission', -directWallDb);
+  const directPlatformDb = direct.platformLossDb || 0;
+  if (directWallDb - directPlatformDb > 1e-12) step('Wall transmission', -(directWallDb - directPlatformDb));
+  if (directPlatformDb) step('Platform obstruction', -directPlatformDb);
   if (Math.abs(multipathDb) > 1e-9) step('Multipath (coherent sum)', multipathDb);
   step('Rx antenna gain', direct._gr);
   const body = (env.bodyLossDb || 0) + (link.rx.bodyLossDb || 0);

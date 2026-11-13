@@ -19,6 +19,7 @@
 
 import { solveLink, antennaGainDb, chainItemLossDb, cascadeChainIip3Dbm } from './rf.js';
 import { RX_PRESETS, RX_DEFAULTS } from './rx-params.js';
+import { absolutePos } from './floor.js';
 import {
   IMD_PRESETS, COMBINER_PRESETS, TX_REVERSE_IM_CONVERSION_DB, TX_REVERSE_IM_5TH_EXTRA_DB, PIM_JUNCTIONS, PIM_REFERENCE_DBM,
   NEAR_FIELD_FLOOR_WAVELENGTHS, SPEED_OF_LIGHT_M_S, coordinationRules, coupledNoiseDbm,
@@ -141,8 +142,10 @@ function rxPointOf(scene, rxPoint) {
  * antennas load each other and the formula would otherwise give gain: at 600 MHz it caps the loss at about 16 dB minus the
  * gains. Doubling the distance in the far field adds 6.02 dB.
  */
-export function couplingLossDb(txA, txB, freqMHz) {
-  const dx = txB.pos.x - txA.pos.x, dy = txB.pos.y - txA.pos.y, dz = (txB.pos.z || 0) - (txA.pos.z || 0);
+export function couplingLossDb(txA, txB, freqMHz, scene) {
+  // optional scene: positions are heights above the local floor, so decks and platforms are added for the true separation
+  const pa = scene ? absolutePos(scene, txA.pos) : txA.pos, pb = scene ? absolutePos(scene, txB.pos) : txB.pos;
+  const dx = pb.x - pa.x, dy = pb.y - pa.y, dz = (pb.z || 0) - (pa.z || 0);
   const d = Math.hypot(dx, dy, dz);
   const lambda = SPEED_OF_LIGHT_M_S / (freqMHz * 1e6);
   const dEff = Math.max(d, NEAR_FIELD_FLOOR_WAVELENGTHS * lambda);
@@ -235,7 +238,7 @@ export function txReverseImd(scene, rxPoint) {
     tx.forEach((b, ib) => {
       if (ia === ib) return;
       // shared combiner: port-to-port isolation only (it already includes the split); insertion loss belongs to the through path
-      const coupling = comb.shared ? comb.isolationDb : couplingLossDb(a, b, b.freqMHz);
+      const coupling = comb.shared ? comb.isolationDb : couplingLossDb(a, b, b.freqMHz, scene);
       const pIn = b.powerDbm - coupling;
       for (const order of [3, 5]) {
         const fMHz = order === 3 ? 2 * a.freqMHz - b.freqMHz : 3 * a.freqMHz - 2 * b.freqMHz;
@@ -282,7 +285,7 @@ export function pimImd(scene, rxPoint) {
       const fMHz = 2 * a.freqMHz - b.freqMHz;
       if (!(fMHz > 0)) return;
       const pa = a.powerDbm - (comb.shared ? comb.lossDb : 0);
-      const pb = b.powerDbm - (comb.shared ? comb.lossDb : couplingLossDb(a, b, b.freqMHz));
+      const pb = b.powerDbm - (comb.shared ? comb.lossDb : couplingLossDb(a, b, b.freqMHz, scene));
       const atJunction = (PIM_REFERENCE_DBM + dbcRef) + 2 * (pa - PIM_REFERENCE_DBM) + (pb - PIM_REFERENCE_DBM);
       out.push({
         fMHz, order: 3, label: `2f${ia + 1}-f${ib + 1}`, source: 'pim', pumpTx: a.id, interfererTx: b.id,

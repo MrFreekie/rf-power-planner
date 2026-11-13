@@ -13,12 +13,12 @@ import { squelch } from '../squelchTracker.js';
 import { gateOf, drawSquelchLed, rxInfo, drawActiveRing, drawOverloadHalo } from './squelchUi.js';
 import { rxState } from '../rxTracker.js';
 import { coverage } from '../coverageTracker.js';
-import { createHeatmap, drawHeatLegend, drawZones, drawBranches, drawImd, drawRxCableTags, createLabelPlacer } from './planOverlay.js';
+import { createHeatmap, drawHeatLegend, drawZones, drawBranches, drawImd, drawRxCableTags, drawPlatforms, drawElevationLegend, createLabelPlacer } from './planOverlay.js';
 import { covView, subscribeCovView } from './coverageUi.js';
 import { imd } from '../imdTracker.js';
 import { getRipples } from './ripples.js';
 import { registerSnapshot, makeSnapshotCanvas } from './snapshots.js';
-import { movePoint, moveBranch, moveImdTransmitter, setAntennaBOrientation } from '../actions.js';
+import { updatePlatform, movePoint, moveBranch, moveImdTransmitter, setAntennaBOrientation } from '../actions.js';
 import { effectiveAntennaB } from '../model/diversity.js';
 
 const LOBE_STEP = 6; // degrees
@@ -33,6 +33,9 @@ export function createPlanView(canvas, store) {
   const placer = createLabelPlacer();
   let lastDesc = '';
 
+  let shiftDown = false;
+  const onKey = (e) => { shiftDown = e.shiftKey; };
+  window.addEventListener('keydown', onKey); window.addEventListener('keyup', onKey);
   const rip = getRipples(store);
   const host = createCanvasHost(canvas, draw, (w, h) => { if (!userView) fit(w, h); });
   const detachRip = rip.attach('plan', canvas, () => host.invalidate());
@@ -80,8 +83,11 @@ export function createPlanView(canvas, store) {
     ctx.fillStyle = th.paper2; ctx.fillRect(a.x, a.y, b.x - a.x, b.y - a.y);
     strokeHatchRect(ctx, a.x, a.y, b.x - a.x, b.y - a.y, th.hatch, 9);
     ctx.strokeStyle = th.ink; ctx.lineWidth = 1.6; ctx.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
-    haloText(ctx, th, `STAGE ${fmtLen(st.width, scene.units)} × ${fmtLen(st.depth, scene.units)}`, (a.x + b.x) / 2, a.y - 7, { align: 'center', color: th.inkSoft });
+    haloText(ctx, th, `STAGE ${fmtLen(st.width, scene.units)} × ${fmtLen(st.depth, scene.units)}${st.heightM > 0 ? `, deck ${fmtLen(st.heightM, scene.units)}` : ''}`, (a.x + b.x) / 2, a.y - 7, { align: 'center', color: th.inkSoft });
     haloText(ctx, th, '▼ AUDIENCE (+y)', (a.x + b.x) / 2, b.y + 32, { align: 'center', color: th.inkSoft });
+
+    // raised platforms above the stage fill, under everything else
+    drawPlatforms(ctx, th, vp, scene, sel, handles, scene.units.length);
 
     // coverage heat map under everything else
     const cov = link0 ? coverage.get(link0.id) : null;
@@ -115,6 +121,7 @@ export function createPlanView(canvas, store) {
     for (const link of scene.links) drawRxCableTags(ctx, th, vp, link, placer, scene.units.length, w);
     if (covView.zones) drawZones(ctx, th, vp, scene, cov, sel, handles);
     drawImd(ctx, th, vp, scene, sel, handles, placer, w);
+    drawElevationLegend(ctx, th, w, scene, scene.units.length);
     if (cov && cov.grid && covView.show) drawHeatLegend(ctx, th, w, h, cov, covView.tint);
 
     // legend + scale
@@ -278,20 +285,40 @@ export function createPlanView(canvas, store) {
         const [a, b] = hd.seg, dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy || 1;
         const t = clamp(((sx - a.x) * dx + (sy - a.y) * dy) / l2, 0, 1);
         d = Math.hypot(sx - (a.x + t * dx), sy - (a.y + t * dy)) + 3; // slightly lower priority than point handles
+      } else if (hd.rect) { // platform body: inside the rectangle, lowest priority
+        d = sx >= hd.rect[0] && sx <= hd.rect[2] && sy >= hd.rect[1] && sy <= hd.rect[3] ? 30 : Infinity;
       } else d = Math.hypot(sx - hd.sx, sy - hd.sy);
-      const lim = (hd.seg ? 9 : hd.r) * k;
+      const lim = (hd.rect ? 30 : hd.seg ? 9 : hd.r) * k;
       if (d <= lim && d - (hd.pri ? 4 : 0) < bd) { best = hd; bd = d - (hd.pri ? 4 : 0); }
     }
     return best;
   }
 
   const bounds = (st) => ({ x0: -3, x1: st.width + 3, y0: -3, y1: st.depth + 10 });
-  function dragStart(hd) {
+  function dragStart(hd, w0) {
     const key = `plan-drag-${++dragCounter}`;
+    if (hd.kind === 'platBody' || hd.kind === 'platCorner') {
+      const pl = (store.getScene().platforms || []).find((q) => q.id === hd.itemId);
+      return { key, plat: pl && { ...pl }, startPtr: w0 ? { x: w0.x, y: w0.y } : { x: hd.wx, y: hd.wy } };
+    }
     const r = (store.getScene().reflectors || []).find((q) => q.id === hd.itemId);
     return { key, p1: r && { ...r.p1 }, p2: r && { ...r.p2 }, startW: { x: hd.wx, y: hd.wy } };
   }
   function dragMove(hd, ptr, target, state) {
+    if ((hd.kind === 'platBody' || hd.kind === 'platCorner') && state.plat) {
+      const snap = (v) => (shiftDown ? round2(v) : Math.round(v * 10) / 10);
+      const P0 = state.plat;
+      if (hd.kind === 'platBody') {
+        updatePlatform(store, hd.itemId, { x: snap(P0.x + ptr.x - state.startPtr.x), y: snap(P0.y + ptr.y - state.startPtr.y) }, { coalesce: state.key });
+      } else {
+        const cx = [P0.x, P0.x + P0.width, P0.x + P0.width, P0.x][hd.corner], cy = [P0.y, P0.y, P0.y + P0.depth, P0.y + P0.depth][hd.corner];
+        const fx = cx === P0.x ? P0.x + P0.width : P0.x, fy = cy === P0.y ? P0.y + P0.depth : P0.y; // the opposite corner stays put
+        const nx = snap(ptr.x), ny = snap(ptr.y);
+        const x0 = Math.min(fx, nx), x1 = Math.max(fx, nx), y0 = Math.min(fy, ny), y1 = Math.max(fy, ny);
+        updatePlatform(store, hd.itemId, { x: round2(x0), y: round2(y0), width: round2(Math.max(0.2, x1 - x0)), depth: round2(Math.max(0.2, y1 - y0)) }, { coalesce: state.key });
+      }
+      return;
+    }
     if (hd.kind === 'rxBRot') {
       const l = store.getScene().links.find((q) => q.id === hd.linkId); const b = l && l.rx.diversity && l.rx.diversity.antennaB;
       if (!b || !b.pos) return;
@@ -342,6 +369,7 @@ export function createPlanView(canvas, store) {
       if (!g) return;
       if (g.type === 'tx' || g.type === 'rx') { g.item.pos.x = round2(clamp(g.item.pos.x + dx * step, bd.x0, bd.x1)); g.item.pos.y = round2(clamp(g.item.pos.y + dy * step, bd.y0, bd.y1)); }
       else if (g.type === 'reflector') for (const p of [g.item.p1, g.item.p2]) { p.x = round2(p.x + dx * step); p.y = round2(p.y + dy * step); }
+      else if (g.type === 'platform') { g.item.x = round2(g.item.x + dx * step); g.item.y = round2(g.item.y + dy * step); }
     }, { coalesce: `plan-nudge-${id}` });
   }
   function cycle(dir) {
@@ -366,6 +394,6 @@ export function createPlanView(canvas, store) {
 
   return {
     viewport: vp, fit, invalidate: host.invalidate,
-    destroy() { unregSnap(); detachRip(); detach(); unsub?.(); unsubSq?.(); unsubRx?.(); unsubCov?.(); unsubImd?.(); unsubView?.(); host.destroy(); },
+    destroy() { window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKey); unregSnap(); detachRip(); detach(); unsub?.(); unsubSq?.(); unsubRx?.(); unsubCov?.(); unsubImd?.(); unsubView?.(); host.destroy(); },
   };
 }

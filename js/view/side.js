@@ -15,6 +15,8 @@ import { gateOf, drawSquelchLed, rxInfo, drawActiveRing, drawOverloadHalo } from
 import { rxState } from '../rxTracker.js';
 import { getRipples } from './ripples.js';
 import { effectiveAntennaB } from '../model/diversity.js';
+import { isWalking } from '../walk.js';
+import { floorHeightAt, platformBoxes } from '../model/floor.js';
 import { registerSnapshot, makeSnapshotCanvas } from './snapshots.js';
 
 export function createSideView(canvas, store) {
@@ -27,8 +29,7 @@ export function createSideView(canvas, store) {
     const link = activeLink(store.getScene(), store.getSelection());
     if (!link) return null;
     const save = { px: vp.pxPerM, ox: vp.origin.x, oy: vp.origin.y, user: userView, sig, hs: handles };
-    const { D } = geom(link), zt = zTop(link);
-    vp.fitRect(-1.0, -zt, D + 1.0, 0.9, w, h, 44);
+    layout(w, h, link, niceRange(geom(link).D + 1));
     userView = true; sig = fitSig(link); // keep draw() from refitting to the live canvas size
     const { c, ctx } = makeSnapshotCanvas(w, h);
     const ripOn = rip.settings.on; rip.settings.on = false; // clean sheet: no animated rings in the print
@@ -36,23 +37,51 @@ export function createSideView(canvas, store) {
     return c;
   });
 
+  // The slice axis s is the distance from the STATIONARY antenna: the receive antenna for a mic link (the mic walks),
+  // the transmit antenna for an IEM link (the bodypack walks). It points from the static antenna toward the walker.
   function geom(link) {
-    const dx = link.rx.pos.x - link.tx.pos.x, dy = link.rx.pos.y - link.tx.pos.y, D = Math.hypot(dx, dy);
+    const iem = link.kind === 'iem';
+    const S = iem ? link.tx.pos : link.rx.pos, W = iem ? link.rx.pos : link.tx.pos;
+    const dx = W.x - S.x, dy = W.y - S.y, D = Math.hypot(dx, dy);
     const u = D > 1e-6 ? { x: dx / D, y: dy / D } : { x: 0, y: 1 };
-    return { u, D, sOf: (p) => (p.x - link.tx.pos.x) * u.x + (p.y - link.tx.pos.y) * u.y };
+    return { u, D, S, iem, sTx: iem ? 0 : D, sRx: iem ? D : 0, sOf: (p) => (p.x - S.x) * u.x + (p.y - S.y) * u.y };
   }
-  const zTop = (link) => Math.max(3.2, Math.ceil(Math.max(link.tx.pos.z, link.rx.pos.z) + 0.3)) + 0.3;
+  const NICE_STEPS = [2, 3, 5, 8, 10, 15, 20, 30, 50, 80, 100, 150, 200, 300, 500, 800, 1000, 2000, 5000];
+  /** Smallest 1-2-5 style range (metres) that covers v. */
+  function niceRange(v) {
+    for (const n of NICE_STEPS) if (n >= v) return n;
+    return Math.ceil(v / 1000) * 1000;
+  }
+  let rangeM = 0;
+  /** Visible slice length: current distance rounded up to a nice step; while walking it only grows, with some lookahead. */
+  function wantRange(link) {
+    const { D } = geom(link);
+    if (isWalking()) return Math.max(rangeM, niceRange(D * 1.25 + 1));
+    return niceRange(D + 1);
+  }
+  /** Place the viewport: static antenna at a fixed pixel column, scale set by the visible range. */
+  function layout(w, h, link, range) {
+    const zt = zTop(link);
+    const left = w < 520 ? 56 : 70, right = 24;
+    const px = Math.min(Math.max((w - left - right) / Math.max(range, 1), 4), 600);
+    const pxY = (h - 88) / (zt + 0.9);
+    vp.pxPerM = Math.min(px, Math.max(pxY, 4), 600);
+    vp.origin.x = left;
+    vp.origin.y = h / 2 - ((-zt + 0.9) / 2) * vp.pxPerM;
+  }
+  const flAt = (pos) => floorHeightAt(store.getScene(), pos.x, pos.y);
+  const zTop = (link) => Math.max(3.2, Math.ceil(Math.max(link.tx.pos.z + flAt(link.tx.pos), link.rx.pos.z + flAt(link.rx.pos)) + 0.3)) + 0.3;
 
   function fit(w = host.width, h = host.height) {
     const link = activeLink(store.getScene(), store.getSelection());
     if (!link) return;
-    const { D } = geom(link), zt = zTop(link);
-    vp.fitRect(-1.0, -zt, D + 1.0, 0.9, w, h, 44);
+    rangeM = wantRange(link);
+    layout(w, h, link, rangeM);
     sig = fitSig(link);
     userView = false;
     host.invalidate();
   }
-  const fitSig = (link) => `${link.id}|${Math.ceil(geom(link).D * 2) / 2}|${zTop(link)}`;
+  const fitSig = (link) => `${link.id}|${wantRange(link)}|${zTop(link)}`;
 
   function draw(ctx, w, h, th) {
     const scene = store.getScene(), sel = store.getSelection(), link = activeLink(scene, sel);
@@ -61,8 +90,8 @@ export function createSideView(canvas, store) {
     if (!link) { haloText(ctx, th, 'No link in scene', w / 2, h / 2, { align: 'center', color: th.inkSoft }); return; }
     if (!userView && fitSig(link) !== sig) fit();
 
-    const { u, D, sOf } = geom(link), res = solveCached(scene, link);
-    drawGrid(ctx, vp, w, h, th, { yLabel: (v) => -v, xName: 's (m) along Tx → Rx', yName: 'z (m)' });
+    const { u, D, sOf, S, sTx, sRx, iem } = geom(link), res = solveCached(scene, link);
+    drawGrid(ctx, vp, w, h, th, { yLabel: (v) => -v, xName: iem ? 'distance from transmit antenna (m)' : 'distance from receive antenna (m)', yName: 'z (m)' });
 
     // floor
     const fy = vp.worldToScreen(0, 0).y;
@@ -72,12 +101,30 @@ export function createSideView(canvas, store) {
     const fname = SURFACES?.[scene.environment.floor]?.name || scene.environment.floor;
     if (w >= 520) haloText(ctx, th, `FLOOR (${fname})`, w - 8, Math.min(h - 8, fy + 16), { align: 'right', color: th.inkSoft });
 
+    // deck and platforms as raised blocks where the slice crosses them
+    for (const bx of platformBoxes(scene)) {
+      let t0 = -Infinity, t1 = Infinity, ok = true;
+      for (const [o, d, lo, hi] of [[S.x, u.x, bx.x0, bx.x1], [S.y, u.y, bx.y0, bx.y1]]) {
+        if (Math.abs(d) < 1e-9) { if (o < lo || o > hi) ok = false; continue; }
+        const a = (lo - o) / d, b = (hi - o) / d;
+        t0 = Math.max(t0, Math.min(a, b)); t1 = Math.min(t1, Math.max(a, b));
+      }
+      if (!ok || !(t1 > t0)) continue;
+      const a = vp.worldToScreen(t0, -bx.zTop), b = vp.worldToScreen(t1, 0);
+      ctx.fillStyle = th.paper2; ctx.fillRect(a.x, a.y, b.x - a.x, b.y - a.y);
+      strokeHatchRect(ctx, a.x, a.y, b.x - a.x, b.y - a.y, th.hatch, 7);
+      ctx.strokeStyle = th.ink; ctx.lineWidth = 1.2; ctx.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
+      ctx.lineWidth = 2.4; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, a.y); ctx.stroke(); // the local floor (top surface)
+      const pl = bx.kind === 'deck' ? 'stage deck' : ((scene.platforms || []).find((q) => q.id === bx.id) || {}).name || 'platform';
+      if (b.x - a.x > 50) haloText(ctx, th, `${pl} ${fmtLen(bx.zTop, scene.units)}`, (a.x + b.x) / 2, a.y + 14, { align: 'center', px: 11, color: th.inkSoft });
+    }
+
     // ripples (wavefronts) under the walls, rays and icons
-    rip.drawSide(ctx, th, vp, scene, link, { u, D }, w, h);
+    rip.drawSide(ctx, th, vp, scene, link, { u, D, sTx, sRx }, w, h);
 
     // reflectors crossing the slice
     for (const r of scene.reflectors || []) {
-      const e = { x: r.p2.x - r.p1.x, y: r.p2.y - r.p1.y }, wv = { x: r.p1.x - link.tx.pos.x, y: r.p1.y - link.tx.pos.y };
+      const e = { x: r.p2.x - r.p1.x, y: r.p2.y - r.p1.y }, wv = { x: r.p1.x - S.x, y: r.p1.y - S.y };
       const den = u.x * e.y - u.y * e.x;
       if (Math.abs(den) < 1e-9) continue;
       const s = (wv.x * e.y - wv.y * e.x) / den, q = (wv.x * u.y - wv.y * u.x) / den;
@@ -121,28 +168,29 @@ export function createSideView(canvas, store) {
     // antenna B (diversity): ray and icon
     const inf = rxInfo(link);
     if (inf.B) {
-      const bp = proj(inf.B.pos), tp = proj(link.tx.pos);
+      const bAbs = { ...inf.B.pos, z: inf.B.pos.z + flAt(inf.B.pos) }, tAbs = { ...link.tx.pos, z: link.tx.pos.z + flAt(link.tx.pos) };
+      const bp = proj(bAbs), tp = proj(tAbs);
       ctx.save(); ctx.strokeStyle = col; ctx.lineWidth = inf.active === 'B' ? 2.4 : 1; ctx.globalAlpha = inf.active === 'B' ? 1 : 0.4;
       ctx.beginPath(); ctx.moveTo(tp.x, tp.y); ctx.lineTo(bp.x, bp.y); ctx.stroke(); ctx.restore();
       {
         const eff = effectiveAntennaB(link), o = eff.orientation;
         const dS = Math.cos(o.el * DEG) * (Math.sin(o.az * DEG) * u.x + Math.cos(o.az * DEG) * u.y), dZ = Math.sin(o.el * DEG);
-        icons.drawAntenna(ctx, vp, sOf(inf.B.pos), -inf.B.pos.z, { view: 'side', ink: th.ink, fill: th.paper, type: eff.type, angleDeg: Math.atan2(dS, dZ) / DEG });
+        icons.drawAntenna(ctx, vp, sOf(inf.B.pos), -bAbs.z, { view: 'side', ink: th.ink, fill: th.paper, type: eff.type, angleDeg: Math.atan2(dS, dZ) / DEG });
       }
       haloText(ctx, th, 'B', bp.x + 10, bp.y - 8, { px: 12, weight: '600' });
       if (inf.active === 'B') drawActiveRing(ctx, th, bp.x, bp.y, 12);
     }
     {
-      const rp = vp.worldToScreen(D, -link.rx.pos.z);
+      const rp = vp.worldToScreen(sRx, -(link.rx.pos.z + flAt(link.rx.pos)));
       drawOverloadHalo(ctx, th, rp.x, rp.y, inf.overload, 22);
       if (inf.B) { haloText(ctx, th, 'A', rp.x - 10, rp.y - 8, { align: 'right', px: 12, weight: '600' }); if (inf.active === 'A') drawActiveRing(ctx, th, rp.x, rp.y, 12); }
     }
 
     // ends
-    for (const role of ['tx', 'rx']) drawEnd(ctx, th, link, role, role === 'tx' ? 0 : D, u, sel, w);
+    for (const role of ['tx', 'rx']) drawEnd(ctx, th, link, role, role === 'tx' ? sTx : sRx, u, sel, w, sTx > sRx);
 
     drawScaleBar(ctx, vp, h, th);
-    const brg = ((Math.atan2(u.x, u.y) / DEG) + 360) % 360;
+    const brg = ((Math.atan2(iem ? u.x : -u.x, iem ? u.y : -u.y) / DEG) + 360) % 360;
     if (w >= 520) haloText(ctx, th, `${link.name}: Tx → Rx bearing ${brg.toFixed(0)}°, horizontal ${fmtLen(D, scene.units)}`, w - 8, h - 10, { align: 'right', color: th.inkSoft });
 
     const desc = `Side view of ${link.name}. Tx height ${link.tx.pos.z.toFixed(2)} m, Rx height ${link.rx.pos.z.toFixed(2)} m, horizontal distance ${D.toFixed(2)} m. Up and down arrow keys change the height of the selected end.`;
@@ -164,26 +212,27 @@ export function createSideView(canvas, store) {
     return pts[0];
   }
 
-  function drawEnd(ctx, th, link, role, s, u, sel, w) {
-    const e = link[role], z = e.pos.z, p = vp.worldToScreen(s, -z), selected = sel === e.id;
+  function drawEnd(ctx, th, link, role, s, u, sel, w, txOnRight = false) {
+    const leftEnd = (role === 'tx') !== txOnRight; // the end at the left margin keeps its dimension line on the outside
+    const e = link[role], z = e.pos.z, fl = flAt(e.pos), p = vp.worldToScreen(s, -(z + fl)), selected = sel === e.id;
     const hasPerson = (role === 'tx') === (link.kind !== 'iem');
     const ink = th.ink, fill = th.paper;
     const az = e.antenna.orientation?.az ?? 0, el = e.antenna.orientation?.el ?? 0;
     const dirS = Math.cos(el * DEG) * (Math.sin(az * DEG) * u.x + Math.cos(az * DEG) * u.y), dirZ = Math.sin(el * DEG);
     const angle = Math.atan2(dirS, dirZ) / DEG;
     if (hasPerson) {
-      icons.drawPerson(ctx, vp, s, 0, { view: 'side', ink, fill });
-      if (link.kind === 'mic') icons.drawMic(ctx, vp, s, -z, { view: 'side', ink, fill });
-      else icons.drawBodypack(ctx, vp, s, -z, { view: 'side', ink, fill });
+      icons.drawPerson(ctx, vp, s, -fl, { view: 'side', ink, fill });
+      if (link.kind === 'mic') icons.drawMic(ctx, vp, s, -(z + fl), { view: 'side', ink, fill });
+      else icons.drawBodypack(ctx, vp, s, -(z + fl), { view: 'side', ink, fill });
     } else {
-      icons.drawStand(ctx, vp, s, 0, { view: 'side', ink, fill, heightM: z });
-      icons.drawAntenna(ctx, vp, s, -z, { view: 'side', ink, fill, type: e.antenna.type, angleDeg: angle });
+      icons.drawStand(ctx, vp, s, -fl, { view: 'side', ink, fill, heightM: z });
+      icons.drawAntenna(ctx, vp, s, -(z + fl), { view: 'side', ink, fill, type: e.antenna.type, angleDeg: angle });
     }
     // height dimension line beside the item
-    const dx = p.x + (role === 'tx' ? -26 : 26), f0 = vp.worldToScreen(s, 0).y;
+    const dx = p.x + (leftEnd ? -26 : 26), f0 = vp.worldToScreen(s, -fl).y;
     ctx.strokeStyle = th.inkSoft; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(dx, f0); ctx.lineTo(dx, p.y); ctx.moveTo(dx - 4, f0); ctx.lineTo(dx + 4, f0); ctx.moveTo(dx - 4, p.y); ctx.lineTo(dx + 4, p.y); ctx.stroke();
-    haloText(ctx, th, `${z.toFixed(2)} m`, dx + (role === 'tx' ? -4 : 4), (f0 + p.y) / 2 + 4, { align: role === 'tx' ? 'right' : 'left', weight: selected ? '600' : '' });
+    haloText(ctx, th, `${z.toFixed(2)} m${fl > 0 ? ` above floor (+${fl.toFixed(2)})` : ''}`, dx + (leftEnd ? -4 : 4), (f0 + p.y) / 2 + 4, { align: leftEnd ? 'right' : 'left', weight: selected ? '600' : '' });
     if (w >= 520 || selected) haloText(ctx, th, e.name, p.x, p.y - Math.max(18, 0.4 * vp.pxPerM), { align: 'center', color: selected ? th.ink : th.inkSoft, weight: selected ? '600' : '' });
     if (role === 'rx') drawSquelchLed(ctx, th, p.x + 16, p.y - 14, gateOf(link.id), { label: w >= 520 || selected });
     // height handle
@@ -191,7 +240,7 @@ export function createSideView(canvas, store) {
     ctx.fillStyle = selected || hot ? th.ink : th.paper; ctx.strokeStyle = th.ink; ctx.lineWidth = 1.6;
     ctx.beginPath(); ctx.arc(p.x, p.y, 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
     if (selected) { ctx.save(); ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.arc(p.x, p.y, 14, 0, Math.PI * 2); ctx.stroke(); ctx.restore(); }
-    handles.push({ kind: role, itemId: e.id, linkId: link.id, sx: p.x, sy: p.y, r: 16, wx: s, wy: -z });
+    handles.push({ kind: role, itemId: e.id, linkId: link.id, sx: p.x, sy: p.y, r: 16, wx: s, wy: -(z + fl), fl });
   }
 
   // ---- interaction -----------------------------------------------------------------------
@@ -205,7 +254,7 @@ export function createSideView(canvas, store) {
   }
   function dragMove(hd, ptr, target, state) {
     if (hd.kind !== 'tx' && hd.kind !== 'rx') return;
-    const z = round2(clamp(-target.y, 0, 5));
+    const z = round2(clamp(-target.y - (hd.fl || 0), 0, 5));
     store.update((s) => { const l = s.links.find((q) => q.id === hd.linkId); if (l) l[hd.kind].pos.z = z; }, { coalesce: state.key });
   }
   function nudge(dx, dy, big) {

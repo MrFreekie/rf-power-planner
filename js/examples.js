@@ -1,7 +1,7 @@
 // Example scenes: each builds a complete scene plus a short explanation. Pure (no DOM).
 //   EXAMPLES: [{ id, title, note, build() -> { scene, walk?: { to, speedMps, pingPong }, select? } }]
 //   getExample(id), buildExample(id) -> { id, title, note, scene, walk, selectId }
-import { createDefaultScene, createDefaultLink, createChainItem, createReflector, createBranch, createZone, createDefaultImd, createImdTransmitter, newId, syncScene } from './model/scene.js';
+import { createDefaultScene, createDefaultLink, createChainItem, createReflector, createBranch, createZone, createDefaultImd, createImdTransmitter, createPlatform, newId, syncScene } from './model/scene.js';
 
 const omni = (el = 90) => ({ type: 'omni', gainDbi: 0, orientation: { az: 0, el } });
 
@@ -10,6 +10,7 @@ function make(kind, fn) {
   const scene = createDefaultScene();
   scene.links = [createDefaultLink(kind)];
   fn(scene, scene.links[0]);
+  if (scene.stage.heightM === undefined) scene.stage.heightM = 0;
   return syncScene(scene);
 }
 
@@ -456,6 +457,58 @@ export const EXAMPLES = [
         l.rx.diversity.antennaB.chain = [createChainItem('booster', { gainDb: 6, nfDb: 3 }), createChainItem('cable', { cableType: 'rg58', lengthM: 40 })];
       }),
       walk: ACROSS,
+    }),
+  },
+  {
+    id: 'raised-stage-null',
+    title: 'Raised stage: deck 1.2 m changes the dropout positions',
+    note: 'The receiver antenna stands on the floor in front of the stage and the mic walks on a deck 1.2 m high. The mic is now nearly 3 m above the reflecting floor instead of 1.75 m, so the cancellation moves: the dip that sits at 6.8 m with a ground-level stage (-46 dBm) falls at about 5.1 m on the deck and is shallower (-41 dBm), so the squelch that closes at 6.8 m on the ground stays open here. Set the deck height to 0 to compare.',
+    build: () => ({
+      scene: make('mic', (s, l) => {
+        twoRay(s, l);
+        s.stage.heightM = 1.2;
+        l.rx.pos = { x: 6, y: 12, z: 1.0 };
+        l.tx.pos = { x: 6, y: 7.5, z: 1.75 };
+        l.rx.squelch = { enabled: true, thresholdDbm: -42, hysteresisDb: 1 };
+        l.rx.diversity.antennaB.pos = { x: 6, y: 12, z: 1.4 };
+      }),
+      walk: { to: { x: 6, y: 1, z: 1.75 }, speedMps: 0.8, pingPong: true },
+    }),
+  },
+  {
+    id: 'drum-riser',
+    title: 'Drum riser on a stage: a stage on a stage',
+    note: 'A 1.2 m deck carries a 0.4 m drum riser, and the IEM bodypack is worn on the riser while the transmit antenna stands on the deck. Heights are measured from the local floor, so the bodypack is 1.0 m above the riser top. The floor bounce now reflects from the riser instead of the deck: that ray is about 14.6 dB weaker than over a bare deck (-41.6 dB against -26.9 dB relative to the direct ray), while the total level barely moves (-35.9 dBm against -36.1 dBm).',
+    build: () => ({
+      scene: make('iem', (s, l) => {
+        s.stage = { width: 12, depth: 8, heightM: 1.2 };
+        s.environment.floor = 'wood';
+        s.environment.polarisation = 'vertical';
+        l.tx.antenna = OMNI_IMD();
+        l.tx.pos = { x: 1, y: 1, z: 2.5 };
+        l.rx.antenna = { type: 'omni', gainDbi: -3, orientation: { az: 0, el: 90 } };
+        l.rx.pos = { x: 8, y: 4, z: 1.0 };
+        l.chain = [createChainItem('cable', { cableType: 'rg58', lengthM: 10 })];
+        s.platforms = [createPlatform({ id: newId('plat'), name: 'Drum riser', x: 7, y: 3, width: 2.5, depth: 2, topM: 1.6, material: 'wood' })];
+      }),
+    }),
+  },
+  {
+    id: 'audience-vs-stage',
+    title: 'Audience level receiver vs raised stage',
+    note: 'The receiver antenna is on the floor in front of the audience and the mic is on a 1.5 m stage. The raised stage changes the geometry: the level falls from -36.6 dBm for a ground-level stage to -38.5 dBm. A 1.4 m tall, 0.6 m deep wooden riser in front of the mic then blocks part of the direct ray and costs another 3.6 dB (-42.1 dBm); a metal one would cost 5.8 dB.',
+    build: () => ({
+      scene: make('mic', (s, l) => {
+        s.stage = { width: 12, depth: 8, heightM: 1.5 };
+        s.environment.floor = 'concrete';
+        s.environment.polarisation = 'vertical';
+        l.tx.antenna = omni();
+        l.rx.antenna = omni();
+        l.tx.pos = { x: 6, y: 4, z: 1.5 };
+        l.rx.pos = { x: 6, y: 14, z: 1.0 };
+        l.chain = [createChainItem('cable', { cableType: 'rg58', lengthM: 10 })];
+        s.platforms = [createPlatform({ id: newId('plat'), name: 'Front-of-house riser', x: 4.5, y: 5.4, width: 3, depth: 0.6, topM: 2.9, material: 'wood' })];
+      }),
     }),
   },
 ];

@@ -22,6 +22,18 @@ export const defaultDiversity = (pos, _antennaA) => ({
   hysteresisDb: 3, switchMs: 30,
 });
 import { MATERIAL_TRANSMISSION } from './zones-params.js';
+import { SURFACES, MATERIALS } from './library.js';
+
+// Stage and platform limits. Item pos.z everywhere stays the height above the LOCAL floor (deck or platform top).
+export const STAGE_LIMITS = Object.freeze({ size: [0.5, 500], heightM: [0, 20] });
+export const PLATFORM_LIMITS = Object.freeze({ max: 50, size: [0.1, 500], coord: [-500, 1000], topM: [0.05, 30] });
+/** Material ids a platform top may use: floor surfaces and wall materials of the library. */
+export const PLATFORM_MATERIALS = Object.freeze([...new Set([...Object.keys(SURFACES), ...Object.keys(MATERIALS)])]);
+
+/** A raised platform: an axis-aligned rectangle whose top surface is topM metres above the ground. */
+export function createPlatform(overrides = {}) {
+  return { id: newId('plat'), name: 'Riser', x: 0, y: 0, width: 2, depth: 2, topM: 0.4, material: 'wood', ...overrides };
+}
 
 /** Reference thickness in metres at which a material table loss applies (null for unknown materials). */
 export function referenceThicknessM(materialId) {
@@ -218,7 +230,8 @@ export function createDefaultScene() {
   return {
     version: SCHEMA_VERSION,
     units: { power: 'dBm', length: 'm' },
-    stage: { width: 12, depth: 8 },
+    stage: { width: 12, depth: 8, heightM: 0 },
+    platforms: [],
     environment: { floor: 'wood', polarisation: 'vertical', model: 'two-ray', fadeMarginDb: 0, bodyLossDb: 0 },
     reflectors: [],
     zones: [],
@@ -259,6 +272,12 @@ export function validateScene(scene) {
   if (!isObj(scene.units) || !LENGTH_UNITS.includes(scene.units.length)) errors.push('units.length invalid');
   if (!isObj(scene.stage) || !(scene.stage.width > 0) || !(scene.stage.depth > 0)) {
     errors.push('stage.width and stage.depth must be positive numbers');
+  } else {
+    const [smin, smax] = STAGE_LIMITS.size;
+    if (scene.stage.width < smin || scene.stage.width > smax || scene.stage.depth < smin || scene.stage.depth > smax) errors.push(`stage.width and stage.depth must be between ${smin} and ${smax} m`);
+    if (scene.stage.heightM !== undefined && !(isNum(scene.stage.heightM) && scene.stage.heightM >= STAGE_LIMITS.heightM[0] && scene.stage.heightM <= STAGE_LIMITS.heightM[1])) {
+      errors.push(`stage.heightM must be between ${STAGE_LIMITS.heightM[0]} and ${STAGE_LIMITS.heightM[1]} m`);
+    }
   }
   const env = scene.environment;
   if (!isObj(env)) errors.push('environment must be an object');
@@ -275,6 +294,21 @@ export function validateScene(scene) {
     else if (ids.has(id)) errors.push(`${path}.id duplicate: ${id}`);
     else ids.add(id);
   };
+  if (scene.platforms !== undefined) {
+    if (!Array.isArray(scene.platforms)) errors.push('platforms must be an array');
+    else if (scene.platforms.length > PLATFORM_LIMITS.max) errors.push(`at most ${PLATFORM_LIMITS.max} platforms are supported`);
+    else scene.platforms.forEach((pl, i) => {
+      const p = `platforms[${i}]`;
+      if (!isObj(pl)) { errors.push(`${p} must be an object`); return; }
+      checkId(pl.id, p);
+      const [c0, c1] = PLATFORM_LIMITS.coord, [s0, s1] = PLATFORM_LIMITS.size, [t0, t1] = PLATFORM_LIMITS.topM;
+      if (!isNum(pl.x) || pl.x < c0 || pl.x > c1 || !isNum(pl.y) || pl.y < c0 || pl.y > c1) errors.push(`${p}.x and ${p}.y must be numbers between ${c0} and ${c1}`);
+      if (!isNum(pl.width) || pl.width < s0 || pl.width > s1 || !isNum(pl.depth) || pl.depth < s0 || pl.depth > s1) errors.push(`${p}.width and ${p}.depth must be between ${s0} and ${s1} m`);
+      if (!isNum(pl.topM) || pl.topM < t0 || pl.topM > t1) errors.push(`${p}.topM must be between ${t0} and ${t1} m`);
+      if (!PLATFORM_MATERIALS.includes(pl.material)) errors.push(`${p}.material invalid: ${pl.material}`);
+      if (pl.name !== undefined && typeof pl.name !== 'string') errors.push(`${p}.name must be a string`);
+    });
+  }
   if (scene.zones !== undefined) {
     if (!Array.isArray(scene.zones)) errors.push('zones must be an array');
     else scene.zones.forEach((z, i) => {
@@ -500,6 +534,8 @@ export function migrateScene(raw) {
   }
   if (s.imd === undefined) s.imd = createDefaultImd();
   if (isObj(s.imd) && Array.isArray(s.imd.transmitters)) for (const t of s.imd.transmitters) if (isObj(t) && (typeof t.id !== 'string' || !t.id)) t.id = newId('imdtx');
+  if (isObj(s.stage) && s.stage.heightM === undefined) s.stage.heightM = 0;
+  if (s.platforms === undefined) s.platforms = [];
   if (s.zones === undefined) s.zones = [];
   for (const z of s.zones) if (isObj(z) && z.passAreaFraction === undefined) z.passAreaFraction = DEFAULT_PASS_AREA_FRACTION;
   if (s.coverage === undefined) s.coverage = { mode: 'power' };

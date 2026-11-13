@@ -6,7 +6,7 @@ import { createDefaultScene, createDefaultLink, validateScene, serialize, deseri
 test('default scene matches spec', () => {
   const s = createDefaultScene();
   assert.equal(s.version, SCHEMA_VERSION);
-  assert.deepEqual(s.stage, { width: 12, depth: 8 });
+  assert.deepEqual(s.stage, { width: 12, depth: 8, heightM: 0 });
   const l = s.links[0];
   assert.equal(l.kind, 'mic');
   assert.equal(l.tx.pos.z, 1.5);
