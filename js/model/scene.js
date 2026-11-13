@@ -12,10 +12,13 @@ const AUDIO_SOURCES = ['speech', 'tone', 'pink', 'stereo-demo', 'off'];
 export const RX_PRESET_IDS = ['mic-receiver-typical', 'iem-bodypack-typical', 'budget-receiver'];
 export const DIVERSITY_MODES = ['switching', 'true', 'ratio'];
 export const defaultRxPreset = (kind) => (kind === 'iem' ? 'iem-bodypack-typical' : 'mic-receiver-typical');
-/** Default second antenna: same type, 0.6 m (about one UHF wavelength) to the stage-left of antenna A. */
-export const defaultDiversity = (pos, antenna) => ({
+/**
+ * Default second antenna: 0.6 m (about one UHF wavelength) to the stage-left of antenna A.
+ * `antenna: null` means "same as antenna A" (it follows any change made to A); an object overrides it.
+ */
+export const defaultDiversity = (pos, _antennaA) => ({
   enabled: false, mode: 'switching',
-  antennaB: { pos: { x: Math.round((pos.x - 0.6) * 1000) / 1000, y: pos.y, z: pos.z }, antenna: structuredClone(antenna) },
+  antennaB: { pos: { x: Math.round((pos.x - 0.6) * 1000) / 1000, y: pos.y, z: pos.z }, antenna: null },
   hysteresisDb: 3, switchMs: 30,
 });
 import { MATERIAL_TRANSMISSION } from './zones-params.js';
@@ -417,7 +420,7 @@ export function validateScene(scene) {
         if (!isObj(d) || typeof d.enabled !== 'boolean' || !DIVERSITY_MODES.includes(d.mode) || !isNum(d.hysteresisDb) || !(d.switchMs >= 0)
           || !isObj(b) || !isObj(b.pos) || !isNum(b.pos.x) || !isNum(b.pos.y) || !isNum(b.pos.z)) {
           errors.push(`${p}.rx.diversity must be {enabled, mode: ${DIVERSITY_MODES.join('|')}, antennaB:{pos,antenna}, hysteresisDb, switchMs}`);
-        } else checkAntenna(b.antenna, `${p}.rx.diversity.antennaB.antenna`, errors);
+        } else if (b.antenna != null) checkAntenna(b.antenna, `${p}.rx.diversity.antennaB.antenna`, errors);
       }
       checkPos(l.rx.pos, `${p}.rx.pos`, errors);
       checkAntenna(l.rx.antenna, `${p}.rx.antenna`, errors);
@@ -445,6 +448,9 @@ export function migrateScene(raw) {
         if (l.rx.rxPreset === undefined) l.rx.rxPreset = defaultRxPreset(l.kind);
         if (l.rx.overload === undefined) l.rx.overload = {};
         if (l.rx.diversity === undefined && isObj(l.rx.pos) && isObj(l.rx.antenna)) l.rx.diversity = defaultDiversity(l.rx.pos, l.rx.antenna);
+        // Older scenes stored a copy of antenna A in antenna B: an identical copy now means "same as A".
+        const ab = isObj(l.rx.diversity) ? l.rx.diversity.antennaB : null;
+        if (isObj(ab) && isObj(ab.antenna) && isObj(l.rx.antenna) && JSON.stringify(ab.antenna) === JSON.stringify(l.rx.antenna)) ab.antenna = null;
       }
       if (isObj(l) && l.interferer === undefined) l.interferer = defaultInterferer();
       if (isObj(l) && l.telemetry === undefined) l.telemetry = defaultTelemetry();

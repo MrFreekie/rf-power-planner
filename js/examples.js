@@ -23,7 +23,7 @@ function twoRay(scene, link) {
   link.rx.pos = { x: 11, y: 6.5, z: 1.0 };
   link.tx.pos = { x: 8, y: 6.5, z: 1.75 };
   link.rx.squelch = { enabled: true, thresholdDbm: -42, hysteresisDb: 2 };
-  link.rx.diversity.antennaB = { pos: { x: 11, y: 6.5, z: 1.4 }, antenna: omni() };
+  link.rx.diversity.antennaB = { pos: { x: 11, y: 6.5, z: 1.4 }, antenna: null }; // null = same as antenna A
 }
 
 const ACROSS = { to: { x: 0.5, y: 6.5, z: 1.75 }, speedMps: 0.8, pingPong: true };

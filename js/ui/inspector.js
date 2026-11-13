@@ -342,6 +342,33 @@ export function mountInspector({ container, store }) {
           setNested(cc, 'rx.diversity.antennaB.pos', { x: cur.x, y: cur.y, z: cur.z, [ax]: lengthFromUi(v, cc.lu) }, o);
         },
       })),
+      selectField({
+        key: 'rx-b-antmode', label: 'Antenna B type', options: [['same', 'Same as antenna A'], ['custom', 'Different antenna']],
+        visible: (cc) => !!cc.link.rx.diversity?.enabled,
+        get: (cc) => (cc.link.rx.diversity?.antennaB?.antenna ? 'custom' : 'same'),
+        set: (cc, v) => setNested(cc, 'rx.diversity.antennaB.antenna', v === 'custom' ? structuredClone(cc.link.rx.antenna) : null),
+      }),
+      selectField({
+        key: 'rx-b-ant', label: 'Antenna B model', options: Object.entries(ANTENNAS).map(([id, a]) => [id, a.name]),
+        visible: (cc) => !!cc.link.rx.diversity?.enabled && !!cc.link.rx.diversity?.antennaB?.antenna,
+        get: (cc) => cc.link.rx.diversity?.antennaB?.antenna?.type,
+        set: (cc, v) => store.update((d) => {
+          const l = d.links.find((x) => x.id === cc.link.id);
+          const a = l?.rx.diversity?.antennaB?.antenna;
+          if (!a) return;
+          a.type = v;
+          if (ANTENNAS[v]) a.gainDbi = ANTENNAS[v].gainDbi;
+        }),
+      }),
+      numLink('rx-b-gain', 'Antenna B gain', 'rx.diversity.antennaB.antenna.gainDbi', -20, 40, 0.5, 'dBi', {
+        decimals: 1, visible: (cc) => !!cc.link.rx.diversity?.enabled && !!cc.link.rx.diversity?.antennaB?.antenna,
+      }),
+      numLink('rx-b-az', 'Antenna B azimuth', 'rx.diversity.antennaB.antenna.orientation.az', 0, 360, 1, '°', {
+        decimals: 1, visible: (cc) => !!cc.link.rx.diversity?.enabled && !!cc.link.rx.diversity?.antennaB?.antenna,
+      }),
+      numLink('rx-b-el', 'Antenna B elevation', 'rx.diversity.antennaB.antenna.orientation.el', -90, 90, 1, '°', {
+        decimals: 1, visible: (cc) => !!cc.link.rx.diversity?.enabled && !!cc.link.rx.diversity?.antennaB?.antenna,
+      }),
       numberField({
         key: 'rx-div-hys', label: 'Switch hysteresis', min: 0, max: 20, step: 0.5, unit: 'dB', decimals: 1,
         visible: (cc) => !!cc.link.rx.diversity?.enabled && (cc.link.rx.diversity.mode || 'switching') === 'switching',

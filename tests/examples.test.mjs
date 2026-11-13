@@ -31,7 +31,7 @@ test('rx defaults: preset, overload overrides, diversity antenna B 0.6 m from A'
   assert.equal(d.mode, 'switching');
   assert.equal(d.hysteresisDb, 3);
   assert.equal(d.switchMs, 30);
-  assert.equal(d.antennaB.antenna.type, mic.rx.antenna.type);
+  assert.equal(d.antennaB.antenna, null, 'antenna B defaults to "same as antenna A"');
   assert.ok(Math.abs(Math.hypot(d.antennaB.pos.x - mic.rx.pos.x, d.antennaB.pos.y - mic.rx.pos.y, d.antennaB.pos.z - mic.rx.pos.z) - 0.6) < 1e-9);
 });
 
@@ -263,4 +263,35 @@ test('note check: imd-too-close link meter is the own transmitter (-46 dBm), mic
   assert.ok(Math.abs(a.wantedDbm + 40) < 0.5);
   assert.ok(a.imSumDbm > a.wantedDbm - 10);
   assert.ok(frontEndImd(ex.scene).length > 0);
+});
+
+test('diversity antenna B follows antenna A unless overridden', async () => {
+  const { solveDiversity } = await import('../js/model/diversity.js');
+  const s = createDefaultScene();
+  const link = s.links[0];
+  link.rx.diversity.enabled = true;
+  link.rx.diversity.antennaB.pos = { ...link.rx.pos }; // same place: B must equal A while it follows A
+  assert.deepEqual(validateScene(s), { ok: true, errors: [] });
+  let r = solveDiversity(s, link);
+  assert.equal(r.b.rxPowerDbm, r.a.rxPowerDbm);
+  // change antenna A: B (same as A) changes with it
+  link.rx.antenna = { type: 'dipole', gainDbi: 5, orientation: { az: 90, el: 0 } };
+  r = solveDiversity(s, link);
+  assert.equal(r.b.rxPowerDbm, r.a.rxPowerDbm);
+  // an explicit override is respected
+  link.rx.diversity.antennaB.antenna = { type: 'omni', gainDbi: -3, orientation: { az: 0, el: 0 } };
+  assert.equal(validateScene(s).ok, true);
+  r = solveDiversity(s, link);
+  assert.notEqual(r.b.rxPowerDbm, r.a.rxPowerDbm);
+});
+
+test('migration turns an identical stored copy of antenna A into "same as A"', () => {
+  const s = createDefaultScene();
+  const l = s.links[0];
+  l.rx.diversity.antennaB.antenna = structuredClone(l.rx.antenna);
+  const m = migrateScene(s);
+  assert.equal(m.links[0].rx.diversity.antennaB.antenna, null);
+  const t = createDefaultScene();
+  t.links[0].rx.diversity.antennaB.antenna = { ...structuredClone(t.links[0].rx.antenna), gainDbi: 99 - 90 };
+  assert.ok(migrateScene(t).links[0].rx.diversity.antennaB.antenna, 'a different antenna stays an override');
 });
