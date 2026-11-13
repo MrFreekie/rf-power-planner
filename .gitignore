@@ -1,0 +1,19 @@
+# Secrets and local config
+.env
+.env.*
+*.pem
+*.key
+*.p12
+secrets/
+*.local.json
+
+# Local scratch, logs, OS and editor files
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+tmp/
+scratch/
+*.py

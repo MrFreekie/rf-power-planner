@@ -1,0 +1,11 @@
+{
+  "name": "rf-power-planner",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Static RF link-budget planner for wireless microphones and IEMs",
+  "scripts": {
+    "test": "node --test tests/",
+    "serve": "node scripts/serve.mjs"
+  }
+}

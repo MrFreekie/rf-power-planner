@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RF Power Planner</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header id="toolbar" role="toolbar" aria-label="Scenario controls">
+  <h1>RF Power Planner</h1>
+  <div class="group" role="group" aria-label="Scenario">
+    <button type="button" id="btn-mic" aria-pressed="true">Mic</button>
+    <button type="button" id="btn-iem" aria-pressed="false">IEM</button>
+  </div>
+  <label>Frequency <input id="freq" type="number" min="1" max="6000" step="0.025" inputmode="decimal"> MHz</label>
+  <label>Floor <select id="floor"></select></label>
+  <div class="group" role="group" aria-label="Propagation model">
+    <button type="button" id="btn-two-ray" aria-pressed="true">2-ray</button>
+    <button type="button" id="btn-free-space" aria-pressed="false">Free space</button>
+  </div>
+  <div class="group" role="group" aria-label="Power units">
+    <button type="button" id="u-dbm" data-power="dBm" aria-pressed="true">dBm</button>
+    <button type="button" id="u-dbw" data-power="dBW" aria-pressed="false">dBW</button>
+    <button type="button" id="u-mw" data-power="mW" aria-pressed="false">mW</button>
+  </div>
+  <div class="group" role="group" aria-label="Length units">
+    <button type="button" id="u-m" data-length="m" aria-pressed="true">m</button>
+    <button type="button" id="u-ft" data-length="ft" aria-pressed="false">ft</button>
+  </div>
+  <div class="group" role="group" aria-label="History">
+    <button type="button" id="btn-undo" title="Undo (Ctrl+Z)">Undo</button>
+    <button type="button" id="btn-redo" title="Redo (Ctrl+Shift+Z)">Redo</button>
+  </div>
+  <div class="group" role="group" aria-label="Walk">
+    <button type="button" id="btn-walk" aria-pressed="false" title="Walk the mobile end automatically">Walk</button>
+    <label>Speed <input id="walk-speed" type="number" min="0.1" max="1000" step="0.1" value="1.2" inputmode="decimal"> m/s</label>
+    <label>To <select id="walk-to"><option value="stage">Stage</option><option value="range">Out of range</option></select></label>
+  </div>
+  <div class="group" role="group" aria-label="Modulation">
+    <button type="button" id="mod-fm" data-mod="analog-fm" aria-pressed="true">Analog FM</button>
+    <button type="button" id="mod-digital" data-mod="digital" aria-pressed="false">Digital</button>
+  </div>
+  <span id="digital-controls" hidden>
+    <label>Preset <select id="dig-preset"></select></label>
+    <label>Order <select id="dig-order"><option value="">Adaptive</option><option value="2">BPSK</option><option value="4">QPSK</option><option value="16">16-QAM</option><option value="64">64-QAM</option><option value="256">256-QAM</option></select></label>
+  </span>
+  <div class="group" role="group" aria-label="Battery">
+    <button type="button" id="btn-batt" aria-pressed="false" title="Start or pause the virtual battery drain">Battery: Start</button>
+    <button type="button" id="btn-batt-reset" title="Refill the battery to its start level">Reset</button>
+    <label>Time x <input id="batt-scale" type="number" min="1" max="100000" step="1" value="60" inputmode="numeric"></label>
+  </div>
+  <button type="button" id="btn-imd" aria-pressed="false" title="Show intermodulation between transmitters">Intermod</button>
+  <label>Coverage <select id="cov-mode"><option value="power">Power sum</option><option value="coherent">Coherent</option><option value="best">Best antenna</option></select></label>
+  <label>Examples <select id="examples"><option value="">Choose...</option></select></label>
+  <div class="group" role="group" aria-label="Share and report">
+    <button type="button" id="btn-share" title="Copy a link that contains this scene">Share</button>
+    <button type="button" id="btn-report" title="Open a printable link budget report">Report</button>
+  </div>
+  <div class="group" role="group" aria-label="Scene file">
+    <button type="button" id="btn-save" title="Download the scene as a JSON file">Save</button>
+    <button type="button" id="btn-load" title="Load a scene JSON file">Load</button>
+    <input id="file-load" type="file" accept="application/json,.json" hidden>
+  </div>
+</header>
+<div id="share-bar" role="alertdialog" aria-label="Shared scene" hidden>
+  <p id="share-bar-text">Load shared scene?</p>
+  <button type="button" id="share-load">Load</button>
+  <button type="button" id="share-ignore">Ignore</button>
+</div>
+<p id="share-status" role="status" hidden></p>
+<div id="example-note" role="note" hidden>
+  <p><strong id="example-title"></strong> <span id="example-text"></span></p>
+  <button type="button" id="example-dismiss" aria-label="Dismiss note">Dismiss</button>
+</div>
+
+<main id="workspace">
+  <section class="pane" aria-label="Plan view">
+    <h2>Plan</h2>
+    <canvas id="plan-canvas" tabindex="0" aria-label="Plan view of the stage"></canvas>
+  </section>
+  <section class="pane" aria-label="Side view">
+    <h2>Side</h2>
+    <canvas id="side-canvas" tabindex="0" aria-label="Side view of the Tx to Rx line"></canvas>
+  </section>
+  <div id="sidebar">
+  <aside id="results" aria-label="Link budget results" aria-live="polite">
+    <h2>Link budget</h2>
+    <dl id="readout">
+      <div><dt>Distance</dt><dd id="r-distance">-</dd></div>
+      <div><dt>Rx power</dt><dd id="r-rx">-</dd></div>
+      <div><dt>Input power</dt><dd id="r-input">-</dd></div>
+      <div><dt>Margin</dt><dd id="r-margin">-</dd></div>
+      <div><dt>System NF</dt><dd id="r-nf">-</dd></div>
+      <div><dt>Noise floor</dt><dd id="r-floor">-</dd></div>
+      <div><dt>Status</dt><dd id="r-status" class="status">-</dd></div>
+    </dl>
+    <p id="app-error" role="alert" hidden></p>
+  </aside>
+  <section id="meters" aria-label="RF and audio meters"></section>
+  <section id="mpx" aria-label="Stereo multiplex"></section>
+  <section id="diversity" aria-label="Antenna diversity"></section>
+  <section id="telemetry" aria-label="Telemetry"></section>
+  <section id="digital" aria-label="Digital link"></section>
+  <section id="coverage" aria-label="Coverage zones"></section>
+  <section id="imd" aria-label="Intermodulation"></section>
+  <section id="inspector" aria-label="Inspector"></section>
+  <section id="waterfall" aria-label="Signal level waterfall"></section>
+  </div>
+</main>
+
+<section id="timeline" aria-label="Level timeline"></section>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

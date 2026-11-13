@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Views demo (stub RF model)</title>
+<link rel="stylesheet" href="../css/style.css">
+<!-- The views import ../model/rf.js and ../model/library.js; map them to demo stubs so no other module is needed. -->
+<script type="importmap">
+{ "imports": {
+  "/js/model/rf.js": "/demo/stub-rf.js",
+  "/js/model/library.js": "/demo/stub-library.js"
+} }
+</script>
+</head>
+<body>
+<header id="toolbar">
+  <h1>Views demo <small>(stub solver, fake store)</small></h1>
+  <div class="group" role="group" aria-label="Select">
+    <button type="button" id="sel-tx">Select Tx</button>
+    <button type="button" id="sel-rx">Select Rx</button>
+    <button type="button" id="sel-iem">Select IEM Tx</button>
+    <button type="button" id="sel-none">None</button>
+  </div>
+  <label><input type="checkbox" id="two-ray" checked> two-ray</label>
+</header>
+<main id="workspace">
+  <section class="pane" aria-label="Plan view"><h2>Plan</h2>
+    <canvas id="plan-canvas" tabindex="0" aria-label="Plan view of the stage"></canvas></section>
+  <section class="pane" aria-label="Side view"><h2>Side</h2>
+    <canvas id="side-canvas" tabindex="0" aria-label="Side view of the Tx to Rx line"></canvas></section>
+  <aside id="results" aria-label="Readout" aria-live="polite"><h2>Readout</h2>
+    <dl id="readout"><div><dt>Selected</dt><dd id="r-sel">-</dd></div>
+      <div><dt>Distance</dt><dd id="r-distance">-</dd></div><div><dt>Rx power</dt><dd id="r-rx">-</dd></div>
+      <div><dt>Margin</dt><dd id="r-margin">-</dd></div><div><dt>Status</dt><dd id="r-status" class="status">-</dd></div></dl>
+    <p style="font-size:12px;color:var(--ink-soft)">Drag icons, lobe tips (dots), wall ends/body; side view: drag the circles up/down. Wheel = zoom, drag background / space-drag = pan, arrows = nudge, [ ] = cycle, 0 = fit.</p>
+  </aside>
+</main>
+
+<script type="module">
+import { mountViews } from '/js/view/index.js';
+import { solveLink } from '/js/model/rf.js';
+
+// ---- fake store: copy-on-write plain objects, same interface as js/store.js ----
+function fakeStore(initial) {
+  let scene = initial, selection = null, last = null;
+  const subs = new Set();
+  const emit = (type) => subs.forEach((cb) => cb(scene, { type }));
+  return {
+    getScene: () => scene,
+    setScene(s) { scene = s; emit('scene'); },
+    update(fn, { coalesce = null } = {}) {
+      const draft = structuredClone(scene);
+      const out = fn(draft);
+      scene = out === undefined ? draft : out;
+      last = coalesce; emit('scene'); return true;
+    },
+    subscribe(cb) { subs.add(cb); return () => subs.delete(cb); },
+    select(id) { if (id === selection) return; selection = id ?? null; emit('selection'); },
+    getSelection: () => selection,
+  };
+}
+
+const scene = {
+  version: 1, units: { power: 'dBm', length: 'm' },
+  stage: { width: 12, depth: 8 },
+  environment: { floor: 'wood', polarisation: 'vertical', model: 'two-ray', fadeMarginDb: 3, bodyLossDb: 0 },
+  reflectors: [
+    { id: 'wall_back', name: 'Back wall', material: 'concrete', p1: { x: 0, y: 8 }, p2: { x: 12, y: 8 }, zMin: 0, zMax: 4 },
+    { id: 'wall_left', name: 'Side wall', material: 'brick', p1: { x: -0.8, y: 0 }, p2: { x: -0.8, y: 8 }, zMin: 0, zMax: 4 },
+  ],
+  links: [
+    { id: 'link_mic', name: 'Mic 1', kind: 'mic', freqMHz: 600,
+      tx: { id: 'tx_mic', name: 'Handheld mic', powerDbm: 14, pos: { x: 4, y: 3, z: 1.5 }, antenna: { type: 'body', gainDbi: -3, orientation: { az: 0, el: 90 } } },
+      rx: { id: 'rx_mic', name: 'UHF receiver', pos: { x: 10, y: 6.5, z: 2.5 }, antenna: { type: 'paddle', gainDbi: 2, orientation: { az: 250, el: -10 } }, sensitivityDbm: -90, bodyLossDb: 0 },
+      chain: [] },
+    { id: 'link_iem', name: 'IEM 1', kind: 'iem', freqMHz: 600,
+      tx: { id: 'tx_iem', name: 'IEM transmitter', powerDbm: 17, pos: { x: 11, y: 0.6, z: 1.2 }, antenna: { type: 'helical', gainDbi: 2, orientation: { az: 300, el: 0 } } },
+      rx: { id: 'rx_iem', name: 'Bodypack', pos: { x: 8.5, y: 2.0, z: 1.0 }, antenna: { type: 'body', gainDbi: -3, orientation: { az: 0, el: 90 } }, sensitivityDbm: -90, bodyLossDb: 0 },
+      chain: [] },
+  ],
+};
+
+const store = fakeStore(scene);
+window.views = mountViews({ planCanvas: document.getElementById('plan-canvas'), sideCanvas: document.getElementById('side-canvas'), store });
+window.store = store;
+
+const $ = (id) => document.getElementById(id);
+$('sel-tx').onclick = () => store.select('tx_mic');
+$('sel-rx').onclick = () => store.select('rx_mic');
+$('sel-iem').onclick = () => store.select('tx_iem');
+$('sel-none').onclick = () => store.select(null);
+$('two-ray').onchange = (e) => store.update((s) => { s.environment.model = e.target.checked ? 'two-ray' : 'free-space'; });
+
+function readout() {
+  const s = store.getScene(), id = store.getSelection();
+  const link = s.links.find((l) => l.tx.id === id || l.rx.id === id) || s.links[0];
+  const r = solveLink(s, link);
+  $('r-sel').textContent = id || 'none (' + link.name + ')';
+  $('r-distance').textContent = r.distanceM.toFixed(2) + ' m';
+  $('r-rx').textContent = r.rxPowerDbm.toFixed(1) + ' dBm';
+  $('r-margin').textContent = r.marginDb.toFixed(1) + ' dB';
+  $('r-status').textContent = r.status.toUpperCase(); $('r-status').dataset.status = r.status;
+}
+store.subscribe(readout); readout();
+</script>
+</body>
+</html>
