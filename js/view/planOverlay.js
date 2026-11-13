@@ -44,6 +44,7 @@ export function createHeatmap() {
             if (edge) { c = ink; a = 190; } else { c = red; }
           } else if (tint) c = TINTS[(dom[k] || 0) % TINTS.length];
           else c = cls === 'good' ? green : amber;
+          if (cls === 'near' && ((i + j) & 1)) a = 45; // dither: near-threshold cells read as textured, not by colour alone
           data[o] = c[0]; data[o + 1] = c[1]; data[o + 2] = c[2]; data[o + 3] = a;
         }
       }
@@ -62,6 +63,24 @@ export function drawHeatLegend(ctx, th, w, h, cov, tint) {
   const items = tint ? [['dominant antenna 1', TINTS[0]], ['2', TINTS[1]], ['3', TINTS[2]], ['below squelch', parseColor(th.fail)]]
     : [['good (above threshold + margin)', parseColor(th.pass)], ['near threshold', parseColor(th.marginal)], ['dead (below squelch)', parseColor(th.fail)]];
   const small = w < 520;
+  if (small) { // phone: one compact row along the bottom so it never covers the stage
+    ctx.save(); setFont(ctx, th, 11);
+    const row = items.map(([t, c]) => [t.split(' ')[0], c]);
+    const widths = row.map(([t]) => ctx.measureText(t).width + 24);
+    const total = widths.reduce((a, b) => a + b, 0) + 4;
+    const rx = 8, ry = h - 52;
+    ctx.fillStyle = th.paper; ctx.globalAlpha = 0.85; ctx.fillRect(rx - 4, ry - 12, total + 4, 18 + (cov && cov.computing ? 12 : 0)); ctx.globalAlpha = 1;
+    let cx = rx;
+    row.forEach(([t, c], i) => {
+      ctx.fillStyle = `rgb(${c[0]},${c[1]},${c[2]})`; ctx.globalAlpha = 0.7; ctx.fillRect(cx, ry - 9, 14, 11); ctx.globalAlpha = 1;
+      ctx.strokeStyle = th.ink; ctx.lineWidth = 0.8; ctx.strokeRect(cx + 0.5, ry - 8.5, 13, 10);
+      ctx.fillStyle = th.ink; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; ctx.fillText(t, cx + 18, ry);
+      cx += widths[i];
+    });
+    if (cov && cov.computing) { ctx.fillStyle = th.inkSoft; ctx.fillText(`computing ${Math.round((cov.progress || 0) * 100)}%`, rx, ry + 12); }
+    ctx.restore();
+    return;
+  }
   const x = 10, y0 = h - (small ? 150 : 140) - items.length * 0;
   ctx.save();
   setFont(ctx, th, 11);
@@ -246,7 +265,7 @@ export function drawPlatforms(ctx, th, vp, scene, sel, handles, lengthUnit = 'm'
     const a = vp.worldToScreen(p.x, p.y), b = vp.worldToScreen(p.x + p.width, p.y + p.depth);
     const w = b.x - a.x, h = b.y - a.y, selected = sel === p.id;
     ctx.save();
-    ctx.fillStyle = `rgba(29,39,51,${(0.05 + 0.2 * (p.topM / maxTop)).toFixed(3)})`; ctx.fillRect(a.x, a.y, w, h);
+    ctx.fillStyle = `rgba(${th.inkRgb},${(0.05 + 0.2 * (p.topM / maxTop)).toFixed(3)})`; ctx.fillRect(a.x, a.y, w, h);
     strokeHatchRect(ctx, a.x, a.y, w, h, th.inkSoft, 6);
     ctx.strokeStyle = th.ink; ctx.lineWidth = selected ? 2.6 : 1.5; ctx.strokeRect(a.x, a.y, w, h);
     ctx.restore();
@@ -271,17 +290,18 @@ export function drawElevationLegend(ctx, th, w, scene, lengthUnit = 'm') {
   if (!plats.length && !deckH) return;
   const rows = [['ground (audience)', 0]];
   if (deckH) rows.push(['stage deck', deckH]);
-  plats.slice(0, 4).forEach((p) => rows.push([p.name, p.topM]));
-  if (plats.length > 4) rows.push([`+${plats.length - 4} more`, NaN]);
+  const cap = w < 520 ? 2 : 4; // phone: fewer rows so the legend stays clear of the stage
+  plats.slice(0, cap).forEach((p) => rows.push([p.name, p.topM]));
+  if (plats.length > cap) rows.push([`+${plats.length - cap} more`, NaN]);
   setFont(ctx, th, 11);
   const bw = Math.max(...rows.map(([t, v]) => ctx.measureText(`${t} ${Number.isFinite(v) ? formatLength(v, lengthUnit) : ''}`).width)) + 26;
-  const x = w - bw - 8, y = 8;
+  const x = w - bw - 8, y = w < 520 ? 20 : 8;
   ctx.save(); ctx.fillStyle = th.paper; ctx.globalAlpha = 0.9; ctx.fillRect(x - 4, y, bw + 4, rows.length * 15 + 18); ctx.globalAlpha = 1;
   ctx.fillStyle = th.inkSoft; ctx.textAlign = 'left'; ctx.fillText('Elevation', x, y + 12);
   const max = Math.max(deckH, ...plats.map((p) => p.topM), 0.1);
   rows.forEach(([t, v], i) => {
     const yy = y + 18 + i * 15;
-    if (Number.isFinite(v)) { ctx.fillStyle = `rgba(29,39,51,${(0.05 + 0.2 * (v / max)).toFixed(3)})`; ctx.fillRect(x, yy - 9, 14, 11); ctx.strokeStyle = th.ink; ctx.lineWidth = 0.8; ctx.strokeRect(x + 0.5, yy - 8.5, 13, 10); }
+    if (Number.isFinite(v)) { ctx.fillStyle = `rgba(${th.inkRgb},${(0.05 + 0.2 * (v / max)).toFixed(3)})`; ctx.fillRect(x, yy - 9, 14, 11); ctx.strokeStyle = th.ink; ctx.lineWidth = 0.8; ctx.strokeRect(x + 0.5, yy - 8.5, 13, 10); }
     ctx.fillStyle = th.ink; ctx.fillText(`${t} ${Number.isFinite(v) ? formatLength(v, lengthUnit) : ''}`, x + 20, yy);
   });
   ctx.restore();

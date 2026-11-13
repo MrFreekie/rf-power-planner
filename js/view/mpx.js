@@ -118,8 +118,8 @@ export function mountMpx({ container, store, tracker = null }) {
     const blend = state.blend ?? 0;
     ctx.fillStyle = th.paper2; ctx.fillRect(L, T, pw, ph);
     // L-R region shading follows the blend
-    ctx.fillStyle = STEREO_BLUE; ctx.globalAlpha = 0.06 + 0.12 * blend; ctx.fillRect(X(23), T, X(53) - X(23), ph); ctx.globalAlpha = 1;
-    ctx.fillStyle = MONO_GREY; ctx.globalAlpha = 0.18; ctx.fillRect(X(0.03), T, X(15) - X(0.03), ph); ctx.globalAlpha = 1;
+    ctx.fillStyle = th.blue; ctx.globalAlpha = 0.06 + 0.12 * blend; ctx.fillRect(X(23), T, X(53) - X(23), ph); ctx.globalAlpha = 1;
+    ctx.fillStyle = th.mono; ctx.globalAlpha = 0.18; ctx.fillRect(X(0.03), T, X(15) - X(0.03), ph); ctx.globalAlpha = 1;
     // grid
     setFont(ctx, th, 11); ctx.textBaseline = 'alphabetic';
     for (let db = SPEC_DB.min; db <= SPEC_DB.max; db += 30) {
@@ -156,11 +156,11 @@ export function mountMpx({ container, store, tracker = null }) {
     };
     lab('L+R', 0.03, 15, th.ink);
     lab(state.pilotLocked ? 'PILOT' : 'PILOT lost', 15.5, 22.5, state.pilotLocked ? th.pass : th.fail);
-    lab(w < 380 ? 'L−R' : 'L−R stereo', 23, 53, blend > 0.05 ? STEREO_BLUE : th.inkSoft);
+    lab(w < 380 ? 'L−R' : 'L−R stereo', 23, 53, blend > 0.05 ? th.blue : th.inkSoft);
     if (s.dataBand) {
       const [a, b] = s.dataBand;
       ctx.fillStyle = th.marginal; ctx.globalAlpha = s.dataLevelDb > -100 ? 0.35 : 0.1; ctx.fillRect(X(a), T, Math.max(X(b) - X(a), 3), ph); ctx.globalAlpha = 1;
-      haloText(ctx, th, s.dataLocked ? 'DATA' : 'DATA lost', X(s.dataKHz), T + ph - 6, { align: 'center', px: 11, weight: '600', color: s.dataLocked ? '#8a6200' : th.fail });
+      haloText(ctx, th, s.dataLocked ? 'DATA' : 'DATA lost', X(s.dataKHz), T + ph - 6, { align: 'center', px: 11, weight: '600', color: s.dataLocked ? th.warnText : th.fail });
     }
     const sqs = link ? squelch.get(link.id) : null;
     if (link && link.interferer && link.interferer.enabled && sqs && sqs.capture && Number.isFinite(sqs.capture.cirDb)) {
@@ -169,7 +169,7 @@ export function mountMpx({ container, store, tracker = null }) {
         ctx.save(); ctx.strokeStyle = th.marginal; ctx.setLineDash([3, 3]); ctx.lineWidth = 2;
         ctx.beginPath(); ctx.moveTo(X(19), T + 14); ctx.lineTo(X(19), T + ph); ctx.stroke(); ctx.restore();
       }
-      haloText(ctx, th, `stray carrier${ifr.hasPilot ? ' + pilot' : ' (no pilot)'}  C/I ${cirDb >= 0 ? '+' : '\u2212'}${Math.abs(cirDb).toFixed(1)} dB`, L + pw - 4, T + ph - 6, { align: 'right', px: 11, weight: '600', color: '#8a6200' });
+      haloText(ctx, th, `stray carrier${ifr.hasPilot ? ' + pilot' : ' (no pilot)'}  C/I ${cirDb >= 0 ? '+' : '\u2212'}${Math.abs(cirDb).toFixed(1)} dB`, L + pw - 4, T + ph - 6, { align: 'right', px: 11, weight: '600', color: th.warnText });
     }
     haloText(ctx, th, 'noise', X(Math.min(57, spanKHz - 3)), Y(s.noiseDb[s.noiseDb.length - 1]) - 4, { align: 'center', px: 11, color: th.fail });
   }
@@ -193,9 +193,9 @@ export function mountMpx({ container, store, tracker = null }) {
     haloText(ctx, th, 'Sep', 2, y + 12, { px: 11, color: th.inkSoft });
     const sx = L + 14, sw = x1 - sx;
     ctx.fillStyle = th.paper2; ctx.fillRect(sx, y, sw, 12);
-    if (state.mode === 'stereo') { ctx.fillStyle = STEREO_BLUE; ctx.fillRect(sx, y, sw * sep / 40, 12); }
-    else if (state.mode === 'blend') { ctx.fillStyle = th.paper; ctx.fillRect(sx, y, sw * sep / 40, 12); strokeHatchRect(ctx, sx, y, sw * sep / 40, 12, STEREO_BLUE, 4); }
-    else { ctx.fillStyle = MONO_GREY; ctx.fillRect(sx, y, Math.max(2, sw * sep / 40), 12); }
+    if (state.mode === 'stereo') { ctx.fillStyle = th.blue; ctx.fillRect(sx, y, sw * sep / 40, 12); }
+    else if (state.mode === 'blend') { ctx.fillStyle = th.paper; ctx.fillRect(sx, y, sw * sep / 40, 12); strokeHatchRect(ctx, sx, y, sw * sep / 40, 12, th.blue, 4); }
+    else { ctx.fillStyle = th.mono; ctx.fillRect(sx, y, Math.max(2, sw * sep / 40), 12); }
     ctx.strokeStyle = th.ink; ctx.lineWidth = 1; ctx.strokeRect(sx + 0.5, y + 0.5, sw - 1, 11);
     setFont(ctx, th, 11); ctx.fillStyle = th.ink; ctx.textAlign = 'left';
     ctx.fillText(`separation ${sep.toFixed(0)} dB (L and R ${state.mode === 'mono' ? 'identical' : 'distinct'})`, sx, y + 26);

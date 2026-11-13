@@ -73,3 +73,11 @@ Issues and suggestions:
 7. Info: `spectrum` draws every product at its centre frequency as a narrow line. FM products are about three times the channel bandwidth wide (`productBandwidthFactor`), so the picture understates how much of the neighbouring channel they cover.
 
 Figures checked numerically against the module (two 17 dBm transmitters 600.0 and 600.4 MHz): raising both transmitters by 3 dB raises the front-end IM3 product by 9.00 dB (3:1) and the PIM product by 9.00 dB (3:1); halving the transmitter-to-transmitter distance raises the reverse-IM product by 6.02 dB (4 m to 2 m and 8 m to 4 m); the thermal floor is -112.99 dBm for 200 kHz and NF 8 dB; product enumeration for eight transmitters at real frequencies gives the same counts as `imProductCount` (224 third order, and the same fifth-order count). The test file for the module was still being edited when this was written, so some of its tests were failing in the last full run (noise floor worst-channel selection); the figures above are not affected.
+
+## Frequency coordination (js/model/coordination.js)
+Third-order products 2fi - fj and fi + fj - fk must not fall within the guard bandwidth (default 2 x 200 kHz) of any used channel; channels at least 300 kHz apart. Mics and IEMs share one set, so cross products count.
+The search is greedy on an integer kHz grid (adding channels only adds constraints) and verifies the final plan with imd.js `productFrequencies`. Fifth order is reported, not enforced. Band and power tables (bands.js) are planning estimates; check local licensing.
+Score = 100 min(1, d_product / (2 guard), d_spacing / (2 spacing)).
+
+## IEM noise cascade (rf.js cascadeNoiseIem)
+Bodypack noise floor = kTB + Friis NF of (rx.chain, bodypack) (+ external noise). The Tx-side chain radiates kTB + NF_c + G_c, reaching the bodypack through the path gain; the two powers add. It matters only for a noisy high-gain booster near the bodypack.

@@ -8,6 +8,7 @@ const omni = (el = 90) => ({ type: 'omni', gainDbi: 0, orientation: { az: 0, el 
 /** Base scene with a single link of the given kind; `fn(scene, link)` customises it. */
 function make(kind, fn) {
   const scene = createDefaultScene();
+  scene.environment.externalNoise = 0; // examples quote margins without external noise; a note or fn may set it on purpose
   scene.links = [createDefaultLink(kind)];
   fn(scene, scene.links[0]);
   if (scene.stage.heightM === undefined) scene.stage.heightM = 0;

@@ -13,7 +13,7 @@
 // visual speed (the real wave is about 300 million m/s). Field mode draws the static coherent interference
 // pattern of the direct wave and its reflections (antenna pattern ignored).
 import { antennaGainDb, floorReflection, reflectorCoefficient } from '../model/rf.js';
-import { solveCached, statusColor, setFont, haloText } from './util.js';
+import { solveCached, statusColor, setFont, haloText, drawCost } from './util.js';
 import { gateOf } from './squelchUi.js';
 import { floorHeightAt } from '../model/floor.js';
 import { parseColor } from './coverageUi.js';
@@ -265,7 +265,7 @@ export function createRipples({ store }) {
   }
 
   // ---- field mode (offscreen, low resolution, throttled) ---------------------------------------
-  const field = { canvas: null, ctx: null, img: null, w: 0, h: 0, key: '', at: 0, pxPerM: 0, ox: 0, oy: 0, scene: null, linkId: '', mode: '' };
+  const field = { ink: '', canvas: null, ctx: null, img: null, w: 0, h: 0, key: '', at: 0, pxPerM: 0, ox: 0, oy: 0, scene: null, linkId: '', mode: '' };
   const inkRgb = [29, 39, 51];
 
   function ensureField(w, h) {
@@ -277,7 +277,8 @@ export function createRipples({ store }) {
       field.w = cw; field.h = ch; field.scene = null;
     }
   }
-  const needField = (scene, vp, linkId, mode) => {
+  const needField = (scene, vp, linkId, mode, ink) => {
+    if (field.ink !== ink) { field.ink = ink; field.scene = null; field.at = 0; } // theme change: repaint at once
     const now = performance.now();
     const same = field.scene === scene && field.pxPerM === vp.pxPerM && field.ox === vp.origin.x && field.oy === vp.origin.y && field.linkId === linkId && field.mode === mode;
     if (same) return false;
@@ -316,7 +317,7 @@ export function createRipples({ store }) {
     const e = list.find((q) => q.linkId === link.id);
     if (!e) return;
     ensureField(w, h);
-    if (needField(scene, vp, link.id, 'plan')) {
+    if (needField(scene, vp, link.id, 'plan', th.ink)) {
       const rgb = parseColor(th.ink, inkRgb); inkRgb[0] = rgb[0]; inkRgb[1] = rgb[1]; inkRgb[2] = rgb[2];
       nSrc = 0;
       const put = (x, y, z, a, ph) => { const o = nSrc * 5; srcs[o] = x; srcs[o + 1] = y; srcs[o + 2] = z; srcs[o + 3] = a; srcs[o + 4] = ph; nSrc++; };
@@ -370,7 +371,7 @@ export function createRipples({ store }) {
     const sp = M.ringSpacing(lambda, vp.pxPerM);
     if (settings.field) {
       ensureField(w, h);
-      if (needField(scene, vp, link.id, 'side')) {
+      if (needField(scene, vp, link.id, 'side', th.ink)) {
         const rgb = parseColor(th.ink, inkRgb); inkRgb[0] = rgb[0]; inkRgb[1] = rgb[1]; inkRgb[2] = rgb[2];
         nSrc = 0;
         const sT = geom.sTx ?? 0;
@@ -420,11 +421,18 @@ export function createRipples({ store }) {
   function running() {
     return settings.on && !settings.field && !settings.paused && !reduced && !document.hidden && anyVisible() && views.size > 0;
   }
+  // Adaptive frame rate: ripples may use about a third of the main thread, so expensive views (heat map, many sources)
+  // animate at 20 or 10 fps instead of stalling the pointer. Cheap scenes keep the 30 fps cap.
+  function frameInterval() {
+    let cost = 0;
+    for (const v of views.values()) if (v.visible) cost += drawCost.get(v.canvas) || 0;
+    return Math.min(100, Math.max(FRAME_MS, cost * 3));
+  }
   function invalidateAll() { for (const v of views.values()) v.invalidate(); }
   function loop(ts) {
     raf = 0;
     if (!running()) return;
-    if (ts - lastTs >= FRAME_MS) {
+    if (ts - lastTs >= frameInterval()) {
       const dt = lastTs ? Math.min(0.1, (ts - lastTs) / 1000) : 0;
       lastTs = ts;
       phase = M.advancePhase(phase, dt, M.BASE_RINGS_PER_S * settings.speed);

@@ -37,7 +37,6 @@ export function mountMeters({ container, store }) {
   h2.textContent = 'Meters';
   const chip = document.createElement('span');
   chip.className = 'chip';
-  chip.setAttribute('role', 'status');
   head.append(h2, chip);
   const canvas = document.createElement('canvas');
   canvas.className = 'meters-canvas';
@@ -140,7 +139,7 @@ export function mountMeters({ container, store }) {
       `${Number.isFinite(rfV) ? formatPower(rfV, unit) : '-'}${thr != null ? `   squelch ${formatPower(thr, unit)}` : ''}}`, thr, zones, tk);
     const aV = last ? last.audioDb : NaN;
     if (ifr) {
-      setFont(ctx, th, 11, '600'); ctx.fillStyle = th.marginal === th.ink ? th.ink : '#8a6200'; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+      setFont(ctx, th, 11, '600'); ctx.fillStyle = th.warnText; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
       ctx.fillText(`stray ${formatPower(ifr.levelDbm, unit)}${ms && Number.isFinite(ms.cirDb) ? `, C/I ${ms.cirDb >= 0 ? '+' : '−'}${Math.abs(ms.cirDb).toFixed(1)} dB` : ''}`, x0, 62);
     }
     bar(70, 'Audio', aV, AUDIO_RANGE, au, th.ink,

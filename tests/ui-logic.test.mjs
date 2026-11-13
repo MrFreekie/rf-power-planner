@@ -1,0 +1,230 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { createSceneLibrary, LIBRARY_KEY, LIMITS, cleanName } from '../js/ui/scenes.js';
+import { snapshotScene, compareSnapshots } from '../js/ui/compare.js';
+import { shouldShowWelcome, markWelcomeSeen, resetWelcome, WELCOME_KEY, WELCOME_STEPS } from '../js/ui/onboarding.js';
+import { GLOSSARY, ALIASES, findTerms, termsIn, lookup, legend } from '../js/ui/glossary.js';
+import { TOOLTIPS, HELP_TOPICS } from '../js/ui/help.js';
+import { createDefaultScene, createChainItem } from '../js/model/scene.js';
+
+function fakeStorage({ failWrites = false } = {}) {
+  const m = new Map();
+  return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem(k, v) { if (failWrites) throw new Error('quota'); m.set(k, String(v)); }, removeItem: (k) => m.delete(k), _m: m };
+}
+
+test('scene library: save, list, load round trip', () => {
+  let t = 1000;
+  const lib = createSceneLibrary(fakeStorage(), { now: () => t++ });
+  const scene = createDefaultScene();
+  const r = lib.save('  Main   stage ', scene);
+  assert.equal(r.ok, true);
+  assert.deepEqual(lib.list().map((x) => x.name), ['Main stage']);
+  const l = lib.load(r.id);
+  assert.equal(l.ok, true);
+  assert.equal(l.scene.stage.width, scene.stage.width);
+});
+
+test('scene library: same name replaces, newest first, rename and delete', () => {
+  let t = 1;
+  const lib = createSceneLibrary(fakeStorage(), { now: () => t++ });
+  const a = lib.save('A', createDefaultScene());
+  const b = lib.save('B', createDefaultScene());
+  assert.equal(lib.save('a', createDefaultScene()).replaced, true);
+  assert.equal(lib.list().length, 2);
+  assert.equal(lib.list()[0].name, 'a');
+  assert.equal(lib.rename(b.id, 'a').ok, false); // duplicate name
+  assert.equal(lib.rename(b.id, 'Bee').ok, true);
+  assert.equal(lib.remove(a.id).ok, true);
+  assert.equal(lib.remove(a.id).ok, false);
+  assert.deepEqual(lib.list().map((x) => x.name), ['Bee']);
+});
+
+test('scene library: limits, empty names, storage failure never throw', () => {
+  const lib = createSceneLibrary(fakeStorage());
+  assert.equal(lib.save('   ', createDefaultScene()).ok, false);
+  for (let i = 0; i < LIMITS.maxScenes; i++) assert.equal(lib.save(`s${i}`, createDefaultScene()).ok, true);
+  assert.equal(lib.save('one too many', createDefaultScene()).ok, false);
+  const big = createDefaultScene();
+  big.links[0].name = 'x'.repeat(LIMITS.maxSceneBytes);
+  assert.equal(createSceneLibrary(fakeStorage()).save('big', big).ok, false);
+  assert.equal(createSceneLibrary(fakeStorage({ failWrites: true })).save('q', createDefaultScene()).ok, false);
+  assert.equal(createSceneLibrary(null).save('q', createDefaultScene()).ok, false);
+  assert.deepEqual(createSceneLibrary(null).list(), []);
+  assert.equal(cleanName('x'.repeat(200)).length, LIMITS.maxNameLength);
+});
+
+test('scene library: corrupt storage and invalid scenes are handled', () => {
+  const st = fakeStorage();
+  st.setItem(LIBRARY_KEY, '{not json');
+  const lib = createSceneLibrary(st);
+  assert.deepEqual(lib.list(), []);
+  assert.equal(lib.save('ok', createDefaultScene()).ok, true); // overwrites the corrupt blob
+  st.setItem(LIBRARY_KEY, JSON.stringify({ v: 1, items: [{ id: 'z', name: 'bad', savedAt: 1, json: '{"version":1}' }, { id: 5 }] }));
+  assert.equal(lib.list().length, 1);
+  const r = lib.load('z');
+  assert.equal(r.ok, false);
+  assert.match(r.error, /bad/);
+  assert.equal(lib.load('nope').ok, false);
+});
+
+test('compare: identical scenes differ by zero, booster adds its gain', () => {
+  const base = createDefaultScene();
+  const a = snapshotScene(base);
+  const same = compareSnapshots(a, snapshotScene(base));
+  assert.ok(same.every((r) => r.diff === null || Math.abs(r.diff) < 1e-9));
+  const boosted = structuredClone(base);
+  boosted.links[0].chain.unshift(createChainItem('booster', { gainDb: 12, nfDb: 2 }));
+  const b = snapshotScene(boosted);
+  const rows = Object.fromEntries(compareSnapshots(a, b).map((r) => [r.key, r]));
+  assert.ok(rows.marginDb.diff > 0, 'booster before the cable improves the margin');
+  assert.equal(rows.marginDb.better, 'b');
+  assert.ok(Math.abs(rows.rxPowerDbm.diff) < 1e-9, 'antenna level unchanged');
+  assert.ok(rows.waterfallTotalDb.diff > 5, 'end-to-end total gains');
+  assert.match(rows.marginDb.fdiff, /^\+\d+\.\d dB$/);
+});
+
+test('compare: distance row neutral and snapshot is a deep copy', () => {
+  const sc = createDefaultScene();
+  const a = snapshotScene(sc);
+  sc.links[0].tx.pos.x += 3;
+  const b = snapshotScene(sc);
+  assert.notEqual(a.scene.links[0].tx.pos.x, sc.links[0].tx.pos.x);
+  const rows = Object.fromEntries(compareSnapshots(a, b).map((r) => [r.key, r]));
+  assert.equal(rows.distanceM.better, null);
+  assert.ok(rows.distanceM.diff !== 0);
+});
+
+test('welcome: remembered via storage, tolerant of storage errors', () => {
+  const st = fakeStorage();
+  assert.equal(shouldShowWelcome(st), true);
+  assert.equal(markWelcomeSeen(st), true);
+  assert.equal(st.getItem(WELCOME_KEY), '1');
+  assert.equal(shouldShowWelcome(st), false);
+  resetWelcome(st);
+  assert.equal(shouldShowWelcome(st), true);
+  const broken = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); } };
+  assert.equal(shouldShowWelcome(broken), true);
+  assert.equal(markWelcomeSeen(broken), false);
+  assert.ok(WELCOME_STEPS.length >= 4 && WELCOME_STEPS.length <= 5);
+});
+
+test('glossary: finder is whole-word and case-sensitive', () => {
+  assert.deepEqual(termsIn('Rx power in dBm and dB per 100 m'), ['Rx', 'dBm', 'dB']);
+  assert.deepEqual(termsIn('dBmx dBmW per perfect'), []);
+  assert.deepEqual(termsIn('TX -> RX'), ['TX', 'RX']);
+  assert.equal(lookup('TX'), GLOSSARY.Tx);
+  assert.deepEqual(termsIn('Es/N0 and 16-QAM, 3 dB'), ['Es/N0', 'QAM', 'dB']);
+  assert.deepEqual(termsIn('RG58 cable via N-type'), ['RG58', 'N-type']);
+  assert.deepEqual(findTerms('IM3 and IM5').map((t) => t.term), ['IM3', 'IM5']);
+});
+
+test('glossary: every entry is complete and the required terms exist', () => {
+  for (const [k, g] of Object.entries(GLOSSARY)) assert.ok(g.full && g.meaning && g.meaning.length > 20, k);
+  for (const t of ['RF', 'IEM', 'Tx', 'Rx', 'dBm', 'dBW', 'dB', 'dBi', 'EIRP', 'FSPL', 'SNR', 'CNR', 'NF', 'IIP3', 'IM3', 'P1dB', 'PIM', 'MPX', 'FM', 'QAM', 'BER', 'EVM', 'MER', 'FEC', 'PER', 'VSWR', 'LNA', 'UHF', 'PLL', 'AGC', 'ERP', 'TV', 'SMA', 'BNC', 'N-type', 'LOS', 'Fresnel', 'diversity', 'squelch']) {
+    assert.ok(GLOSSARY[t], t);
+  }
+  for (const [alias, key] of Object.entries(ALIASES)) assert.ok(GLOSSARY[key], alias);
+});
+
+test('glossary: static HTML acronyms are all in the glossary; wrapped terms are used somewhere', () => {
+  const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const visible = html.replace(/<script[\s\S]*?<\/script>/g, '').replace(/<[^>]+>/g, ' ');
+  const allow = new Set(['JSON', 'OK', 'PASS', 'FAIL', 'HTML']); // file types and plain status words
+  const acr = [...new Set(visible.match(/\b[A-Z0-9]{2,}\b/g) || [])].filter((w) => !allow.has(w) && /[A-Z]/.test(w));
+  for (const w of acr) assert.ok(lookup(w), `index.html acronym ${w} missing from the glossary`);
+  // vice versa: each auto-wrapped glossary term appears in the static html or in the UI source text
+  const files = ['js/ui/inspector.js', 'js/ui/help.js', 'js/view/waterfall.js', 'js/view/meters.js', 'js/view/imd.js', 'js/view/digital.js', 'js/view/mpx.js', 'js/view/telemetry.js', 'js/view/diversity.js', 'js/view/coverage.js', 'js/view/timeline.js', 'js/reportData.js', 'js/model/rf.js', 'js/examples.js', 'js/model/library.js', 'js/model/digital-params.js', 'js/model/imd-params.js', 'js/model/rx-params.js']
+    .map((f) => { try { return fs.readFileSync(new URL('../' + f, import.meta.url), 'utf8'); } catch { return ''; } }).join('\n') + html;
+  const reserved = new Set(['EIRP', 'ERP', 'CIR', 'PLL', 'VHF']); // defined for text users may type or future labels
+  const unused = Object.keys(GLOSSARY).filter((k) => GLOSSARY[k].wrap !== false && !reserved.has(k) && !files.includes(k));
+  assert.deepEqual(unused, [], 'glossary terms that appear nowhere in the UI sources');
+});
+
+test('help: topics reference only glossary terms; tooltip ids exist in index.html', () => {
+  for (const [id, t] of Object.entries(HELP_TOPICS)) {
+    for (const term of t.terms || []) assert.ok(lookup(term), `${id}: ${term}`);
+    assert.ok(t.text.length > 40 && t.text.length < 400, id);
+  }
+  assert.ok(legend(['dB', 'Tx']).includes('decibel'));
+  const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  for (const id of Object.keys(TOOLTIPS)) assert.ok(html.includes(`id="${id}"`), `tooltip id ${id} not in index.html`);
+});
+
+import { applyToScene, describeResult, parseChannels, clampCounts, runCoordination, LIMITS as COORD_LIMITS } from '../js/ui/coordination.js';
+import { createImdTransmitter } from '../js/model/scene.js';
+
+test('coordination panel: parse channels, clamp counts', () => {
+  assert.deepEqual(parseChannels('24, 27 24;abc 200 31'), [24, 27, 31]);
+  assert.deepEqual(clampCounts(-3, 'x'), { mics: 0, iems: 0 });
+  const c = clampCounts(16, 16);
+  assert.ok(c.mics + c.iems <= COORD_LIMITS.maxTotal);
+});
+
+test('coordination panel: generate for the UK, describe rows, apply to the scene', () => {
+  const { result } = runCoordination({ regionId: 'uk', rangeId: 'uk-uhf-470-694', mics: 4, iems: 1, tvChannels: '', seed: 1 });
+  assert.equal(result.ok, true);
+  const rows = describeResult(result);
+  assert.equal(rows.length, 5);
+  assert.ok(rows.every((r) => r.nearestSpacingKHz >= 300 && /MHz$/.test(r.freqText) && /mW/.test(r.limitText)));
+  const scene = createDefaultScene();
+  scene.imd.transmitters = [createImdTransmitter({ name: 'Extra mic' })];
+  const draft = structuredClone(scene);
+  const res = applyToScene(draft, result);
+  const mic1 = result.frequencies.find((f) => f.id === 'mic1').freqMHz;
+  assert.equal(draft.links[0].freqMHz, mic1);
+  assert.equal(draft.imd.transmitters[0].freqMHz, result.frequencies.find((f) => f.id === 'mic2').freqMHz);
+  assert.equal(res.applied.length, 2);
+  assert.equal(res.unassigned.length, 3); // two more mics and the IEM have no transmitter in this scene
+});
+
+test('coordination panel: blocked TV channels are avoided and impossible requests report a failure', () => {
+  const { result } = runCoordination({ regionId: 'uk', rangeId: 'uk-863-865', mics: 16, iems: 8, tvChannels: '', seed: 1 });
+  assert.equal(result.ok, false);
+  assert.ok(result.failure && result.failure.message);
+  const ok = runCoordination({ regionId: 'uk', rangeId: 'uk-uhf-470-694', mics: 3, iems: 0, tvChannels: '24', seed: 1 }).result;
+  assert.ok(ok.frequencies.every((f) => !(f.freqMHz >= 494 && f.freqMHz <= 502)));
+});
+
+import { validateScene, migrateScene, DEFAULT_EXTERNAL_NOISE } from '../js/model/scene.js';
+import { noiseOptions, noiseValue, noiseFromChoice } from '../js/ui/noise.js';
+import { solveLink } from '../js/model/rf.js';
+import { EXAMPLES, buildExample } from '../js/examples.js';
+
+test('external noise: default urban, validation, old scenes stay Off', () => {
+  const sc = createDefaultScene();
+  assert.equal(DEFAULT_EXTERNAL_NOISE, 'urban');
+  assert.equal(sc.environment.externalNoise, 'urban');
+  for (const ok of [undefined, 'quiet', 'outdoor', 'urban', 'noisy-venue', 0, 7.5]) {
+    const s = structuredClone(sc); s.environment.externalNoise = ok;
+    assert.equal(validateScene(s).ok, true, String(ok));
+  }
+  for (const bad of ['loud', -1, NaN, null, {}, '__proto__']) {
+    const s = structuredClone(sc); s.environment.externalNoise = bad;
+    assert.equal(validateScene(s).ok, false, String(bad));
+  }
+  const old = structuredClone(sc); delete old.environment.externalNoise;
+  assert.equal(migrateScene(old).environment.externalNoise, undefined);
+  assert.equal(solveLink(migrateScene(old), old.links[0]).cascade.externalNoiseNfDb, 0);
+  assert.ok(solveLink(sc, sc.links[0]).cascade.externalNoiseNfDb > 0);
+});
+
+test('external noise selector: options carry the frequency-scaled figure', () => {
+  const o = Object.fromEntries(noiseOptions('urban', 600));
+  assert.match(o.off, /Off \(0 dB\)/);
+  assert.equal(o.urban, 'Urban (+5 dB @600 MHz)');
+  assert.equal(Object.fromEntries(noiseOptions('urban', 1200)).urban, 'Urban (+5 dB @600 MHz; +0 dB at 1200 MHz)');
+  assert.match(Object.fromEntries(noiseOptions('urban', 470)).urban, /; \+7.9 dB at 470 MHz/);
+  assert.ok(noiseOptions(4, 600).some(([v]) => v === 'custom'));
+  assert.equal(noiseValue(undefined), 'off'); assert.equal(noiseValue(0), 'off'); assert.equal(noiseValue('quiet'), 'quiet'); assert.equal(noiseValue(2), 'custom');
+  assert.equal(noiseFromChoice('off'), 0); assert.equal(noiseFromChoice('urban'), 'urban'); assert.equal(noiseFromChoice('custom'), undefined);
+});
+
+test('examples quote margins without external noise (set explicitly to Off)', () => {
+  for (const ex of EXAMPLES) {
+    const b = buildExample(ex.id);
+    const v = b.scene.environment.externalNoise;
+    assert.ok(v === 0 || v !== undefined, ex.id); // explicit, never silently the new default unless an example chose it
+    assert.notEqual(v, undefined, ex.id);
+  }
+});

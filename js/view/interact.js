@@ -5,7 +5,8 @@
 // opts: {
 //   hitTest(sx, sy, isTouch) -> handle | null    handle = {kind, itemId, wx, wy, ...} (wx/wy world pos for offset-free drags)
 //   dragStart(handle), dragMove(handle, pointerWorld, targetWorld, state), dragEnd(handle),
-//   select(id|null), hover(handle|null), onView() after zoom/pan, fit(), nudge(dx, dy, big), cycle(dir), escape()
+//   select(id|null), hover(handle|null), onView() after zoom/pan, fit(), nudge(dx, dy, big), rotate(dAz, dEl, big), cycle(dir), escape()
+//   Keyboard: arrows move the selection (Shift = 10x), Alt+arrows or R / Shift+R aim the selected antenna, [ ] cycle, + - zoom, 0 fit.
 // }
 import { clamp } from './util.js';
 
@@ -93,11 +94,13 @@ export function attachInteraction(canvas, vp, opts) {
 
   function onKey(e) {
     if (e.target !== canvas || e.ctrlKey || e.metaKey) return;
-    const big = e.shiftKey;
+    const big = e.shiftKey && !(e.key === 'r' || e.key === 'R');
     const arrows = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
     let handled = true;
     if (e.key === ' ') { spaceDown = true; setCursor('grab'); }
+    else if (arrows[e.key] && e.altKey) opts.rotate?.(arrows[e.key][0], arrows[e.key][1], big); // Alt+arrows: aim the selected antenna (left/right = azimuth, up/down = elevation)
     else if (arrows[e.key]) opts.nudge?.(arrows[e.key][0], arrows[e.key][1], big);
+    else if (e.key === 'r' || e.key === 'R') opts.rotate?.(e.shiftKey ? -1 : 1, 0, false);
     else if (e.key === '+' || e.key === '=') { vp.zoomAt(canvas.clientWidth / 2, canvas.clientHeight / 2, 1.2); opts.onView?.(); }
     else if (e.key === '-' || e.key === '_') { vp.zoomAt(canvas.clientWidth / 2, canvas.clientHeight / 2, 1 / 1.2); opts.onView?.(); }
     else if (e.key === '0') opts.fit?.();

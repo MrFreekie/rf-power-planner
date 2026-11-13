@@ -18,6 +18,7 @@ import { effectiveAntennaB } from '../model/diversity.js';
 import { isWalking } from '../walk.js';
 import { floorHeightAt, platformBoxes } from '../model/floor.js';
 import { registerSnapshot, makeSnapshotCanvas } from './snapshots.js';
+import { announce } from './a11y.js';
 
 export function createSideView(canvas, store) {
   const vp = createViewport({ pxPerM: 40, origin: { x: 60, y: 200 } });
@@ -193,8 +194,8 @@ export function createSideView(canvas, store) {
     const brg = ((Math.atan2(iem ? u.x : -u.x, iem ? u.y : -u.y) / DEG) + 360) % 360;
     if (w >= 520) haloText(ctx, th, `${link.name}: Tx → Rx bearing ${brg.toFixed(0)}°, horizontal ${fmtLen(D, scene.units)}`, w - 8, h - 10, { align: 'right', color: th.inkSoft });
 
-    const desc = `Side view of ${link.name}. Tx height ${link.tx.pos.z.toFixed(2)} m, Rx height ${link.rx.pos.z.toFixed(2)} m, horizontal distance ${D.toFixed(2)} m. Up and down arrow keys change the height of the selected end.`;
-    if (desc !== lastDesc) { lastDesc = desc; canvas.setAttribute('aria-description', desc); }
+    const desc = `Side view of ${link.name}. Tx height ${link.tx.pos.z.toFixed(2)} m, Rx height ${link.rx.pos.z.toFixed(2)} m, horizontal distance ${D.toFixed(2)} m. Up and down arrow keys change the height of the selected end, Alt plus up or down tilts its antenna.`;
+    if (desc !== lastDesc) { lastDesc = desc; canvas.setAttribute('aria-description', desc); canvas.setAttribute('role', 'application'); canvas.setAttribute('aria-roledescription', 'interactive side diagram'); }
   }
 
   function midPoint(pts) {
@@ -259,8 +260,20 @@ export function createSideView(canvas, store) {
   }
   function nudge(dx, dy, big) {
     const id = store.getSelection(), f = findItem(store.getScene(), id);
-    if (!f || (f.type !== 'tx' && f.type !== 'rx') || !dy) return;
+    if (!f) { cycle(1); return; }
+    if ((f.type !== 'tx' && f.type !== 'rx') || !dy) return;
     store.update((s) => { const g = findItem(s, id); g.item.pos.z = round2(clamp(g.item.pos.z - dy * (big ? 0.5 : 0.05), 0, 5)); }, { coalesce: `side-nudge-${id}` });
+    const g = findItem(store.getScene(), id);
+    announce(`${g.item.name} height ${g.item.pos.z.toFixed(2)} m`, { key: 'move', delay: 350 });
+  }
+  function rotate(dAz, dEl, big) {
+    const id = store.getSelection(), f = findItem(store.getScene(), id);
+    if (!f) { cycle(1); return; }
+    if ((f.type !== 'tx' && f.type !== 'rx') || !dEl) return;
+    const d = -dEl; // arrow up = tilt up
+    store.update((sc) => { const g = findItem(sc, id); if (g) { const o = g.item.antenna.orientation || (g.item.antenna.orientation = { az: 0, el: 0 }); o.el = Math.round(clamp((o.el || 0) + d * (big ? 15 : 5), -90, 90)); } }, { coalesce: `side-rot-${id}` });
+    const g = findItem(store.getScene(), id);
+    announce(`${g.item.name} elevation ${g.item.antenna.orientation.el} degrees`, { key: 'rot', delay: 350 });
   }
   function cycle(dir) {
     const ids = selectableIds(store.getScene()); if (!ids.length) return;
@@ -272,7 +285,7 @@ export function createSideView(canvas, store) {
     select: (id) => store.select(id),
     hover: (hd) => { hoverKey = hd ? hd.kind + ':' + hd.itemId : null; host.invalidate(); },
     onView: () => { userView = true; host.invalidate(); },
-    fit, nudge, cycle, escape: () => store.select(null),
+    fit, nudge, rotate, cycle, escape: () => store.select(null),
   });
   const unsubSq = squelch.subscribe(() => host.invalidate());
   const unsubRx = rxState.subscribe(() => host.invalidate());

@@ -8,7 +8,7 @@ const near = (a, b, tol, m = '') => assert.ok(Math.abs(a - b) <= tol, `${m} got 
 const OMNI = { type: 'omni', gainDbi: 0, orientation: { az: 0, el: 0 } };
 
 function micScene(chain, rxExtra = {}) {
-  const scene = createDefaultScene();
+  const scene = createDefaultScene(); scene.environment.externalNoise = undefined; // these tests check the model with no external noise (the new-scene default is urban)
   scene.environment = { ...scene.environment, model: 'free-space', fadeMarginDb: 0, bodyLossDb: 0 };
   scene.reflectors = [];
   const link = createDefaultLink('mic');
@@ -82,8 +82,8 @@ test('booster at the antenna before 40 dB of cable beats the same booster after 
   assert.ok(rb.marginDb < rb.inputPowerDbm - back.link.rx.sensitivityDbm);
 });
 
-test('iem link: cascade is information only, marginDb stays the bodypack-input margin', () => {
-  const scene = createDefaultScene();
+test('iem link: the bodypack is the receiver; cascade, noise floor and SNR margin work like a mic link', () => {
+  const scene = createDefaultScene(); scene.environment.externalNoise = undefined;
   scene.environment = { ...scene.environment, model: 'free-space' };
   scene.reflectors = [];
   const link = createDefaultLink('iem');
@@ -91,12 +91,69 @@ test('iem link: cascade is information only, marginDb stays the bodypack-input m
   delete link.branches;
   scene.links = [link];
   const r = solveLink(scene, link);
-  near(r.marginDb, r.inputPowerDbm - link.rx.sensitivityDbm, 1e-9);
-  assert.equal(r.cascade.stages.length, 2); // chain only, no receiver stage
-  assert.equal(r.cascade.marginAtAntennaDb, null);
-  assert.ok(!r.waterfall.some((w) => w.note));
-  const c = cascadeNoise(link, link.chain, 600, true);
+  // Tx-side noise at the bodypack is ~60 dB below the bodypack floor here: margin = input - sensitivity to ~1e-5 dB (tolerance 1e-4)
+  near(r.marginDb, r.inputPowerDbm - link.rx.sensitivityDbm, 1e-4);
+  near(r.cascade.marginAtAntennaDb, r.marginDb, 1e-12);
+  assert.equal(r.cascade.side, 'rx');
+  assert.equal(r.cascade.stages.length, 1); // bodypack only (no rx.chain)
+  assert.equal(r.cascade.stages[0].label, 'Receiver');
+  near(r.cascade.systemNfDb, r.cascade.receiverNfDb, 1e-12);
+  assert.ok(r.waterfall.some((w) => w.note && /System NF/.test(w.label)));
+  // Tx-side chain by hand (Friis): cable 6 dB then booster 10 dB NF 3 dB
+  near(r.cascade.txSide.systemNfDb, 10 * Math.log10(lin(6) + (lin(3) - 1) / lin(-6)), 1e-9);
+  near(r.cascade.txSide.chainGainDb, 4, 1e-9);
+  const c = cascadeNoise(link, link.chain, 600, true); // legacy Tx-side-only call is unchanged
   near(c.systemNfDb, 10 * Math.log10(lin(6) + (lin(3) - 1) / lin(-6)), 1e-9);
+});
+
+test('iem link: receiver NF, rx.chain LNA and external noise move the margin; Tx booster noise appears only when close and noisy', () => {
+  const mk = (extra = {}, chain = []) => {
+    const scene = createDefaultScene(); scene.environment.externalNoise = undefined;
+    scene.environment = { ...scene.environment, model: 'free-space', fadeMarginDb: 0, bodyLossDb: 0 };
+    scene.reflectors = [];
+    const link = createDefaultLink('iem'); delete link.branches;
+    link.freqMHz = 600;
+    link.tx = { ...link.tx, powerDbm: 10, pos: { x: 0, y: 0, z: 1.5 }, antenna: { ...OMNI } };
+    link.rx = { ...link.rx, pos: { x: 0, y: 10, z: 1.5 }, antenna: { ...OMNI }, bodyLossDb: 0, sensitivityDbm: -85, ...extra };
+    link.chain = chain;
+    scene.links = [link];
+    return { scene, link };
+  };
+  const base = mk(); const rb = solveLink(base.scene, base.link);
+  // raising the bodypack NF by 4 dB lowers the margin by 4 dB (preset path: requiredSnr fixed, floor +4 dB)
+  const nf = mk({ noiseFigureDb: base.link.rx.noiseFigureDb ?? 10 }); // same value: unchanged
+  near(solveLink(nf.scene, nf.link).marginDb, rb.marginDb, 1e-4);
+  const hi = mk({ noiseFigureDb: 14 }); const rh = solveLink(hi.scene, hi.link);
+  near(rb.marginDb - rh.marginDb, 4, 1e-3);
+  // external noise (noisy-venue = 12 dB at 600 MHz): floor = kTB + 10log(F_sys + F_ext - 1), like a mic receiver (tolerance 1e-4)
+  const ext = mk(); ext.scene.environment.externalNoise = 'noisy-venue';
+  const re = solveLink(ext.scene, ext.link);
+  const kTB = -174 + 10 * Math.log10(200000);
+  near(re.cascade.rxFloorDbm, kTB + 10 * Math.log10(lin(10) + lin(12) - 1), 1e-9);
+  near(rb.marginDb - re.marginDb, re.cascade.rxFloorDbm - rb.cascade.rxFloorDbm, 1e-3);
+  // optional rx.chain: 3 dB cable then bodypack adds 3 dB NF and 3 dB loss; a 2 dB NF / 15 dB LNA ahead of it recovers the margin
+  const cab = mk({ chain: [cableDb(3)] }); const rc = solveLink(cab.scene, cab.link);
+  near(rc.cascade.systemNfDb, rb.cascade.systemNfDb + 3, 1e-9);
+  near(rb.marginDb - rc.marginDb, 3, 1e-3);
+  assert.equal(rc.cascade.stages.length, 2);
+  near(rb.inputPowerDbm - rc.inputPowerDbm, 3, 1e-9);
+  const lna = mk({ chain: [{ kind: 'booster', gainDb: 15, nfDb: 2 }, cableDb(3)] }); const rl = solveLink(lna.scene, lna.link);
+  const F = lin(2) + (lin(3) - 1) / lin(15) + (lin(10) - 1) / (lin(15) * lin(-3));
+  near(rl.cascade.systemNfDb, 10 * Math.log10(F), 1e-9);
+  assert.ok(rl.marginDb > rc.marginDb + 9);
+  // Tx-side booster: 40 dB gain, NF 30 dB, bodypack 0.3 m away -> its radiated noise exceeds the bodypack floor and costs margin
+  const near_ = mk({}, [{ kind: 'booster', gainDb: 40, nfDb: 30 }]); near_.link.rx.pos = { x: 0, y: 0.3, z: 1.5 };
+  const rn = solveLink(near_.scene, near_.link);
+  const pathGain = rn.rxPowerDbm - (10 + 40);
+  const noiseAtRx = kTB + 30 + 40 + pathGain;
+  near(rn.cascade.txSide.noiseAtRxDbm, noiseAtRx, 1e-9);
+  near(rn.cascade.noiseFloorDbm, 10 * Math.log10(Math.pow(10, rn.cascade.rxFloorDbm / 10) + Math.pow(10, noiseAtRx / 10)), 1e-9);
+  assert.ok(rn.cascade.noiseFloorDbm - rn.cascade.rxFloorDbm > 10);
+  // same booster 10 m away: FSPL(10 m) - FSPL(0.3 m) = 20log10(10/0.3) = 30.5 dB lower noise at the bodypack, so the floor rise is far smaller
+  const far_ = mk({}, [{ kind: 'booster', gainDb: 40, nfDb: 30 }]); const rf2 = solveLink(far_.scene, far_.link);
+  const riseFar = rf2.cascade.noiseFloorDbm - rf2.cascade.rxFloorDbm;
+  near(rf2.cascade.txSide.noiseAtRxDbm, rn.cascade.txSide.noiseAtRxDbm - 20 * Math.log10(10 / 0.3), 1e-6);
+  assert.ok(riseFar < 13 && riseFar > 11, `riseFar ${riseFar}`); // -99 dBm noise vs -111 dBm floor: 10log(1+10^1.2) = 12.2 dB
 });
 
 test('wall thickness: reference thickness reported, scaling documented by test', () => {
@@ -150,7 +207,7 @@ test('requiredSnrDb: override, then the receiver preset (so raising NF worsens s
   assert.equal(rd.cascade.requiredSource, 'override');
   assert.equal(rd.requiredSnrDb, 30);
   // the default mic scene (sensitivity -95 differs from the preset's -90) keeps its old margin exactly
-  const def = createDefaultScene(); def.environment = { ...def.environment, model: 'free-space' }; def.reflectors = [];
+  const def = createDefaultScene(); def.environment.externalNoise = undefined; def.environment = { ...def.environment, model: 'free-space' }; def.reflectors = [];
   const ml = def.links.find((l) => l.kind === 'mic') || createDefaultLink('mic');
   const rm = solveLink(def, ml);
   near(rm.marginDb, rm.inputPowerDbm - ml.rx.sensitivityDbm, 1e-9);
@@ -176,9 +233,11 @@ test('external noise (off by default) raises the antenna noise floor and falls w
   near(solveLink(hi.scene, hi.link).cascade.externalNoiseNfDb, 12 - 27.7 * Math.log10(2), 1e-9);
   const huge = micScene([]); huge.scene.environment.externalNoise = 3; huge.link.freqMHz = 6000;
   assert.equal(solveLink(huge.scene, huge.link).cascade.externalNoiseNfDb, 0);
-  // IEM: informational only, margin unaffected
+  // IEM: external noise now applies at the bodypack antenna (margin falls by the floor rise, tolerance 1e-3)
   const iem = createDefaultScene(); iem.environment = { ...iem.environment, externalNoise: 'noisy-venue', model: 'free-space' }; iem.reflectors = [];
   const il = createDefaultLink('iem'); delete il.branches; iem.links = [il];
   const ri = solveLink(iem, il);
-  near(ri.marginDb, ri.inputPowerDbm - il.rx.sensitivityDbm, 1e-9);
+  assert.equal(ri.cascade.externalNoiseNfDb, 12);
+  near(ri.marginDb, ri.inputPowerDbm - il.rx.sensitivityDbm - (ri.cascade.noiseFloorDbm - (kTB + ri.cascade.systemNfDb)), 1e-3);
+  assert.ok(ri.cascade.noiseFloorDbm > kTB + ri.cascade.systemNfDb + 2);
 });

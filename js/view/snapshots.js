@@ -1,10 +1,13 @@
 // Offscreen snapshots for the report: each view registers a function that renders it to a new canvas of a fixed size,
 // synchronously and independent of the live pane size or visibility (no animation frame needed).
+import { withLightTheme } from './theme.js';
 const reg = new Map();
 
+/** Snapshots always render with the light palette (print and PDF must not depend on the on-screen theme). */
 export function registerSnapshot(kind, fn) {
-  reg.set(kind, fn);
-  return () => { if (reg.get(kind) === fn) reg.delete(kind); };
+  const wrapped = (...args) => withLightTheme(() => fn(...args));
+  reg.set(kind, wrapped);
+  return () => { if (reg.get(kind) === wrapped) reg.delete(kind); };
 }
 export const getSnapshot = (kind) => reg.get(kind) || null;
 

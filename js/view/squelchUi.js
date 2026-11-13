@@ -42,5 +42,5 @@ export function drawOverloadHalo(ctx, th, x, y, level, r = 24) {
   ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
   ctx.strokeStyle = level === 'overload' ? th.fail : th.marginal; ctx.lineWidth = 2; ctx.stroke();
   ctx.restore();
-  haloText(ctx, th, level === 'overload' ? 'OVERLOAD' : 'HOT', x, y - r - 4, { align: 'center', px: 11, weight: '600', color: level === 'overload' ? th.fail : '#8a6200' });
+  haloText(ctx, th, level === 'overload' ? 'OVERLOAD' : 'HOT', x, y - r - 4, { align: 'center', px: 11, weight: '600', color: level === 'overload' ? th.fail : th.warnText });
 }

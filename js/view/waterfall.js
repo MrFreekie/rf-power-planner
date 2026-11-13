@@ -222,7 +222,7 @@ export function mountWaterfall({ container, store }) {
       ctx.beginPath(); ctx.moveTo(ox, TOP - 4); ctx.lineTo(ox, plotBottom + 4); ctx.stroke(); ctx.setLineDash([]);
       const ot = `P1dB ${formatPower(ovl.p1dBDbm, unit)}${ovl.level === 'ok' ? '' : ovl.level === 'hot' ? ' (HOT)' : ' (OVERLOAD)'}`;
       setFont(ctx, th, 12, '600'); const ow = ctx.measureText(ot).width;
-      ctx.fillStyle = ovl.level === 'ok' ? th.inkSoft : ovl.level === 'hot' ? '#8a6200' : th.fail; ctx.textAlign = 'left';
+      ctx.fillStyle = ovl.level === 'ok' ? th.inkSoft : ovl.level === 'hot' ? th.warnText : th.fail; ctx.textAlign = 'left';
       ctx.fillText(ot, Math.min(Math.max(ox - ow / 2, x0), x1 - ow), plotBottom + 54);
     }
     if (sq) {
@@ -244,8 +244,8 @@ export function mountWaterfall({ container, store }) {
     if (!rows.length) return null;
     const h = TOP + rows.length * ROW_H + BOTTOM;
     const { c, ctx } = makeSnapshotCanvas(w, h);
-    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h);
-    draw(ctx, w, h, readTheme(canvas));
+    const th = readTheme(canvas); ctx.fillStyle = th.paper; ctx.fillRect(0, 0, w, h);
+    draw(ctx, w, h, th);
     return c;
   });
 

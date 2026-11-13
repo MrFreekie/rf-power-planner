@@ -18,17 +18,29 @@ import { downloadScene, loadSceneFromFile } from './io.js';
 import { squelch, history } from './squelchTracker.js';
 import { mpx } from './mpxTracker.js';
 import { formatPower, formatLength, formatDb } from './model/units.js';
+import { resetScene } from './actions.js';
+import { mountWelcome } from './ui/onboarding.js';
+import { mountHelp } from './ui/help.js';
+import { mountScenes } from './ui/scenes.js';
+import { mountCompare } from './ui/compare.js';
+import { mountCoordination } from './ui/coordination.js';
+import { mountGlossary } from './ui/glossary.js';
 
 const $ = (id) => document.getElementById(id);
 const STORAGE_KEY = 'rf-power-planner.scene.v1';
 
 const history_ = window.history; // the sample history module below is also called `history`
 let hadStoredScene = false;
+let staleCleared = false;
 function loadInitialScene() {
   try {
     const text = localStorage.getItem(STORAGE_KEY);
-    if (text) { hadStoredScene = true; return deserialize(text); }
-  } catch { /* storage unavailable or stale: fall back to default */ }
+    if (text) { const sc = deserialize(text); hadStoredScene = true; return sc; }
+  } catch {
+    // Stale or corrupt saved state (old schema, hand-edited, truncated): drop it so it cannot fail again, start from the default.
+    try { localStorage.removeItem(STORAGE_KEY); } catch { /* storage unavailable */ }
+    staleCleared = true;
+  }
   return createDefaultScene();
 }
 
@@ -215,6 +227,30 @@ $('batt-scale').addEventListener('change', (e) => {
   if (Number.isFinite(v) && v >= 1) setPath(store, 'links.0.telemetry.battery.timeScale', v);
   else e.target.value = activeLink().telemetry.battery.timeScale;
 });
+// Reset to the default scene (asks first; undoable) and let the autosave overwrite the stored copy.
+$('btn-reset').addEventListener('click', () => {
+  let ok = false;
+  try { ok = window.confirm('Reset to the default scene? Your current scene is replaced. You can press Undo straight afterwards, or use Save first to keep a copy.'); } catch { ok = false; }
+  if (!ok) return;
+  stopWalk();
+  resetScene(store);
+  history.clear();
+  loadError = '';
+  $('example-note').hidden = true;
+  renderWalk();
+  showStatus('Reset to the default scene. Undo brings the previous one back.', 5000);
+});
+// Replace the scene with one from the saved-scenes list (undoable).
+function loadSavedScene(scene, name) {
+  stopWalk();
+  store.setScene(scene, { resetHistory: false });
+  store.select(null);
+  history.clear();
+  loadError = '';
+  $('example-note').hidden = true;
+  renderWalk();
+  showStatus(`Loaded "${name}". Undo brings the previous scene back.`, 5000);
+}
 $('btn-undo').addEventListener('click', () => store.undo());
 $('btn-redo').addEventListener('click', () => store.redo());
 
@@ -330,6 +366,19 @@ for (const [path, name, id] of [
     $(id).hidden = true;
   }
 }
+
+// ---- onboarding, saved scenes, compare, help, glossary (each optional: a failure must not break the planner) ----
+for (const [name, fn] of [
+  ['welcome', () => mountWelcome({ container: $('welcome'), openButton: $('btn-help') })],
+  ['scenes', () => mountScenes({ container: $('scenes'), getScene: () => store.getScene(), onLoad: loadSavedScene })],
+  ['compare', () => mountCompare({ container: $('compare'), store })],
+  ['coordination', () => mountCoordination({ container: $('coordination'), store })],
+  ['help', () => mountHelp(document)],
+  ['glossary', () => mountGlossary(document.body)],
+]) {
+  try { fn(); } catch (err) { console.error(name, err); }
+}
+if (staleCleared) showStatus('Your previously saved scene could not be read, so it was discarded and the default scene is shown.', 8000);
 
 handleHash();
 window.addEventListener('hashchange', handleHash);

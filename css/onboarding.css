@@ -1,0 +1,74 @@
+/* Welcome panel, help popovers, saved scenes, A/B compare and the glossary popover. Uses the shared tokens with fallbacks. */
+
+/* ---- welcome ---- */
+#welcome { padding: 10px 14px 12px; border-bottom: 1px solid var(--ink, #1d2733); background: var(--paper-2, #f1eee4); }
+#welcome[hidden] { display: none; }
+#welcome:focus-visible { outline: 2px solid var(--focus, var(--ink, #1d2733)); outline-offset: -2px; }
+.ob-welcome-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
+.ob-welcome-intro { margin: 4px 0 6px; max-width: 70ch; }
+.ob-steps { margin: 0; padding-left: 1.4em; max-width: 80ch; }
+.ob-steps li { margin: 3px 0; }
+
+/* ---- "What's this?" ---- */
+.ob-help { padding: 2px 14px 0; font-size: 12px; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.ob-help[hidden] { display: none; }
+.ob-help-pane { padding: 0 12px; }
+.ob-help-btn {
+  min-height: 0; padding: 0 2px; border: 0; background: none; color: var(--blue-text, #2f5a8f);
+  text-decoration: underline; text-underline-offset: 2px; font-size: 12px; cursor: pointer;
+}
+.ob-help-btn:hover:not(:disabled) { background: none; text-decoration-thickness: 2px; }
+.ob-help-text { margin: 0 0 6px; padding: 6px 8px; border: 1px solid var(--line, #cfc8b6); border-left: 3px solid var(--blue, #4a78b5); background: var(--paper-2, #f1eee4); max-width: 60ch; }
+.ob-help-text[hidden] { display: none; }
+.ob-help-terms { display: block; margin-top: 4px; color: var(--ink-soft, #5b6673); }
+
+/* ---- saved scenes and compare ---- */
+.ob-details { border-bottom: 1px solid var(--ink, #1d2733); padding: 6px 14px; min-width: 0; }
+.ob-details > summary { cursor: pointer; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft, #5b6673); padding: 4px 0; }
+.ob-details > summary:focus-visible { outline: 2px solid var(--focus, var(--ink, #1d2733)); outline-offset: 2px; }
+.ob-body { padding: 4px 0 8px; }
+.ob-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0; }
+.ob-row input[type="text"] { flex: 1 1 10em; min-width: 0; }
+.ob-list { list-style: none; margin: 6px 0 0; padding: 0; }
+.ob-item { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 5px 0; border-bottom: 1px solid var(--grid-major, #d2cbb7); }
+.ob-item .ob-name { flex: 1 1 8em; font-weight: 600; overflow-wrap: anywhere; }
+.ob-item .ob-when { margin: 0; }
+.ob-item button, .ob-body button { min-height: 28px; padding: 1px 8px; font-size: 12px; }
+.ob-empty { color: var(--ink-soft, #5b6673); font-size: 12px; padding: 4px 0; }
+.ob-msg[data-bad="true"], [data-bad="true"] { color: var(--fail, #c0392b); }
+.ob-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 6px; }
+.ob-table th, .ob-table td { padding: 3px 4px; border-bottom: 1px solid var(--grid-major, #d2cbb7); text-align: left; vertical-align: top; }
+.ob-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.ob-table thead th { color: var(--ink-soft, #5b6673); font-weight: 600; }
+.ob-table td[data-better="b"] { color: var(--pass, #1f7a46); font-weight: 600; }
+.ob-table td[data-better="a"] { color: var(--fail, #c0392b); font-weight: 600; }
+.ob-table td[data-status="pass"] { color: var(--pass, #1f7a46); }
+.ob-table td[data-status="marginal"] { color: var(--warn-text, #8a6200); }
+.ob-table td[data-status="fail"] { color: var(--fail, #c0392b); }
+
+@media (max-width: 720px) {
+  #welcome { padding: 8px 12px 10px; }
+  .ob-details { padding: 6px 12px; }
+  .ob-body button, .ob-item button, .ob-help-btn { min-height: 36px; }
+}
+
+/* ---- glossary: acronyms and the single shared popover ---- */
+abbr.gl { text-decoration: underline dotted; text-underline-offset: 2px; text-decoration-thickness: 1px; cursor: help; }
+abbr.gl:focus-visible { outline: 2px solid var(--focus, var(--ink, #1d2733)); outline-offset: 1px; border-radius: 2px; }
+#ob-glossary-pop {
+  position: absolute; z-index: 1000; max-width: min(22rem, calc(100vw - 16px)); padding: 6px 9px;
+  font: 12px/1.4 var(--font, system-ui, sans-serif); text-transform: none; letter-spacing: normal; font-weight: 400;
+  color: var(--paper, #fbf9f3); background: var(--ink, #1d2733);
+  border: 1px solid var(--paper, #fbf9f3); border-radius: var(--radius, 3px); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+#ob-glossary-pop[hidden] { display: none; }
+#ob-glossary-pop strong { font-weight: 600; }
+@media (forced-colors: active) {
+  #ob-glossary-pop { color: CanvasText; background: Canvas; border-color: CanvasText; }
+}
+
+/* ---- frequency coordination ---- */
+.ob-field { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
+.ob-field input[type="number"] { width: 4.5em; }
+.ob-coord-sum { margin: 6px 0; font-size: 13px; font-weight: 600; }

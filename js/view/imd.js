@@ -74,12 +74,12 @@ export function mountImd({ container, store }) {
   // legend (DOM, so it wraps on phones)
   const addLeg = (swatch, text) => { const s = el('span', 'imd-leg'); s.append(swatch, document.createTextNode(text)); legend.append(s); };
   const sw = (color, shape) => { const e = el('span', `imd-sw imd-sw-${shape}`); e.style.setProperty('--c', color); return e; };
-  addLeg(sw('#1d2733', 'bar'), 'Carrier');
-  addLeg(sw(MECH_COLORS['front-end'], 'tri'), 'IM3 / IM5 front end');
-  addLeg(sw(MECH_COLORS['tx-reverse'], 'dia'), 'TX reverse');
-  addLeg(sw(MECH_COLORS.pim, 'sq'), 'PIM');
-  addLeg(sw('#c0392b', 'ring'), 'Hits a channel');
-  addLeg(sw('#5b6673', 'dash'), 'Noise floor');
+  addLeg(sw('var(--ink)', 'bar'), 'Carrier');
+  addLeg(sw('var(--mech-fe)', 'tri'), 'IM3 / IM5 front end');
+  addLeg(sw('var(--mech-tx)', 'dia'), 'TX reverse');
+  addLeg(sw('var(--mech-pim)', 'sq'), 'PIM');
+  addLeg(sw('var(--fail)', 'ring'), 'Hits a channel');
+  addLeg(sw('var(--ink-soft)', 'dash'), 'Noise floor');
 
   let state = null, link = null, scene = null;
 
@@ -112,10 +112,10 @@ export function mountImd({ container, store }) {
       ctx.stroke(); ctx.restore();
     };
     trace(s.noiseDbm, th.inkSoft, 1.4, [5, 3]);
-    trace(s.im3FrontEndDbm, MECH_COLORS['front-end'], 1.4, []);
-    trace(s.im5FrontEndDbm, MECH_COLORS['front-end'], 1.2, [3, 3]);
-    trace(s.txReverseDbm, MECH_COLORS['tx-reverse'], 1.4, []);
-    trace(s.pimDbm, MECH_COLORS.pim, 1.4, []);
+    trace(s.im3FrontEndDbm, th.mech['front-end'], 1.4, []);
+    trace(s.im5FrontEndDbm, th.mech['front-end'], 1.2, [3, 3]);
+    trace(s.txReverseDbm, th.mech['tx-reverse'], 1.4, []);
+    trace(s.pimDbm, th.mech.pim, 1.4, []);
     trace(s.carriersDbm, th.ink, 1.8, []);
     ctx.restore();
     // squelch / sensitivity line
@@ -141,7 +141,7 @@ export function mountImd({ container, store }) {
     const ringSeen = new Set();
     for (const m of s.markers) {
       if (m.kind === 'carrier' || !(m.levelDbm > lo + 1)) continue;
-      const mech = mechanismOf(m.kind), x = X(m.fMHz), y = Y(m.levelDbm), c = MECH_COLORS[mech] || th.ink;
+      const mech = mechanismOf(m.kind), x = X(m.fMHz), y = Y(m.levelDbm), c = th.mech[mech] || th.ink;
       ctx.fillStyle = c; ctx.strokeStyle = th.ink; ctx.lineWidth = 0.8;
       ctx.beginPath();
       if (mech === 'front-end') { const r = m.kind === 'im3' ? 5 : 4; ctx.moveTo(x, y - r); ctx.lineTo(x + r, y + r); ctx.lineTo(x - r, y + r); ctx.closePath(); }
@@ -193,9 +193,9 @@ export function mountImd({ container, store }) {
       ctx.stroke(); ctx.restore();
     };
     ctx.save(); ctx.beginPath(); ctx.rect(L, T, pw, h - T); ctx.clip();
-    line(sp.worstFrontEndDbm, Y1, MECH_COLORS['front-end'], 1.6, []);
-    line(sp.worstReverseDbm, Y1, MECH_COLORS['tx-reverse'], 1.6, []);
-    line(sp.worstPimDbm, Y1, MECH_COLORS.pim, 1.6, []);
+    line(sp.worstFrontEndDbm, Y1, th.mech['front-end'], 1.6, []);
+    line(sp.worstReverseDbm, Y1, th.mech['tx-reverse'], 1.6, []);
+    line(sp.worstPimDbm, Y1, th.mech.pim, 1.6, []);
     line(sp.worstProductDbm, Y1, th.ink, 2.2, []);
     const ty = Math.round(Y1(sp.thermalDbm)) + 0.5;
     ctx.save(); ctx.strokeStyle = th.inkSoft; ctx.setLineDash([5, 3]); ctx.beginPath(); ctx.moveTo(L, ty); ctx.lineTo(L + pw, ty); ctx.stroke(); ctx.restore();

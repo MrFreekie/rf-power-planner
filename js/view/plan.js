@@ -4,7 +4,7 @@
 import { createViewport } from './viewport.js';
 import {
   createCanvasHost, activeLink, findItem, selectableIds, solveCached, fmtLen, fmtDb, fmtDbm, statusColor,
-  drawGrid, drawScaleBar, haloText, setFont, readTheme, strokeHatchRect, clamp, round2, DEG,
+  drawGrid, drawScaleBar, haloText, setFont, readTheme, inkAlpha, strokeHatchRect, clamp, round2, DEG,
 } from './util.js';
 import { attachInteraction } from './interact.js';
 import { antennaGainDb, wallTransmissionInfo } from '../model/rf.js';
@@ -20,6 +20,7 @@ import { getRipples } from './ripples.js';
 import { registerSnapshot, makeSnapshotCanvas } from './snapshots.js';
 import { updatePlatform, movePoint, moveBranch, moveImdTransmitter, setAntennaBOrientation } from '../actions.js';
 import { effectiveAntennaB } from '../model/diversity.js';
+import { initA11y, announce } from './a11y.js';
 
 const LOBE_STEP = 6; // degrees
 
@@ -36,6 +37,7 @@ export function createPlanView(canvas, store) {
   let shiftDown = false;
   const onKey = (e) => { shiftDown = e.shiftKey; };
   window.addEventListener('keydown', onKey); window.addEventListener('keyup', onKey);
+  initA11y(store);
   const rip = getRipples(store);
   const host = createCanvasHost(canvas, draw, (w, h) => { if (!userView) fit(w, h); });
   const detachRip = rip.attach('plan', canvas, () => host.invalidate());
@@ -128,8 +130,9 @@ export function createPlanView(canvas, store) {
     drawScaleBar(ctx, vp, h, th);
     drawAxesLegend(ctx, th, w, h);
 
-    const desc = `${scene.links.length} link(s), ${(scene.reflectors || []).length} reflector(s). Selected: ${findItem(scene, sel)?.item.name ?? 'none'}. Arrow keys move the selection, [ and ] change it, plus and minus zoom, 0 fits the stage.`;
-    if (desc !== lastDesc) { lastDesc = desc; canvas.setAttribute('aria-description', desc); }
+    const rl = link0 ? solveCached(scene, link0) : null, selF = findItem(scene, sel);
+    const desc = `Plan view of a ${fmtLen(st.width, scene.units)} by ${fmtLen(st.depth, scene.units)} stage with ${scene.links.length} link(s) and ${(scene.reflectors || []).length} reflector(s). ${link0 && rl ? `${link0.name}: ${fmtLen(rl.distanceM, scene.units)}, ${rl.status.toUpperCase()}, margin ${fmtDb(rl.marginDb)}. ` : ''}Selected: ${selF ? `${selF.item.name}${selF.item.pos ? ` at x ${selF.item.pos.x.toFixed(2)}, y ${selF.item.pos.y.toFixed(2)}` : ''}` : 'none'}. Arrow keys move the selection, Shift for big steps, Alt+arrows or R rotate an antenna, [ and ] change the selection, plus and minus zoom, 0 fits the stage.`;
+    if (desc !== lastDesc) { lastDesc = desc; canvas.setAttribute('aria-description', desc); canvas.setAttribute('role', 'application'); canvas.setAttribute('aria-roledescription', 'interactive plan diagram'); }
   }
 
   function drawAxesLegend(ctx, th, w, h) {
@@ -201,6 +204,7 @@ export function createPlanView(canvas, store) {
     if (info.B) rayTo(vp.worldToScreen(info.B.pos), info.active === 'B');
     const d = res?.distanceM ?? Math.hypot(link.tx.pos.x - link.rx.pos.x, link.tx.pos.y - link.rx.pos.y, link.tx.pos.z - link.rx.pos.z);
     let txt = fmtLen(d, scene.units);
+    if (isActive && res) txt = `${res.status === 'pass' ? '✓ PASS' : res.status === 'marginal' ? '! MARGINAL' : '✗ FAIL'}  ${txt}`;
     if (isActive && res) txt += w < 520 ? `  ${fmtDb(res.marginDb)}` : `  ·  ${fmtDbm(res.inputPowerDbm ?? res.rxPowerDbm)}  ·  ${fmtDb(res.marginDb)} margin`;
     const mx = (t.x + r.x) / 2, my = (t.y + r.y) / 2;
     setFont(ctx, th, 12, isActive ? '600' : '');
@@ -218,7 +222,7 @@ export function createPlanView(canvas, store) {
     const R = clamp(0.9 * vp.pxPerM, 26, 80);
     const pts = lobePoints(antRef, p, R);
     ctx.beginPath(); pts.forEach((q, i) => (i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y))); ctx.closePath();
-    ctx.fillStyle = 'rgba(29,39,51,0.07)'; ctx.fill();
+    ctx.fillStyle = inkAlpha(th, 0.07); ctx.fill();
     ctx.setLineDash([4, 3]); ctx.strokeStyle = th.inkSoft; ctx.lineWidth = 0.9; ctx.stroke(); ctx.setLineDash([]);
     icons.drawStand(ctx, vp, inf.B.pos.x, inf.B.pos.y, { view: 'plan', ink: th.ink, fill: th.paper });
     icons.drawAntenna(ctx, vp, inf.B.pos.x, inf.B.pos.y, { view: 'plan', ink: th.ink, fill: th.paper, type: eff.type, angleDeg: 180 - az });
@@ -245,7 +249,7 @@ export function createPlanView(canvas, store) {
       // pattern lobe
       const pts = lobePoints(ant, p, R);
       ctx.beginPath(); pts.forEach((q, i) => (i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y))); ctx.closePath();
-      ctx.fillStyle = 'rgba(29,39,51,0.07)'; ctx.fill();
+      ctx.fillStyle = inkAlpha(th, 0.07); ctx.fill();
       ctx.strokeStyle = th.inkSoft; ctx.lineWidth = selected ? 1.4 : 0.9; ctx.stroke();
       // icons
       const ink = th.ink, fill = th.paper;
@@ -362,7 +366,7 @@ export function createPlanView(canvas, store) {
 
   function nudge(dx, dy, big) {
     const id = store.getSelection(); const f = findItem(store.getScene(), id);
-    if (!f) return;
+    if (!f) { cycle(1); return; } // nothing selected yet: the first arrow press selects the first item
     const step = big ? 0.5 : 0.05;
     store.update((s) => {
       const g = findItem(s, id), bd = bounds(s.stage);
@@ -371,6 +375,18 @@ export function createPlanView(canvas, store) {
       else if (g.type === 'reflector') for (const p of [g.item.p1, g.item.p2]) { p.x = round2(p.x + dx * step); p.y = round2(p.y + dy * step); }
       else if (g.type === 'platform') { g.item.x = round2(g.item.x + dx * step); g.item.y = round2(g.item.y + dy * step); }
     }, { coalesce: `plan-nudge-${id}` });
+    const g = findItem(store.getScene(), id);
+    if (g && g.item.pos) announce(`${g.item.name} at x ${g.item.pos.x.toFixed(2)} m, y ${g.item.pos.y.toFixed(2)} m`, { key: 'move', delay: 350 });
+  }
+  function rotate(dAz, dEl, big) {
+    const id = store.getSelection(); const f = findItem(store.getScene(), id);
+    if (!f) { cycle(1); return; }
+    if (f.type !== 'tx' && f.type !== 'rx') return;
+    if (!dAz) return;
+    const step = big ? 15 : 5;
+    store.update((s) => { const g = findItem(s, id); if (g) { const o = g.item.antenna.orientation || (g.item.antenna.orientation = { az: 0, el: 0 }); o.az = Math.round(((o.az + dAz * step) % 360 + 360) % 360); } }, { coalesce: `plan-rot-${id}` });
+    const g = findItem(store.getScene(), id);
+    announce(`${g.item.name} aimed at azimuth ${g.item.antenna.orientation.az} degrees`, { key: 'rot', delay: 350 });
   }
   function cycle(dir) {
     const ids = selectableIds(store.getScene()); if (!ids.length) return;
@@ -383,14 +399,19 @@ export function createPlanView(canvas, store) {
     select: (id) => store.select(id),
     hover: (hd) => { hoverKey = hd ? hd.kind + ':' + hd.itemId : null; host.invalidate(); },
     onView: () => { userView = true; host.invalidate(); },
-    fit, nudge, cycle, escape: () => store.select(null),
+    fit, nudge, rotate, cycle, escape: () => store.select(null),
   });
   const unsubSq = squelch.subscribe(() => host.invalidate());
   const unsubRx = rxState.subscribe(() => host.invalidate());
   const unsubCov = coverage.subscribe(() => host.invalidate());
   const unsubImd = imd.subscribe(() => host.invalidate());
   const unsubView = subscribeCovView(() => host.invalidate());
-  const unsub = store.subscribe(() => host.invalidate());
+  let stageSig = (() => { const st = store.getScene().stage; return st.width + 'x' + st.depth; })();
+  const unsub = store.subscribe(() => {
+    const st = store.getScene().stage, sg = st.width + 'x' + st.depth;
+    if (sg !== stageSig) { stageSig = sg; if (!userView) { fit(); return; } }
+    host.invalidate();
+  });
 
   return {
     viewport: vp, fit, invalidate: host.invalidate,

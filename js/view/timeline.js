@@ -136,9 +136,9 @@ export function mountTimeline({ container, store }) {
 
     for (const sp of spans) {
       const xa = X(sp.t0), xb = Math.max(X(sp.t1), xa + 1);
-      if (!sp.open) { ctx.fillStyle = 'rgba(192, 57, 43, 0.16)'; ctx.fillRect(xa, rfY0, xb - xa, lanesBottom - rfY0); }
+      if (!sp.open) { ctx.save(); ctx.globalAlpha = 0.16; ctx.fillStyle = th.fail; ctx.fillRect(xa, rfY0, xb - xa, lanesBottom - rfY0); ctx.restore(); }
       ctx.fillStyle = sp.open ? th.pass : th.fail; ctx.fillRect(xa, ribY, xb - xa, ribH);
-      if (!sp.open && xb - xa > 38) { setFont(ctx, th, 11, '600'); ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.fillText('MUTE', (xa + xb) / 2, ribY + 12); }
+      if (!sp.open && xb - xa > 38) { setFont(ctx, th, 11, '600'); ctx.fillStyle = th.onFail; ctx.textAlign = 'center'; ctx.fillText('MUTE', (xa + xb) / 2, ribY + 12); }
       if (sp !== spans[0]) {
         ctx.strokeStyle = th.ink; ctx.lineWidth = 1; ctx.setLineDash([2, 3]);
         const x = Math.round(xa) + 0.5; ctx.beginPath(); ctx.moveTo(x, ribY + ribH); ctx.lineTo(x, lanesBottom); ctx.stroke(); ctx.setLineDash([]);
@@ -149,7 +149,7 @@ export function mountTimeline({ container, store }) {
       if (r.value === 'ok') continue;
       const xa = X(r.t0), xb = Math.max(X(r.t1), xa + 2);
       ctx.fillStyle = th.marginal; ctx.globalAlpha = r.value === 'overload' ? 0.35 : 0.15; ctx.fillRect(xa, rfY0, xb - xa, lanesBottom - rfY0); ctx.globalAlpha = 1;
-      if (r.value === 'overload' && xb - xa > 30) { setFont(ctx, th, 10, '600'); ctx.fillStyle = '#8a6200'; ctx.textAlign = 'center'; ctx.fillText('OVERLOAD', (xa + xb) / 2, rfY0 + laneH - 4); }
+      if (r.value === 'overload' && xb - xa > 30) { setFont(ctx, th, 10, '600'); ctx.fillStyle = th.warnText; ctx.textAlign = 'center'; ctx.fillText('OVERLOAD', (xa + xb) / 2, rfY0 + laneH - 4); }
     }
     if (hasDiv) { // single-antenna traces under the combined trace
       for (const [key, dash, col] of [['aDbm', [], th.inkSoft], ['bDbm', [5, 3], th.inkSoft]]) {
@@ -193,17 +193,17 @@ export function mountTimeline({ container, store }) {
         else if (state === 'degraded') { ctx.fillStyle = th.marginal; ctx.fillRect(xa, modeY0, xb - xa, modeH); }
         else if (state === 'concealing') { ctx.fillStyle = th.paper; ctx.fillRect(xa, modeY0, xb - xa, modeH); strokeHatchRect(ctx, xa, modeY0, xb - xa, modeH, th.marginal, 4); }
         else { ctx.fillStyle = th.fail; ctx.fillRect(xa, modeY0, xb - xa, modeH); }
-        if (xb - xa > 34 && names[order]) { setFont(ctx, th, 10, '600'); ctx.fillStyle = state === 'down' ? '#fff' : th.ink; ctx.textAlign = 'center'; ctx.fillText(names[order], (xa + xb) / 2, modeY0 + 10); }
+        if (xb - xa > 34 && names[order]) { setFont(ctx, th, 10, '600'); ctx.fillStyle = state === 'down' ? th.onFail : th.ink; ctx.textAlign = 'center'; ctx.fillText(names[order], (xa + xb) / 2, modeY0 + 10); }
       }
     }
     if (hasMode) {
       for (const r of runsBy(samples, (s) => s.mode || '')) {
         const xa = X(r.t0), xb = Math.max(X(r.t1), xa + 1);
-        if (r.value === 'stereo') { ctx.fillStyle = '#4a78b5'; ctx.fillRect(xa, modeY0, xb - xa, modeH); }
-        else if (r.value === 'mono') { ctx.fillStyle = '#9aa1a9'; ctx.fillRect(xa, modeY0, xb - xa, modeH); }
+        if (r.value === 'stereo') { ctx.fillStyle = th.blue; ctx.fillRect(xa, modeY0, xb - xa, modeH); }
+        else if (r.value === 'mono') { ctx.fillStyle = th.mono; ctx.fillRect(xa, modeY0, xb - xa, modeH); }
         else if (r.value === 'blend') {
           ctx.fillStyle = th.paper; ctx.fillRect(xa, modeY0, xb - xa, modeH);
-          strokeHatchRect(ctx, xa, modeY0, xb - xa, modeH, '#4a78b5', 4);
+          strokeHatchRect(ctx, xa, modeY0, xb - xa, modeH, th.blue, 4);
         }
       }
       ctx.fillStyle = th.fail; // pilot-lost marks

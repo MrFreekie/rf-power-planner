@@ -23,6 +23,7 @@ export const defaultDiversity = (pos, _antennaA) => ({
 });
 import { MATERIAL_TRANSMISSION } from './zones-params.js';
 import { SURFACES, MATERIALS } from './library.js';
+import { EXTERNAL_NOISE_FIGURE_600MHZ_DB } from './rx-params.js';
 
 // Stage and platform limits. Item pos.z everywhere stays the height above the LOCAL floor (deck or platform top).
 export const STAGE_LIMITS = Object.freeze({ size: [0.5, 500], heightM: [0, 20] });
@@ -226,13 +227,16 @@ function buildDefaultLink(kind) {
   };
 }
 
+/** External RF noise preset for NEW scenes. Older scenes and share links without the field stay unset (= Off) so their numbers do not change. */
+export const DEFAULT_EXTERNAL_NOISE = 'urban';
+
 export function createDefaultScene() {
   return {
     version: SCHEMA_VERSION,
     units: { power: 'dBm', length: 'm' },
     stage: { width: 12, depth: 8, heightM: 0 },
     platforms: [],
-    environment: { floor: 'wood', polarisation: 'vertical', model: 'two-ray', fadeMarginDb: 0, bodyLossDb: 0 },
+    environment: { floor: 'wood', polarisation: 'vertical', model: 'two-ray', fadeMarginDb: 0, bodyLossDb: 0, externalNoise: DEFAULT_EXTERNAL_NOISE },
     reflectors: [],
     zones: [],
     coverage: { mode: 'power' },
@@ -287,6 +291,8 @@ export function validateScene(scene) {
     if (!MODELS.includes(env.model)) errors.push('environment.model invalid');
     if (!isNum(env.fadeMarginDb)) errors.push('environment.fadeMarginDb must be a number');
     if (!isNum(env.bodyLossDb)) errors.push('environment.bodyLossDb must be a number');
+    const xn = env.externalNoise;
+    if (xn !== undefined && !(typeof xn === 'string' && Object.prototype.hasOwnProperty.call(EXTERNAL_NOISE_FIGURE_600MHZ_DB, xn)) && !(isNum(xn) && xn >= 0)) errors.push('environment.externalNoise must be a preset name or a number >= 0');
   }
   const ids = new Set();
   const checkId = (id, path) => {

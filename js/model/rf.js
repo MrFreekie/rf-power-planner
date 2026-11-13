@@ -562,6 +562,32 @@ export function cascadeNoise(link, chain, freqMHz, iem = false, env = {}) {
   };
 }
 
+/**
+ * cascadeNoiseIem(link, txChain, rxChain, freqMHz, env, pathGainDb) -> cascadeNoise-shaped result for an IEM link.
+ * The bodypack is the receiver, so the receive-side cascade is the same as for a mic link: optional link.rx.chain items
+ * (antenna cable, LNA, filter ahead of the bodypack) then the bodypack itself (Friis, as cascadeNoise). External noise
+ * (environment.externalNoise) applies at the bodypack antenna like it does for a mic receiver.
+ * The Tx-side chain (transmitter -> boosters/cables -> Tx antenna) is not in that cascade, but it radiates its own noise: a
+ * source at 290 K through the chain of noise figure F_c and gain G_c leaves it at kTB + F_c + G_c (dBm in B). That noise
+ * reaches the bodypack antenna attenuated by the whole path (pathGainDb = rx antenna level - Tx chain output level, so
+ * antenna gains, fade margin and body loss are included) and adds in power to the bodypack noise floor:
+ *   N_floor = 10 log10( 10^(N_rx/10) + 10^(N_tx,at rx/10) ).
+ * It matters only for a high-gain, noisy booster close to the bodypack, which is when a Tx-side booster can hurt.
+ * Extra fields: side 'rx', txSide { stages, systemNfDb, chainGainDb, noiseAtTxOutDbm, noiseAtRxDbm }, rxFloorDbm.
+ */
+export function cascadeNoiseIem(link, txChain, rxChain, freqMHz, env = {}, pathGainDb = -Infinity) {
+  const rx = cascadeNoise(link, rxChain, freqMHz, false, env);
+  const tx = cascadeNoise(link, txChain, freqMHz, true, env);
+  const chainGainDb = tx.stages.length ? tx.stages[tx.stages.length - 1].cumulativeGainDb : 0;
+  const noiseAtTxOutDbm = rx.kTBDbm + tx.systemNfDb + chainGainDb;
+  const noiseAtRxDbm = noiseAtTxOutDbm + pathGainDb;
+  const floor = 10 * Math.log10(Math.pow(10, rx.noiseFloorDbm / 10) + Math.pow(10, noiseAtRxDbm / 10));
+  return {
+    ...rx, side: 'rx', rxFloorDbm: rx.noiseFloorDbm, noiseFloorDbm: floor, sensitivityAtAntennaDbm: floor + rx.requiredSnrDb,
+    txSide: { stages: tx.stages, systemNfDb: tx.systemNfDb, chainGainDb, noiseAtTxOutDbm, noiseAtRxDbm },
+  };
+}
+
 const db20 = (x) => 20 * Math.log10(Math.max(x, 1e-300));
 
 export function solveLink(scene, link) {
@@ -624,9 +650,12 @@ export function solveLink(scene, link) {
   wf.push({ label: 'Tx power', valueDbm: level, deltaDb: 0 });
   const step = (label, delta) => { level += delta; wf.push({ label, valueDbm: level, deltaDb: delta }); };
   const chain = link.chain || [];
-  const chainSteps = () => chain.forEach((it) => step(chainLabel(it), -chainItemLossDb(it, f)));
+  const chainSteps = (list = chain) => list.forEach((it) => step(chainLabel(it), -chainItemLossDb(it, f)));
   const iem = link.kind === 'iem';
+  // IEM only: optional link.rx.chain = items between the bodypack antenna and the bodypack (cable, LNA, filter).
+  const rxChain = iem && Array.isArray(link.rx.chain) ? link.rx.chain : [];
   if (iem) chainSteps(); // transmitter -> chain -> Tx antenna
+  const txOutDbm = level;
   step('Tx antenna gain', direct._gt);
   step(`Free-space loss (${formatLength(distanceM, scene && scene.units && scene.units.length)})`, -fspl);
   const directPlatformDb = direct.platformLossDb || 0;
@@ -638,19 +667,17 @@ export function solveLink(scene, link) {
   if (body) step('Body loss', -body);
   if (env.fadeMarginDb) step('Fade margin', -env.fadeMarginDb);
   const rxPowerDbm = level;
-  if (!iem) chainSteps(); // Rx antenna -> chain -> receiver
+  if (iem) chainSteps(rxChain); // bodypack antenna -> optional rx chain -> bodypack
+  else chainSteps(); // Rx antenna -> chain -> receiver
   const inputPowerDbm = level;
 
-  // Noise-figure cascade (Friis). Mic links: the Rx antenna -> chain -> receiver order makes it decide the margin
-  // (marginDb = margin at the antenna terminals). IEM links: the chain sits before the Tx antenna, so the cascade describes
-  // Tx-side noise only and is reported for information; marginDb stays the bodypack-input margin.
-  const cascade = cascadeNoise(link, chain, f, iem, env);
-  if (!iem) { step(`System NF ${cascade.systemNfDb.toFixed(1)} dB (cascade, note)`, 0); wf[wf.length - 1].note = true; }
-  let marginDb = inputPowerDbm - link.rx.sensitivityDbm;
-  if (!iem) {
-    cascade.marginAtAntennaDb = rxPowerDbm - cascade.sensitivityAtAntennaDbm;
-    marginDb = cascade.marginAtAntennaDb;
-  }
+  // Noise-figure cascade (Friis), the same for both link kinds. Mic: Rx antenna -> chain -> receiver. IEM: bodypack antenna ->
+  // optional rx.chain -> bodypack, plus the noise the Tx-side chain radiates (cascadeNoiseIem). marginDb = margin at the
+  // receive antenna terminals over the system sensitivity (noise floor + required SNR).
+  const cascade = iem ? cascadeNoiseIem(link, chain, rxChain, f, env, rxPowerDbm - txOutDbm) : cascadeNoise(link, chain, f, false, env);
+  step(`System NF ${cascade.systemNfDb.toFixed(1)} dB (cascade, note)`, 0); wf[wf.length - 1].note = true;
+  cascade.marginAtAntennaDb = rxPowerDbm - cascade.sensitivityAtAntennaDbm;
+  const marginDb = cascade.marginAtAntennaDb;
   const status = marginDb >= 6 ? 'pass' : marginDb >= 0 ? 'marginal' : 'fail';
   paths.forEach((p) => { delete p._gt; delete p._gr; });
 

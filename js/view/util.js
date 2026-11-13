@@ -1,33 +1,62 @@
 // Shared helpers for the canvas views: theme, canvas host (DPR, resize, rAF), scene lookups, grid, scale bar.
 import { niceGridStep } from './viewport.js';
 import { solveLink } from '../model/rf.js';
+import { initTheme, isForcedLight, effectiveTheme, LIGHT_TOKENS } from './theme.js';
+
+if (typeof document !== 'undefined') initTheme(); // apply the stored theme as soon as any view module loads
 
 export const DEG = Math.PI / 180;
 export const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 export const round2 = (v) => Math.round(v * 100) / 100;
 
 /** Read the CSS custom properties (see css/style.css) so canvas colours follow the stylesheet. */
+const hosts = new Set();
+/** Smoothed draw time (ms) per canvas; the ripple loop uses it to lower its frame rate when the views are expensive. */
+export const drawCost = new WeakMap();
+let themeVersion = 0, themeCache = null, themeCacheVer = -1;
+if (typeof window !== 'undefined') {
+  window.addEventListener('rf-theme', () => { themeVersion++; });
+  if (typeof matchMedia === 'function') for (const q of ['(prefers-color-scheme: dark)', '(prefers-reduced-motion: reduce)']) { const m = matchMedia(q); if (m.addEventListener) m.addEventListener('change', () => { themeVersion++; for (const h of hosts) h.invalidate(); }); }
+}
+
+/** Computed-style reads are slow, so the palette is cached until the theme or a media preference changes. */
 export function readTheme(el) {
+  if (!isForcedLight() && themeCache && themeCacheVer === themeVersion) return themeCache;
+  const th = readThemeUncached(el);
+  if (!isForcedLight()) { themeCache = th; themeCacheVer = themeVersion; }
+  return th;
+}
+function readThemeUncached(el) {
+  const reduceMotion = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const font = (() => { try { return getComputedStyle(el).getPropertyValue('--font').trim(); } catch { return ''; } })() || 'system-ui, -apple-system, "Segoe UI", sans-serif';
+  if (isForcedLight()) return { ...LIGHT_TOKENS, mech: { 'front-end': '#4a78b5', 'tx-reverse': '#c77a1f', pim: '#7d5ba6' }, font, reduceMotion, dark: false }; // report snapshots: always the light sheet
   const cs = getComputedStyle(el);
-  const g = (n, d) => cs.getPropertyValue(n).trim() || d;
+  const g = (n, d) => cs.getPropertyValue(n).trim() || d, L = LIGHT_TOKENS;
   return {
-    paper: g('--paper', '#fbf9f3'), paper2: g('--paper-2', '#f1eee4'),
-    ink: g('--ink', '#1d2733'), inkSoft: g('--ink-soft', '#5b6673'),
-    grid: g('--grid', '#e6e1d3'), gridMajor: g('--grid-major', '#d2cbb7'), hatch: g('--hatch', '#d9d3c1'),
-    pass: g('--pass', '#2e8b57'), marginal: g('--marginal', '#d99a00'), fail: g('--fail', '#c0392b'),
-    font: g('--font', 'system-ui, -apple-system, "Segoe UI", sans-serif'),
-    reduceMotion: typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches,
+    paper: g('--paper', L.paper), paper2: g('--paper-2', L.paper2),
+    ink: g('--ink', L.ink), inkSoft: g('--ink-soft', L.inkSoft),
+    grid: g('--grid', L.grid), gridMajor: g('--grid-major', L.gridMajor), hatch: g('--hatch', L.hatch),
+    pass: g('--pass', L.pass), marginal: g('--marginal', L.marginal), fail: g('--fail', L.fail),
+    warnText: g('--warn-text', L.warnText), onFail: g('--on-fail', L.onFail), blue: g('--blue', L.blue), mono: g('--mono', L.mono),
+    mech: { 'front-end': g('--mech-fe', '#4a78b5'), 'tx-reverse': g('--mech-tx', '#c77a1f'), pim: g('--mech-pim', '#7d5ba6') },
+    inkRgb: g('--ink-rgb', L.inkRgb).replace(/s+/g, ''),
+    dark: effectiveTheme() === 'dark',
+    font, reduceMotion,
   };
 }
+/** rgba() string of the ink colour at the given alpha (translucent fills that must follow the theme). */
+export const inkAlpha = (th, a) => `rgba(${th.inkRgb || LIGHT_TOKENS.inkRgb},${a})`;
 export const statusColor = (th, status) => (status === 'pass' ? th.pass : status === 'marginal' ? th.marginal : status === 'fail' ? th.fail : th.inkSoft);
 
 /**
  * Canvas host: HiDPI backing store, ResizeObserver, redraw only when invalidated (rAF-coalesced).
  * draw(ctx, w, h, theme) gets a context already scaled so 1 unit = 1 CSS px.
  */
+if (typeof window !== 'undefined') window.addEventListener('rf-theme', () => { for (const h of hosts) h.invalidate(); });
+
 export function createCanvasHost(canvas, draw, onResize) {
   const ctx = canvas.getContext('2d');
-  let w = 0, h = 0, dpr = 1, raf = 0, dirty = true, dead = false;
+  let w = 0, h = 0, dpr = 1, raf = 0, dirty = true, dead = false, visible = true;
   const host = { get width() { return w; }, get height() { return h; }, invalidate, destroy };
 
   function resize() {
@@ -43,14 +72,25 @@ export function createCanvasHost(canvas, draw, onResize) {
   function frame() {
     raf = 0;
     if (dead || !dirty || w < 2 || h < 2) return;
+    if (!visible) return; // off screen (scrolled away, collapsed or in a hidden panel): stay dirty, draw when it comes back
     dirty = false;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
+    const t0 = performance.now();
     draw(ctx, w, h, readTheme(canvas));
+    const ms = performance.now() - t0, prev = drawCost.get(canvas);
+    drawCost.set(canvas, prev === undefined ? ms : prev * 0.85 + ms * 0.15);
   }
   function invalidate() { dirty = true; if (!raf && !dead) raf = requestAnimationFrame(frame); }
-  function destroy() { dead = true; ro?.disconnect(); window.removeEventListener('resize', resize); if (raf) cancelAnimationFrame(raf); }
+  function destroy() { dead = true; hosts.delete(host); io?.disconnect(); ro?.disconnect(); window.removeEventListener('resize', resize); if (raf) cancelAnimationFrame(raf); }
 
+  hosts.add(host);
+  const io = typeof IntersectionObserver === 'function' ? new IntersectionObserver((es) => {
+    const en = es[es.length - 1];
+    const v = en.isIntersecting; if (v === visible) return;
+    visible = v; if (v) invalidate();
+  }, { rootMargin: '120px' }) : null;
+  io?.observe(canvas);
   const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(resize) : null;
   ro?.observe(canvas);
   window.addEventListener('resize', resize);

@@ -18,6 +18,7 @@ import { setImdPreset, setImdCombiner, setImdPim, addImdTransmitter, removeImdTr
 const IMD_PRESETS = [['mic-rack-typical', 'Mic rack, typical'], ['iem-combiner-no-isolation', 'IEM combiner, no isolation'],
   ['iem-combiner-isolated', 'IEM combiner, isolated'], ['pim-corroded-connector', 'PIM: corroded connector']];
 import { createChainItem } from '../model/scene.js';
+import { noiseOptions, noiseValue, noiseFromChoice, noiseHint } from './noise.js';
 import {
   setPath, setLinkField, setLinkKind, setUnits, addChainItem, removeChainItem, moveChainItem,
   addReflector, removeReflector,
@@ -459,10 +460,15 @@ export function mountInspector({ container, store }) {
         key: 'env-model', label: 'Propagation model', options: [['two-ray', 'Two-ray (multipath)'], ['free-space', 'Free space']],
         get: (cc) => cc.scene.environment.model, set: (cc, v) => setPath(store, 'environment.model', v),
       }),
+      selectField({
+        key: 'env-noise', label: 'External RF noise', options: (cc) => noiseOptions(cc.scene.environment.externalNoise, cc.link.freqMHz),
+        get: (cc) => noiseValue(cc.scene.environment.externalNoise), set: (cc, v) => { const n = noiseFromChoice(v); if (n !== undefined) setPath(store, 'environment.externalNoise', n); },
+      }),
       numEnv('env-fade', 'Fade margin', 'fadeMarginDb', 0, 40, 0.5),
       numEnv('env-body', 'Environment body loss', 'bodyLossDb', 0, 40, 0.5),
     );
     eb.append(el('p', 'hint', 'Body loss values stack: environment + Rx body loss + body-worn antenna are summed.'));
+    eb.append(el('p', 'hint', noiseHint()));
 
     // Chain
     const endNote = link.kind === 'iem' ? 'Order: transmitter, then these items, then the Tx antenna.' : 'Order: Rx antenna, then these items, then the receiver.';
