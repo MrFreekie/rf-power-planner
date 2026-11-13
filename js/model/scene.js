@@ -18,7 +18,7 @@ export const defaultRxPreset = (kind) => (kind === 'iem' ? 'iem-bodypack-typical
  */
 export const defaultDiversity = (pos, _antennaA) => ({
   enabled: false, mode: 'switching',
-  antennaB: { pos: { x: Math.round((pos.x - 0.6) * 1000) / 1000, y: pos.y, z: pos.z }, antenna: null },
+  antennaB: { pos: { x: Math.round((pos.x - 0.6) * 1000) / 1000, y: pos.y, z: pos.z }, antenna: null, chain: null, orientation: null },
   hysteresisDb: 3, switchMs: 30,
 });
 import { MATERIAL_TRANSMISSION } from './zones-params.js';
@@ -420,7 +420,22 @@ export function validateScene(scene) {
         if (!isObj(d) || typeof d.enabled !== 'boolean' || !DIVERSITY_MODES.includes(d.mode) || !isNum(d.hysteresisDb) || !(d.switchMs >= 0)
           || !isObj(b) || !isObj(b.pos) || !isNum(b.pos.x) || !isNum(b.pos.y) || !isNum(b.pos.z)) {
           errors.push(`${p}.rx.diversity must be {enabled, mode: ${DIVERSITY_MODES.join('|')}, antennaB:{pos,antenna}, hysteresisDb, switchMs}`);
-        } else if (b.antenna != null) checkAntenna(b.antenna, `${p}.rx.diversity.antennaB.antenna`, errors);
+        } else {
+          if (b.antenna != null) checkAntenna(b.antenna, `${p}.rx.diversity.antennaB.antenna`, errors);
+          if (b.orientation !== undefined && b.orientation !== null) {
+            const o = b.orientation;
+            if (!isObj(o) || !isNum(o.az) || !isNum(o.el) || o.az < 0 || o.az > 360 || o.el < -90 || o.el > 90) {
+              errors.push(`${p}.rx.diversity.antennaB.orientation must be null or {az: 0..360, el: -90..90}`);
+            }
+          }
+          if (b.chain !== undefined && b.chain !== null) {
+            if (!Array.isArray(b.chain)) errors.push(`${p}.rx.diversity.antennaB.chain must be null or an array`);
+            else b.chain.forEach((c, m) => {
+              if (!isObj(c) || !CHAIN_KINDS.includes(c.kind)) { errors.push(`${p}.rx.diversity.antennaB.chain[${m}].kind invalid`); return; }
+              if (c.id !== undefined && (typeof c.id !== 'string' || !c.id)) errors.push(`${p}.rx.diversity.antennaB.chain[${m}].id must be a non-empty string`);
+            });
+          }
+        }
       }
       checkPos(l.rx.pos, `${p}.rx.pos`, errors);
       checkAntenna(l.rx.antenna, `${p}.rx.antenna`, errors);
@@ -448,6 +463,19 @@ export function migrateScene(raw) {
         if (l.rx.rxPreset === undefined) l.rx.rxPreset = defaultRxPreset(l.kind);
         if (l.rx.overload === undefined) l.rx.overload = {};
         if (l.rx.diversity === undefined && isObj(l.rx.pos) && isObj(l.rx.antenna)) l.rx.diversity = defaultDiversity(l.rx.pos, l.rx.antenna);
+        const abc = isObj(l.rx.diversity) ? l.rx.diversity.antennaB : null;
+        if (isObj(abc)) {
+          if (abc.orientation === undefined) abc.orientation = null;
+          if (abc.chain === undefined) abc.chain = null;
+          else if (Array.isArray(abc.chain)) {
+            const seenB = new Set();
+            for (const c of abc.chain) {
+              if (!isObj(c)) continue;
+              if (typeof c.id !== 'string' || !c.id || seenB.has(c.id)) c.id = newId('ci');
+              seenB.add(c.id);
+            }
+          }
+        }
         // Older scenes stored a copy of antenna A in antenna B: an identical copy now means "same as A".
         const ab = isObj(l.rx.diversity) ? l.rx.diversity.antennaB : null;
         if (isObj(ab) && isObj(ab.antenna) && isObj(l.rx.antenna) && JSON.stringify(ab.antenna) === JSON.stringify(l.rx.antenna)) ab.antenna = null;

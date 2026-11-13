@@ -14,6 +14,7 @@ import { squelch } from '../squelchTracker.js';
 import { gateOf, drawSquelchLed, rxInfo, drawActiveRing, drawOverloadHalo } from './squelchUi.js';
 import { rxState } from '../rxTracker.js';
 import { getRipples } from './ripples.js';
+import { effectiveAntennaB } from '../model/diversity.js';
 import { registerSnapshot, makeSnapshotCanvas } from './snapshots.js';
 
 export function createSideView(canvas, store) {
@@ -123,7 +124,11 @@ export function createSideView(canvas, store) {
       const bp = proj(inf.B.pos), tp = proj(link.tx.pos);
       ctx.save(); ctx.strokeStyle = col; ctx.lineWidth = inf.active === 'B' ? 2.4 : 1; ctx.globalAlpha = inf.active === 'B' ? 1 : 0.4;
       ctx.beginPath(); ctx.moveTo(tp.x, tp.y); ctx.lineTo(bp.x, bp.y); ctx.stroke(); ctx.restore();
-      icons.drawAntenna(ctx, vp, sOf(inf.B.pos), -inf.B.pos.z, { view: 'side', ink: th.ink, fill: th.paper, type: (inf.B.antenna || link.rx.antenna).type, angleDeg: 0 });
+      {
+        const eff = effectiveAntennaB(link), o = eff.orientation;
+        const dS = Math.cos(o.el * DEG) * (Math.sin(o.az * DEG) * u.x + Math.cos(o.az * DEG) * u.y), dZ = Math.sin(o.el * DEG);
+        icons.drawAntenna(ctx, vp, sOf(inf.B.pos), -inf.B.pos.z, { view: 'side', ink: th.ink, fill: th.paper, type: eff.type, angleDeg: Math.atan2(dS, dZ) / DEG });
+      }
       haloText(ctx, th, 'B', bp.x + 10, bp.y - 8, { px: 12, weight: '600' });
       if (inf.active === 'B') drawActiveRing(ctx, th, bp.x, bp.y, 12);
     }

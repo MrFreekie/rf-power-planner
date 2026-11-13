@@ -13,12 +13,13 @@ import { squelch } from '../squelchTracker.js';
 import { gateOf, drawSquelchLed, rxInfo, drawActiveRing, drawOverloadHalo } from './squelchUi.js';
 import { rxState } from '../rxTracker.js';
 import { coverage } from '../coverageTracker.js';
-import { createHeatmap, drawHeatLegend, drawZones, drawBranches, drawImd, createLabelPlacer } from './planOverlay.js';
+import { createHeatmap, drawHeatLegend, drawZones, drawBranches, drawImd, drawRxCableTags, createLabelPlacer } from './planOverlay.js';
 import { covView, subscribeCovView } from './coverageUi.js';
 import { imd } from '../imdTracker.js';
 import { getRipples } from './ripples.js';
 import { registerSnapshot, makeSnapshotCanvas } from './snapshots.js';
-import { movePoint, moveBranch, moveImdTransmitter } from '../actions.js';
+import { movePoint, moveBranch, moveImdTransmitter, setAntennaBOrientation } from '../actions.js';
+import { effectiveAntennaB } from '../model/diversity.js';
 
 const LOBE_STEP = 6; // degrees
 
@@ -94,9 +95,6 @@ export function createPlanView(canvas, store) {
     // ripples (wavefronts) under the walls and icons
     rip.drawPlan(ctx, th, vp, scene, w, h, link0);
 
-    // reflectors
-    for (const r of scene.reflectors || []) drawReflector(ctx, th, r, sel === r.id);
-
     // reserve name labels so link labels can avoid them
     placer.reset();
     setFont(ctx, th, 12);
@@ -105,11 +103,16 @@ export function createPlanView(canvas, store) {
       placer.reserve({ x: p.x - tw / 2 - 2, y: p.y + Math.max(22, 0.35 * vp.pxPerM + 12) - 12, w: tw + 4, h: 16 });
     }
 
+    // reflectors
+    for (const r of scene.reflectors || []) drawReflector(ctx, th, r, sel === r.id);
+
+
     // links: lines first, then lobes and icons on top
     for (const link of scene.links) drawLinkLine(ctx, th, scene, link, link === link0, w);
     for (const link of scene.links) drawLinkEnds(ctx, th, scene, link, sel, w);
     for (const link of scene.links) drawAntennaB(ctx, th, link, sel);
     for (const link of scene.links) drawBranches(ctx, th, vp, link, handles);
+    for (const link of scene.links) drawRxCableTags(ctx, th, vp, link, placer, scene.units.length, w);
     if (covView.zones) drawZones(ctx, th, vp, scene, cov, sel, handles);
     drawImd(ctx, th, vp, scene, sel, handles, placer, w);
     if (cov && cov.grid && covView.show) drawHeatLegend(ctx, th, w, h, cov, covView.tint);
@@ -147,7 +150,10 @@ export function createPlanView(canvas, store) {
     ctx.beginPath();
     for (let t = 6; t < len; t += 8) { const x = p1.x + (dx * t) / len, y = p1.y + (dy * t) / len; ctx.moveTo(x, y); ctx.lineTo(x + nx * 7 - (dx / len) * 5, y + ny * 7 - (dy / len) * 5); }
     ctx.stroke();
-    haloText(ctx, th, wallLabel(r), (p1.x + p2.x) / 2 + nx * -14, (p1.y + p2.y) / 2 + ny * -14 + 4, { align: 'center', color: th.inkSoft });
+    const wl = wallLabel(r);
+    setFont(ctx, th, 12);
+    const wx = (p1.x + p2.x) / 2 + nx * -14, wy0 = (p1.y + p2.y) / 2 + ny * -14 + 4;
+    haloText(ctx, th, wl, wx, placer.place(ctx.measureText(wl).width, wx, wy0), { align: 'center', color: th.inkSoft });
     for (const [kind, p, wp] of [['refP1', p1, r.p1], ['refP2', p2, r.p2]]) {
       handles.push({ kind, itemId: r.id, sx: p.x, sy: p.y, r: 11, wx: wp.x, wy: wp.y });
       ctx.fillStyle = th.paper; ctx.strokeStyle = th.ink; ctx.lineWidth = selected ? 2 : 1.2;
@@ -197,9 +203,24 @@ export function createPlanView(canvas, store) {
 
   function drawAntennaB(ctx, th, link, sel) {
     const inf = rxInfo(link); if (!inf.B) return;
-    const p = vp.worldToScreen(inf.B.pos), ant = inf.B.antenna || link.rx.antenna, az = ant.orientation?.az ?? link.rx.antenna.orientation?.az ?? 0;
+    const p = vp.worldToScreen(inf.B.pos);
+    const eff = effectiveAntennaB(link), az = eff.orientation.az;
+    const antRef = { type: eff.type, gainDbi: eff.gainDbi, orientation: eff.orientation };
+    const selected = sel === link.rx.id;
+    // pattern lobe, same style as antenna A
+    const R = clamp(0.9 * vp.pxPerM, 26, 80);
+    const pts = lobePoints(antRef, p, R);
+    ctx.beginPath(); pts.forEach((q, i) => (i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y))); ctx.closePath();
+    ctx.fillStyle = 'rgba(29,39,51,0.07)'; ctx.fill();
+    ctx.setLineDash([4, 3]); ctx.strokeStyle = th.inkSoft; ctx.lineWidth = 0.9; ctx.stroke(); ctx.setLineDash([]);
     icons.drawStand(ctx, vp, inf.B.pos.x, inf.B.pos.y, { view: 'plan', ink: th.ink, fill: th.paper });
-    icons.drawAntenna(ctx, vp, inf.B.pos.x, inf.B.pos.y, { view: 'plan', ink: th.ink, fill: th.paper, type: ant.type, angleDeg: 180 - az });
+    icons.drawAntenna(ctx, vp, inf.B.pos.x, inf.B.pos.y, { view: 'plan', ink: th.ink, fill: th.paper, type: eff.type, angleDeg: 180 - az });
+    // rotation handle at the lobe tip
+    const tip = { x: p.x + Math.sin(az * DEG) * (R + 24), y: p.y + Math.cos(az * DEG) * (R + 24) }; // a little further out than A's handle so they do not overlap
+    handles.push({ kind: 'rxBRot', itemId: link.rx.id, linkId: link.id, sx: tip.x, sy: tip.y, r: 10, pri: 1 });
+    ctx.strokeStyle = th.inkSoft; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(tip.x, tip.y); ctx.stroke();
+    ctx.fillStyle = selected || hoverKey === 'rxBRot:' + link.rx.id ? th.ink : th.paper; ctx.strokeStyle = th.ink; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.arc(tip.x, tip.y, 4.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
     haloText(ctx, th, 'B', p.x + 12, p.y - 10, { px: 12, weight: '600' });
     if (inf.active === 'B') drawActiveRing(ctx, th, p.x, p.y, 14);
     if (inf.overload !== 'ok' && inf.div && inf.div.bDbm >= inf.div.aDbm) drawOverloadHalo(ctx, th, p.x, p.y, inf.overload, 20);
@@ -271,6 +292,13 @@ export function createPlanView(canvas, store) {
     return { key, p1: r && { ...r.p1 }, p2: r && { ...r.p2 }, startW: { x: hd.wx, y: hd.wy } };
   }
   function dragMove(hd, ptr, target, state) {
+    if (hd.kind === 'rxBRot') {
+      const l = store.getScene().links.find((q) => q.id === hd.linkId); const b = l && l.rx.diversity && l.rx.diversity.antennaB;
+      if (!b || !b.pos) return;
+      const az = Math.round((Math.atan2(ptr.x - b.pos.x, ptr.y - b.pos.y) / DEG + 360) % 360);
+      setAntennaBOrientation(store, hd.linkId, { az }, { coalesce: state.key });
+      return;
+    }
     if (hd.kind === 'zoneP' || hd.kind === 'branch' || hd.kind === 'imdTx') {
       const bd = bounds(store.getScene().stage);
       const pt = { x: round2(clamp(target.x, bd.x0 - 20, bd.x1 + 40)), y: round2(clamp(target.y, bd.y0 - 20, bd.y1 + 40)) };

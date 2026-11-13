@@ -62,6 +62,24 @@ const toDbm = (p) => 10 * Math.log10(p);
  * solveDiversity(scene, link) -> { a, b }: LinkResult for the link as is (antenna A) and for a copy whose
  * rx.pos / rx.antenna are replaced by link.rx.diversity.antennaB = { pos, antenna }. Without antennaB, or with diversity.enabled === false, B equals A.
  */
+/**
+ * effectiveAntennaB(link) -> { type, gainDbi, orientation: {az, el}, followsA: { antenna: boolean, orientation: boolean } }
+ * The antenna that receive branch B really uses: antennaB.antenna when set, otherwise A's antenna; its orientation is
+ * antennaB.orientation, else antennaB.antenna.orientation, else A's orientation. followsA says which parts are inherited.
+ * Pure; links without diversity data return A's antenna with both flags true.
+ */
+export function effectiveAntennaB(link) {
+  const A = (link.rx && link.rx.antenna) || {};
+  const ab = (link.rx && link.rx.diversity && link.rx.diversity.antennaB) || {};
+  const own = ab.antenna || null;
+  const base = own ? { ...A, ...own } : { ...A };
+  const o = ab.orientation || (own && own.orientation) || A.orientation || { az: 0, el: 0 };
+  return {
+    type: base.type, gainDbi: base.gainDbi, orientation: { az: o.az, el: o.el },
+    followsA: { antenna: !own, orientation: !ab.orientation && !(own && own.orientation) },
+  };
+}
+
 export function solveDiversity(scene, link) {
   const a = solveLink(scene, link);
   const dv = link.rx && link.rx.diversity;
@@ -70,6 +88,10 @@ export function solveDiversity(scene, link) {
   const copy = JSON.parse(JSON.stringify(link));
   if (ab.pos) copy.rx.pos = { ...copy.rx.pos, ...ab.pos };
   if (ab.antenna) copy.rx.antenna = { ...copy.rx.antenna, ...ab.antenna };
+  copy.rx.antenna.orientation = { ...effectiveAntennaB(link).orientation }; // orientation-only override (antennaB.orientation)
+  // Own cable run for antenna B (mic links: the chain sits between the receive antennas and the receiver). null/absent = same chain as A.
+  // IEM links have their chain on the transmit side, so antennaB.chain has no meaning there and is ignored.
+  if (link.kind !== 'iem' && Array.isArray(ab.chain)) copy.chain = JSON.parse(JSON.stringify(ab.chain));
   const bPos = copy.rx.pos;
   const spacingM = Math.hypot(bPos.x - link.rx.pos.x, bPos.y - link.rx.pos.y, (bPos.z || 0) - (link.rx.pos.z || 0));
   const spacingLambda = spacingM / wavelengthM(link.freqMHz);

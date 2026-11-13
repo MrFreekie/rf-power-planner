@@ -41,7 +41,7 @@ export function mountDiversity({ container, store }) {
   const chips = el('div', 'dv-top');
   const modeChip = el('span', 'chip'); const actChip = el('span', 'chip'); const swChip = el('span', 'dv-count');
   chips.append(modeChip, actChip, swChip);
-  const bars = el('canvas', 'dv-bars'); bars.style.height = '84px'; bars.setAttribute('role', 'img');
+  const bars = el('canvas', 'dv-bars'); bars.style.height = '132px'; bars.setAttribute('role', 'img');
   const stats = el('p', 'hint dv-stats');
   const sweep = el('canvas', 'dv-sweep'); sweep.style.height = '215px'; sweep.setAttribute('role', 'img');
   sweep.setAttribute('aria-label', 'Fade sweep: level of antenna A, antenna B and the combined output along the transmitter path');
@@ -105,7 +105,7 @@ export function mountDiversity({ container, store }) {
     if (!link || !last) return;
     const x0 = 22, x1 = w - 10;
     const thr = link.rx.squelch?.enabled === false ? null : link.rx.squelch?.thresholdDbm;
-    [['A', last.aDbm, 8], ['B', last.bDbm, 44]].forEach(([name, v, y]) => {
+    [['A', last.aDbm, last.cableLossADb, 6], ['B', last.bDbm, last.cableLossBDb, 68]].forEach(([name, v, cableDb, y]) => {
       const act = last.active === name;
       haloText(ctx, th, name, 4, y + 14, { px: 13, weight: '700' });
       ctx.fillStyle = th.paper2; ctx.fillRect(x0, y, x1 - x0, 18);
@@ -116,6 +116,11 @@ export function mountDiversity({ container, store }) {
         ctx.save(); ctx.strokeStyle = th.fail; ctx.lineWidth = 1.5; ctx.setLineDash([3, 2]); ctx.beginPath(); ctx.moveTo(tx, y - 3); ctx.lineTo(tx, y + 21); ctx.stroke(); ctx.restore();
       }
       setFont(ctx, th, 11, act ? '700' : ''); ctx.textAlign = 'left'; ctx.fillStyle = th.ink;
+      if (Number.isFinite(cableDb)) {
+        const at = v + cableDb; // level at the antenna terminals = level at the receiver input plus the cable run's net loss
+        setFont(ctx, th, 11); ctx.fillStyle = th.inkSoft; ctx.textAlign = 'left';
+        ctx.fillText(`cable ${name}: ${cableDb >= 0 ? 'loss' : 'gain'} ${Math.abs(cableDb).toFixed(1)} dB   at antenna ${at.toFixed(1)} dBm, at receiver input ${v.toFixed(1)} dBm`, x0, y + 34);
+      }
       const txt = `${v.toFixed(1)} dBm${act ? '  ◀ ACTIVE' : ''}`;
       const tw = ctx.measureText(txt).width; const bx = x0 + (x1 - x0) * frac(v);
       if (bx + 6 + tw < x1) ctx.fillText(txt, bx + 6, y + 13);

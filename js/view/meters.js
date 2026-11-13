@@ -137,8 +137,12 @@ export function mountMeters({ container, store }) {
     const sq0 = ifr ? squelch.get(link.id) : null, ms = sq0 && sq0.capture ? sq0.capture : null;
     if (ifr) tk.push([ifr.levelDbm, 'stray']);
     bar(18, 'RF', rfV, RF_RANGE, rf, open ? th.pass : th.fail,
-      `${Number.isFinite(rfV) ? formatPower(rfV, unit) : '-'}${thr != null ? `   squelch ${formatPower(thr, unit)}` : ''}${ifr ? `   stray ${formatPower(ifr.levelDbm, unit)}${ms && Number.isFinite(ms.cirDb) ? ` (C/I ${ms.cirDb >= 0 ? '+' : '\u2212'}${Math.abs(ms.cirDb).toFixed(1)} dB)` : ''}` : ''}`, thr, zones, tk);
+      `${Number.isFinite(rfV) ? formatPower(rfV, unit) : '-'}${thr != null ? `   squelch ${formatPower(thr, unit)}` : ''}}`, thr, zones, tk);
     const aV = last ? last.audioDb : NaN;
+    if (ifr) {
+      setFont(ctx, th, 11, '600'); ctx.fillStyle = th.marginal === th.ink ? th.ink : '#8a6200'; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+      ctx.fillText(`stray ${formatPower(ifr.levelDbm, unit)}${ms && Number.isFinite(ms.cirDb) ? `, C/I ${ms.cirDb >= 0 ? '+' : '−'}${Math.abs(ms.cirDb).toFixed(1)} dB` : ''}`, x0, 62);
+    }
     bar(70, 'Audio', aV, AUDIO_RANGE, au, th.ink,
       last && !last.open ? 'muted' : `${Number.isFinite(aV) ? aV.toFixed(1) : '-'} dBFS`, null);
   }

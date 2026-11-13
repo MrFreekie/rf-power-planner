@@ -8,7 +8,8 @@ import { dbmToUnit } from '../model/units.js';
 import { squelch } from '../squelchTracker.js';
 import { rxConfig } from '../rxTracker.js';
 import { RX_PRESETS } from '../model/rx-params.js';
-import { setInterferer } from '../actions.js';
+import { setInterferer, setAntennaBChainMode, setAntennaBOrientation } from '../actions.js';
+import { effectiveAntennaB } from '../model/diversity.js';
 import { setImdPreset, setImdCombiner, setImdPim, addImdTransmitter, removeImdTransmitter, updateImdTransmitter } from '../actions.js';
 
 const IMD_PRESETS = [['mic-rack-typical', 'Mic rack, typical'], ['iem-combiner-no-isolation', 'IEM combiner, no isolation'],
@@ -39,7 +40,7 @@ export function mountInspector({ container, store }) {
   let updaters = [];
   let refs = {};
   let session = 0; // bumped on focus so each editing burst is its own undo step
-  const open = { imd: true, link: true, tx: false, rx: false, env: false, chain: true, refl: false, paths: false };
+  const open = { chainB: true, imd: true, link: true, tx: false, rx: false, env: false, chain: true, refl: false, paths: false };
   let lastSel = Symbol('none');
 
   const getCtx = () => {
@@ -363,11 +364,21 @@ export function mountInspector({ container, store }) {
       numLink('rx-b-gain', 'Antenna B gain', 'rx.diversity.antennaB.antenna.gainDbi', -20, 40, 0.5, 'dBi', {
         decimals: 1, visible: (cc) => !!cc.link.rx.diversity?.enabled && !!cc.link.rx.diversity?.antennaB?.antenna,
       }),
-      numLink('rx-b-az', 'Antenna B azimuth', 'rx.diversity.antennaB.antenna.orientation.az', 0, 360, 1, '°', {
-        decimals: 1, visible: (cc) => !!cc.link.rx.diversity?.enabled && !!cc.link.rx.diversity?.antennaB?.antenna,
+      selectField({
+        key: 'rx-b-dirmode', label: 'Antenna B direction', options: [['same', 'Same as antenna A'], ['own', 'Own direction']],
+        visible: (cc) => !!cc.link.rx.diversity?.enabled,
+        get: (cc) => (cc.link.rx.diversity?.antennaB?.orientation ? 'own' : 'same'),
+        set: (cc, v) => setAntennaBOrientation(store, cc.link.id, v === 'same' ? null : { ...effectiveAntennaB(cc.link).orientation }),
       }),
-      numLink('rx-b-el', 'Antenna B elevation', 'rx.diversity.antennaB.antenna.orientation.el', -90, 90, 1, '°', {
-        decimals: 1, visible: (cc) => !!cc.link.rx.diversity?.enabled && !!cc.link.rx.diversity?.antennaB?.antenna,
+      numberField({
+        key: 'rx-b-az', label: 'Antenna B azimuth', min: 0, max: 360, step: 1, unit: '\u00b0 (0 = toward audience, clockwise)', decimals: 1,
+        visible: (cc) => !!cc.link.rx.diversity?.enabled && !!cc.link.rx.diversity?.antennaB?.orientation,
+        get: (cc) => effectiveAntennaB(cc.link).orientation.az, set: (cc, v, o) => setAntennaBOrientation(store, cc.link.id, { az: v }, o),
+      }),
+      numberField({
+        key: 'rx-b-el', label: 'Antenna B elevation', min: -90, max: 90, step: 1, unit: '\u00b0 (0 = horizontal)', decimals: 1,
+        visible: (cc) => !!cc.link.rx.diversity?.enabled && !!cc.link.rx.diversity?.antennaB?.orientation,
+        get: (cc) => effectiveAntennaB(cc.link).orientation.el, set: (cc, v, o) => setAntennaBOrientation(store, cc.link.id, { el: v }, o),
       }),
       numberField({
         key: 'rx-div-hys', label: 'Switch hysteresis', min: 0, max: 20, step: 0.5, unit: 'dB', decimals: 1,
@@ -436,8 +447,23 @@ export function mountInspector({ container, store }) {
 
     // Chain
     const endNote = link.kind === 'iem' ? 'Order: transmitter, then these items, then the Tx antenna.' : 'Order: Rx antenna, then these items, then the receiver.';
-    const cb = section('chain', 'Cable chain', endNote);
+    const cb = section('chain', link.kind === 'iem' ? 'Cable chain' : 'Cable A (antenna A to receiver)', endNote);
     buildChain(cb, c);
+    const hasB = link.kind !== 'iem' && !!(link.rx.diversity && link.rx.diversity.enabled && link.rx.diversity.antennaB);
+    if (hasB) {
+      const bb = section('chainB', 'Cable B (antenna B to receiver)', 'Order: antenna B, then these items, then the receiver.');
+      bb.append(selectField({
+        key: 'chainB-mode', label: 'Cable B', options: [['same', 'Same as cable A'], ['own', 'Own cable']],
+        get: (cc) => (Array.isArray(cc.link.rx.diversity?.antennaB?.chain) ? 'own' : 'same'),
+        set: (cc, v) => setAntennaBChainMode(store, cc.link.id, v),
+      }));
+      if (Array.isArray(link.rx.diversity.antennaB.chain)) buildChain(bb, c, 'antennaB');
+      else {
+        const note = el('p', 'hint chain-total');
+        updaters.push((cc) => { let sum = 0; for (const it of cc.link.chain) sum += safeLoss(it, cc.link.freqMHz); note.textContent = `Antenna B uses cable A: ${lossText(sum)}. Choose "Own cable" to give it its own run (it starts as a copy of cable A).`; });
+        bb.append(note);
+      }
+    }
 
     // Reflectors
     const fb = section('refl', 'Reflectors');
@@ -461,7 +487,7 @@ export function mountInspector({ container, store }) {
       }
     });
 
-    const secs = ['link', 'tx', 'rx', 'env', 'chain', 'refl', 'paths'];
+    const secs = ['link', 'tx', 'rx', 'env', 'chain', ...(refs.chainB ? ['chainB'] : []), 'refl', 'paths'];
     if (c.scene.imd && c.scene.imd.enabled) { buildImd(section('imd', 'Intermod demo'), c); secs.unshift('imd'); }
     container.append(...secs.map((n) => refs[n].details));
   }
@@ -518,10 +544,13 @@ export function mountInspector({ container, store }) {
     body.append(button('Add transmitter', 'imd-add', () => { const id = addImdTransmitter(store); if (id) store.select(id); }));
   }
 
-  function buildChain(body, c) {
+  function buildChain(body, c, target = 'main') {
     const link = c.link;
+    const chainOf = (l) => (target === 'antennaB' ? ((l.rx.diversity && l.rx.diversity.antennaB && l.rx.diversity.antennaB.chain) || []) : l.chain);
+    const base = target === 'antennaB' ? 'rx.diversity.antennaB.chain' : 'chain';
+    const tOpt = { target };
     const list = el('ol', 'chain-list');
-    link.chain.forEach((item, i) => {
+    chainOf(link).forEach((item, i) => {
       const li = el('li', 'ci');
       const head = el('div', 'ci-head');
       const name = el('strong', null, `${i + 1}. ${KIND_NAMES[item.kind] || item.kind}`);
@@ -529,20 +558,20 @@ export function mountInspector({ container, store }) {
       if (PREVIEW_KINDS.has(item.kind)) head.append(el('span', 'badge', 'preview'));
       const lossEl = el('span', 'ci-loss');
       const btns = el('span', 'ci-btns');
-      const idKey = item.id || `i${i}`;
-      const up = button('↑', `ci:${idKey}:up`, () => moveChainItem(store, link.id, item.id, -1), { label: `Move ${KIND_NAMES[item.kind]} ${i + 1} up` });
-      const down = button('↓', `ci:${idKey}:down`, () => moveChainItem(store, link.id, item.id, 1), { label: `Move ${KIND_NAMES[item.kind]} ${i + 1} down` });
-      const del = button('×', `ci:${idKey}:del`, () => removeChainItem(store, link.id, item.id), { label: `Remove ${KIND_NAMES[item.kind]} ${i + 1}`, cls: 'danger' });
+      const idKey = `${target}:${item.id || `i${i}`}`;
+      const up = button('↑', `ci:${idKey}:up`, () => moveChainItem(store, link.id, item.id, -1, tOpt), { label: `Move ${KIND_NAMES[item.kind]} ${i + 1} up` });
+      const down = button('↓', `ci:${idKey}:down`, () => moveChainItem(store, link.id, item.id, 1, tOpt), { label: `Move ${KIND_NAMES[item.kind]} ${i + 1} down` });
+      const del = button('×', `ci:${idKey}:del`, () => removeChainItem(store, link.id, item.id, tOpt), { label: `Remove ${KIND_NAMES[item.kind]} ${i + 1}`, cls: 'danger' });
       up.disabled = i === 0;
-      down.disabled = i === link.chain.length - 1;
+      down.disabled = i === chainOf(link).length - 1;
       btns.append(up, down, del);
       head.append(lossEl, btns);
       const fields = el('div', 'ci-fields');
       li.append(head, fields);
       list.append(li);
 
-      const p = `chain.${i}`;
-      const here = (c2) => c2.link.chain[i];
+      const p = `${base}.${i}`;
+      const here = (c2) => chainOf(c2.link)[i];
       const k = (s) => `ci:${idKey}:${s}`;
       const add = (...nodes) => fields.append(...nodes);
       switch (item.kind) {
@@ -555,10 +584,10 @@ export function mountInspector({ container, store }) {
               get: (c2) => (isCustom(c2) ? 'custom' : here(c2)?.cableType ?? 'rg58'),
               set: (c2, v) => store.update((d) => {
                 const l = d.links.find((x) => x.id === c2.link.id);
-                const it = l?.chain[i];
+                const it = l ? chainOf(l)[i] : null;
                 if (!it) return;
                 if (v === 'custom') {
-                  const per100 = it.lengthM > 0 ? (chainItemLossDb(c2.link.chain[i], c2.link.freqMHz) / it.lengthM) * 100 : 20;
+                  const per100 = it.lengthM > 0 ? (chainItemLossDb(chainOf(c2.link)[i], c2.link.freqMHz) / it.lengthM) * 100 : 20;
                   it.cableType = 'custom';
                   if (it.freqLossOverrideDbPer100m == null) it.freqLossOverrideDbPer100m = Math.round(per100 * 10) / 10;
                 } else {
@@ -602,32 +631,32 @@ export function mountInspector({ container, store }) {
         lossEl.textContent = it ? lossText(safeLoss(it, c2.link.freqMHz)) : '';
       });
     });
-    if (!link.chain.length) body.append(el('p', 'hint', 'No items. The link is connected directly.'));
+    if (!chainOf(link).length) body.append(el('p', 'hint', 'No items. The link is connected directly.'));
     body.append(list);
 
     const total = el('p', 'chain-total');
     updaters.push((c2) => {
       let sum = 0;
-      for (const it of c2.link.chain) sum += safeLoss(it, c2.link.freqMHz);
-      total.textContent = `Net chain: ${lossText(sum)}`;
+      for (const it of chainOf(c2.link)) sum += safeLoss(it, c2.link.freqMHz);
+      total.textContent = `${target === 'antennaB' ? 'Cable B' : 'Cable A'} total: ${lossText(sum)}`;
     });
     body.append(total);
 
     const addRow = el('div', 'chain-add');
     const kindSel = el('select');
     kindSel.setAttribute('aria-label', 'Chain item to add');
-    kindSel.dataset.fkey = 'chain-kind';
+    kindSel.dataset.fkey = `chain-kind-${target}`;
     for (const kd of Object.keys(KIND_NAMES)) {
       const o = el('option', null, PREVIEW_KINDS.has(kd) ? `${KIND_NAMES[kd]} (preview)` : KIND_NAMES[kd]);
       o.value = kd;
       kindSel.append(o);
     }
-    addRow.append(kindSel, button('Add item', 'chain-add', () => {
+    addRow.append(kindSel, button('Add item', `chain-add-${target}`, () => {
       const cc = getCtx();
-      if (cc.link) addChainItem(store, cc.link.id, createChainItem(kindSel.value));
+      if (cc.link) addChainItem(store, cc.link.id, createChainItem(kindSel.value), undefined, tOpt);
     }));
     body.append(addRow);
-    if (link.chain.length === 0 || true) body.append(el('p', 'hint', 'Splitters and combiners are included in the budget but are a preview feature.'));
+    if (target === 'main') body.append(el('p', 'hint', 'Splitters and combiners are included in the budget but are a preview feature.'));
   }
 
   /** Set a link-relative dotted path, creating missing intermediate objects. */
@@ -716,6 +745,7 @@ export function mountInspector({ container, store }) {
     return JSON.stringify([
       c.found?.type ?? null, c.sel ?? null, c.link.id, c.link.kind,
       c.link.chain.map((x, i) => `${x.id || i}:${x.kind}`),
+      c.link.kind !== 'iem' && c.link.rx.diversity && c.link.rx.diversity.enabled && c.link.rx.diversity.antennaB ? (Array.isArray(c.link.rx.diversity.antennaB.chain) ? c.link.rx.diversity.antennaB.chain.map((x, i) => `${x.id || i}:${x.kind}`) : 'same') : null,
       c.scene.reflectors.map((r) => `${r.id}:${r.name}`),
       c.scene.imd && c.scene.imd.enabled ? c.scene.imd.transmitters.map((t) => t.id) : null,
     ]);

@@ -4,7 +4,7 @@
 //   history.get(linkId, seconds)     -> [{ t, rfDbm, rxPowerDbm, thresholdDbm, open, audioDb, audioRawDb,
 //                                          audioPeakDb, audioRawPeakDb, cnrDb, blend, mode, pilotLocked,
 //                                          audioL, audioR, audioRawL, audioRawR, reason,
-//                                          aDbm, bDbm, active, switched, overloadLevel, compressionDb, distortionPct,
+//                                          aDbm, bDbm, cableLossADb, cableLossBDb, active, switched, overloadLevel, compressionDb, distortionPct,
 //                                          batteryPercent (gauge reading, rounded), batteryTruePercent, batteryReportedPercent, batteryGaugeErrorPct, batteryVoltage, dataLocked, dataAgeMs, dataStale, txPowerSagDb,
 //                                          digitalOrder, preFecBer, postFecBer, evmPercent, merDb, digitalState, throughputKbps, noiseRiseDb,
 //                                          captured, cirDb, audioQuality, systemNfDb, noiseFloorDbm, sensitivityAtAntennaDbm, marginAtAntennaDb }]
@@ -85,6 +85,8 @@ export function createHistory({
       audioL: gl.rmsDb, audioR: gr.rmsDb, audioRawL: rawL, audioRawR: rawR,
       aDbm: rx && rx.diversity ? rx.diversity.aDbm : state.levelDbm,
       bDbm: rx && rx.diversity ? rx.diversity.bDbm : NaN,
+      cableLossADb: rx && rx.diversity ? rx.diversity.cableLossADb : NaN,
+      cableLossBDb: rx && rx.diversity ? rx.diversity.cableLossBDb : NaN,
       active: rx && rx.diversity ? rx.diversity.active : 'A',
       switched: !!(rx && rx.diversity && rx.diversity.switchCount !== (lastSwitch.get(link.id) ?? rx.diversity.switchCount)),
       overloadLevel: rx ? rx.overload.level : 'ok',

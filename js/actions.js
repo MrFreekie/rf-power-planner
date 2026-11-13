@@ -3,6 +3,7 @@
 import { buildExample } from './examples.js';
 import { IMD_PRESETS, COMBINER_PRESETS } from './model/imd-params.js';
 import { startWalk, stopWalk } from './walk.js';
+import { effectiveAntennaB } from './model/diversity.js';
 import { createDefaultScene, createDefaultLink, createChainItem, createReflector, createBranch, createZone, createImdTransmitter, defaultImdTransmitters, newId } from './model/scene.js';
 
 const UNSAFE = new Set(['__proto__', 'prototype', 'constructor']);
@@ -45,38 +46,74 @@ export function setLinkField(store, linkId, path, value, o = {}) {
   }, opts(o));
 }
 
-/** Insert a chain item (a plain object with `kind`, or a kind string). Assigns an id when missing. */
-export function addChainItem(store, linkId, item, index) {
+/**
+ * The chain an edit targets: the link chain ('main', default) or, on a mic link whose antenna B has its own cable run,
+ * the antenna B chain ('antennaB'). Returns null when the target does not exist (antenna B shares the main chain).
+ */
+function targetChain(link, target) {
+  if (target === 'antennaB') {
+    const ab = link.rx && link.rx.diversity && link.rx.diversity.antennaB;
+    return ab && Array.isArray(ab.chain) ? ab.chain : null;
+  }
+  return link.chain;
+}
+
+/**
+ * Insert a chain item (a plain object with `kind`, or a kind string). Assigns an id when missing. Returns the new id (null when the
+ * target chain does not exist). opts = { target: 'main' | 'antennaB' } selects the chain; the default is the main link chain.
+ */
+export function addChainItem(store, linkId, item, index, opts = {}) {
   const made = typeof item === 'string' ? createChainItem(item) : createChainItem(item.kind, item);
+  let ok = false;
   store.update((d) => {
     const link = findLink(d, linkId);
-    if (!link) return;
-    const i = Number.isInteger(index) ? Math.max(0, Math.min(link.chain.length, index)) : link.chain.length;
-    link.chain.splice(i, 0, made);
+    const chain = link && targetChain(link, opts.target);
+    if (!chain) return;
+    const i = Number.isInteger(index) ? Math.max(0, Math.min(chain.length, index)) : chain.length;
+    chain.splice(i, 0, made);
+    ok = true;
   });
-  return made.id;
+  return ok ? made.id : null;
 }
 
-export function removeChainItem(store, linkId, itemId) {
+export function removeChainItem(store, linkId, itemId, opts = {}) {
   return store.update((d) => {
     const link = findLink(d, linkId);
-    if (!link) return;
-    const i = link.chain.findIndex((c) => c.id === itemId);
-    if (i >= 0) link.chain.splice(i, 1);
+    const chain = link && targetChain(link, opts.target);
+    if (!chain) return;
+    const i = chain.findIndex((c) => c.id === itemId);
+    if (i >= 0) chain.splice(i, 1);
   });
 }
 
-/** Move an item by `delta` positions (clamped to the chain ends). */
-export function moveChainItem(store, linkId, itemId, delta) {
+/** Move an item by `delta` positions (clamped to the chain ends). opts.target as for addChainItem. */
+export function moveChainItem(store, linkId, itemId, delta, opts = {}) {
   return store.update((d) => {
     const link = findLink(d, linkId);
-    if (!link) return;
-    const i = link.chain.findIndex((c) => c.id === itemId);
+    const chain = link && targetChain(link, opts.target);
+    if (!chain) return;
+    const i = chain.findIndex((c) => c.id === itemId);
     if (i < 0) return;
-    const j = Math.max(0, Math.min(link.chain.length - 1, i + Math.trunc(delta)));
+    const j = Math.max(0, Math.min(chain.length - 1, i + Math.trunc(delta)));
     if (j === i) return;
-    const [it] = link.chain.splice(i, 1);
-    link.chain.splice(j, 0, it);
+    const [it] = chain.splice(i, 1);
+    chain.splice(j, 0, it);
+  });
+}
+
+/**
+ * setAntennaBChainMode(store, linkId, 'same' | 'own'). 'own' gives receive antenna B its own cable run, starting as a deep copy of the
+ * main chain with fresh item ids (so editing B never touches A); 'same' returns to sharing link.chain (stored as null).
+ * Has no effect on IEM links, whose chain is on the transmit side.
+ */
+export function setAntennaBChainMode(store, linkId, mode) {
+  if (mode !== 'same' && mode !== 'own') return false;
+  return store.update((d) => {
+    const link = findLink(d, linkId);
+    const ab = link && link.rx && link.rx.diversity && link.rx.diversity.antennaB;
+    if (!ab) return;
+    if (mode === 'same') ab.chain = null;
+    else if (!Array.isArray(ab.chain)) ab.chain = link.chain.map((c) => ({ ...structuredClone(c), id: newId('ci') }));
   });
 }
 
@@ -411,4 +448,22 @@ export function setRequiredSnr(store, linkId, db) {
     if (db === null) delete link.rx.requiredSnrDb;
     else if (Number.isFinite(db)) link.rx.requiredSnrDb = db;
   });
+}
+
+/**
+ * setAntennaBOrientation(store, linkId, { az?, el? } | null, { coalesce }): aim receive antenna B independently of A.
+ * null returns to "same direction as A". Missing az or el keep the current effective value; az wraps to 0..360, el is clamped to -90..90.
+ */
+export function setAntennaBOrientation(store, linkId, orientation, o = {}) {
+  return store.update((d) => {
+    const link = findLink(d, linkId);
+    const ab = link && link.rx && link.rx.diversity && link.rx.diversity.antennaB;
+    if (!ab) return;
+    if (orientation === null) { ab.orientation = null; return; }
+    if (!orientation || typeof orientation !== 'object') return;
+    const cur = effectiveAntennaB(link).orientation;
+    const az = Number.isFinite(orientation.az) ? orientation.az : cur.az;
+    const el = Number.isFinite(orientation.el) ? orientation.el : cur.el;
+    ab.orientation = { az: ((az % 360) + 360) % 360, el: Math.max(-90, Math.min(90, el)) };
+  }, opts(o));
 }

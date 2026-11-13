@@ -6,14 +6,14 @@
 //   rxConfig(link)          merged overload parameters (receiver preset + the link's overrides)
 // app.js calls rxState.install(squelch): the squelch tracker then uses solve() below, so the squelch gate, meters
 // and history all see the diversity-combined level, and overload is judged on the strongest antenna.
-import { solveLink } from './model/rf.js';
+import { solveLink, chainLossDb } from './model/rf.js';
 import { solveDiversity, diversityStep } from './model/diversity.js';
 import { overloadStep } from './model/overload.js';
 import { RX_PRESETS } from './model/rx-params.js';
 
 const OV_KEYS = ['level', 'headroomDb', 'compressionDb', 'distortionPct', 'agcAttenDb', 'desenseDb', 'inputDbm'];
 const CS_KEYS = ['systemNfDb', 'noiseFloorDbm', 'sensitivityAtAntennaDbm', 'marginAtAntennaDb', 'requiredSnrDb'];
-const DV_KEYS = ['mode', 'active', 'switched', 'switchCount', 'combinedDbm', 'aDbm', 'bDbm', 'gainDb'];
+const DV_KEYS = ['mode', 'active', 'switched', 'switchCount', 'combinedDbm', 'aDbm', 'bDbm', 'gainDb', 'cableLossADb', 'cableLossBDb'];
 
 /** Overload parameters: the link's receiver preset overlaid with link.rx.overload (maxInputDbm, p1dBDbm). */
 export function rxConfig(link) {
@@ -47,7 +47,10 @@ export function createRxTracker({ now = () => (typeof performance !== 'undefined
       rxPowerDbm = step.active === 'B' ? b.rxPowerDbm : a.rxPowerDbm;
       ovInput = Math.max(A, B);
       div = { mode: dv.mode, active: step.active, switched: step.switched, switchCount: m.switchCount,
-        combinedDbm: step.combinedDbm, aDbm: A, bDbm: B, gainDb: step.gainDb };
+        combinedDbm: step.combinedDbm, aDbm: A, bDbm: B, gainDb: step.gainDb,
+        // net loss of each antenna's cable run (negative = net gain from a booster); B equals A unless it has its own chain
+        cableLossADb: chainLossDb(link.chain, link.freqMHz),
+        cableLossBDb: chainLossDb(link.kind !== 'iem' && Array.isArray(dv.antennaB.chain) ? dv.antennaB.chain : link.chain, link.freqMHz) };
     } else {
       const r = solveLink(scene, link);
       casc = r.cascade || null;

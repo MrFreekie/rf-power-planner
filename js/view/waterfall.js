@@ -4,10 +4,11 @@
 import { createCanvasHost, activeLink, solveCached, statusColor, setFont, strokeHatchRect, readTheme } from './util.js';
 import { formatPower, dbmToUnit } from '../model/units.js';
 import { squelch } from '../squelchTracker.js';
+import { solveDiversity } from '../model/diversity.js';
 import { registerSnapshot, makeSnapshotCanvas } from './snapshots.js';
 import { rxState, rxConfig } from '../rxTracker.js';
 
-const ROW_H = 38;
+const ROW_H = 44;
 const TOP = 26;
 const BOTTOM = 66;
 const PAD_L = 10;
@@ -99,7 +100,21 @@ export function mountWaterfall({ container, store }) {
   const nfNote = document.createElement('p');
   nfNote.className = 'hint wf-nf-note';
   nfBox.append(nfHead, nfTable, nfNote);
-  container.append(title, wrap, summary, table, nfBox);
+  // antenna A/B selector (only when receive diversity is on)
+  const abRow = document.createElement('div');
+  abRow.className = 'group wf-ab';
+  abRow.setAttribute('role', 'group');
+  abRow.setAttribute('aria-label', 'Receive antenna shown in the budget');
+  abRow.hidden = true;
+  const abBtns = ['A', 'B'].map((k) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.textContent = `Antenna ${k}`; b.setAttribute('aria-pressed', String(k === 'A'));
+    b.addEventListener('click', () => { ant = k; refresh(); });
+    abRow.append(b);
+    return [k, b];
+  });
+  let ant = 'A';
+  container.append(title, abRow, wrap, summary, table, nfBox);
 
   let rows = [];
   let sens = NaN;
@@ -133,7 +148,7 @@ export function mountWaterfall({ container, store }) {
     let prevEnd = null;
     rows.forEach((r, i) => {
       const y = TOP + i * ROW_H;
-      const barY = y + 18, barH = 12;
+      const barY = y + 24, barH = 12;
       const isEnd = r.type === 'end';
       const level = r.valueDbm;
       const from = r.type === 'start' || isEnd ? min : prevEnd;
@@ -178,7 +193,7 @@ export function mountWaterfall({ container, store }) {
       if (i < rows.length - 1 && !isEnd) {
         const cx = Math.round(X(level)) + 0.5;
         ctx.strokeStyle = th.inkSoft; ctx.lineWidth = 1; ctx.setLineDash([2, 2]);
-        ctx.beginPath(); ctx.moveTo(cx, barY + barH); ctx.lineTo(cx, y + ROW_H + 18); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx, barY + barH); ctx.lineTo(cx, y + ROW_H + 24); ctx.stroke();
         ctx.setLineDash([]);
       }
       prevEnd = level;
@@ -237,7 +252,17 @@ export function mountWaterfall({ container, store }) {
   function refresh() {
     const scene = store.getScene();
     const link = activeLink(scene, store.getSelection());
-    const result = link ? solveCached(scene, link) : null;
+    const dvOn = !!(link && link.kind !== 'iem' && link.rx.diversity && link.rx.diversity.enabled && link.rx.diversity.antennaB);
+    if (!dvOn) ant = 'A';
+    abRow.hidden = !dvOn;
+    abBtns.forEach(([k, b]) => b.setAttribute('aria-pressed', String(k === ant)));
+    let result = link ? solveCached(scene, link) : null;
+    let viewLink = link;
+    if (dvOn && ant === 'B') {
+      try { result = solveDiversity(scene, link).b; } catch { result = null; }
+      const bc = link.rx.diversity.antennaB.chain;
+      if (Array.isArray(bc)) viewLink = { ...link, chain: bc };
+    }
     unit = scene.units?.power || 'dBm';
     if (!link || !result) {
       rows = []; sens = NaN; status = null; sq = null; ovl = null;
@@ -257,12 +282,12 @@ export function mountWaterfall({ container, store }) {
     rows = buildRows(result, sens);
     status = result.status;
     canvas.style.height = `${TOP + rows.length * ROW_H + BOTTOM}px`;
-    const msg = `${link.name}: input ${formatPower(result.inputPowerDbm, unit)}, sensitivity ${formatPower(sens, unit)}, margin ${deltaText(result.marginDb)}, ${result.status}.`;
+    const msg = `${link.name}${dvOn ? ` (antenna ${ant})` : ''}: input ${formatPower(result.inputPowerDbm, unit)}, sensitivity ${formatPower(sens, unit)}, margin ${deltaText(result.marginDb)}, ${result.status}.`;
     summary.textContent = msg + (ovl.level === 'overload' ? ' RF OVERLOAD: receiver input above P1dB.' : ovl.level === 'hot' ? ' Receiver input is HOT (close to P1dB).' : '');
     summary.dataset.status = status;
     canvas.setAttribute('aria-label', `Power budget waterfall. ${msg}`);
 
-    renderNf(result, link);
+    renderNf(result, viewLink);
     tbody.textContent = '';
     for (const r of rows) {
       const tr = document.createElement('tr');

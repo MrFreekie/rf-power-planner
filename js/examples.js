@@ -23,7 +23,7 @@ function twoRay(scene, link) {
   link.rx.pos = { x: 11, y: 6.5, z: 1.0 };
   link.tx.pos = { x: 8, y: 6.5, z: 1.75 };
   link.rx.squelch = { enabled: true, thresholdDbm: -42, hysteresisDb: 2 };
-  link.rx.diversity.antennaB = { pos: { x: 11, y: 6.5, z: 1.4 }, antenna: null }; // null = same as antenna A
+  link.rx.diversity.antennaB = { pos: { x: 11, y: 6.5, z: 1.4 }, antenna: null, chain: null, orientation: null }; // antenna null = same as antenna A, chain null = same cable run as A
 }
 
 const ACROSS = { to: { x: 0.5, y: 6.5, z: 1.75 }, speedMps: 0.8, pingPong: true };
@@ -440,6 +440,22 @@ export const EXAMPLES = [
           createZone({ id: newId('zone'), name: 'Behind the thick wall', polygon: [{ x: 14, y: 1 }, { x: 22, y: 1 }, { x: 22, y: 5 }, { x: 14, y: 5 }], zMin: 0, zMax: 2, requiredMarginDb: 10 }),
         ];
       }),
+    }),
+  },
+  {
+    id: 'diversity-cable-runs',
+    title: 'Diversity with different cable runs',
+    note: 'Antenna A has a short 5 m cable run (2.1 dB loss); antenna B is on a 40 m run of RG58 with a 6 dB booster at the antenna end (11.0 dB net loss). B therefore arrives about 9 dB below A, and with switching diversity the receiver stays on A and moves to B only while A is in its fade, around 7 m (A -41 dBm, B -38 dBm). Remove the booster and B is rarely chosen.',
+    build: () => ({
+      scene: make('mic', (s, l) => {
+        twoRay(s, l);
+        l.chain = [createChainItem('cable', { cableType: 'rg58', lengthM: 5 })];
+        l.rx.diversity.enabled = true;
+        l.rx.diversity.mode = 'switching';
+        l.rx.diversity.hysteresisDb = 3;
+        l.rx.diversity.antennaB.chain = [createChainItem('booster', { gainDb: 6, nfDb: 3 }), createChainItem('cable', { cableType: 'rg58', lengthM: 40 })];
+      }),
+      walk: ACROSS,
     }),
   },
 ];

@@ -3,6 +3,8 @@
 import { haloText, setFont } from './util.js';
 import { classify, parseColor, covView } from './coverageUi.js';
 import { chainLossDb } from '../model/rf.js';
+import { CABLES } from '../model/library.js';
+import { formatLength } from '../model/units.js';
 import * as icons from './icons.js';
 import { couplingLossDb } from '../model/imd.js';
 import { COMBINER_PRESETS } from '../model/imd-params.js';
@@ -193,6 +195,44 @@ export function drawImd(ctx, th, vp, scene, sel, handles, placer, w) {
     ctx.beginPath(); ctx.moveTo(bx + bw, by + bh / 2); ctx.lineTo(rp.x, rp.y + 8); ctx.stroke(); ctx.restore();
     haloText(ctx, th, `Combiner (${c.type})`, bx + 5, by + 14, { px: 11, weight: '600' });
     haloText(ctx, th, `isolation ${Number.isFinite(iso) ? iso : '-'} dB, loss ${Number.isFinite(loss) ? loss : '-'} dB`, bx + 5, by + 28, { px: 10, color: th.inkSoft });
+  }
+}
+
+/** Short description of a receive cable run: "15 m RG58, 6.4 dB" (loss) or "+10 dB" for net gain. Pure apart from reading the library. */
+export function cableTagText(chain, freqMHz, lengthUnit = 'm') {
+  const items = chain || [];
+  const parts = [];
+  for (const it of items.slice(0, 3)) {
+    if (it.kind === 'cable') {
+      const name = it.cableType === 'custom' || it.freqLossOverrideDbPer100m != null ? 'custom' : String((CABLES[it.cableType] && CABLES[it.cableType].name) || it.cableType).split(' ')[0];
+      parts.push(`${formatLength(it.lengthM, lengthUnit).replace(/\.00 /, ' ')} ${name}`);
+    } else parts.push(it.kind);
+  }
+  if (items.length > 3) parts.push(`+${items.length - 3}`);
+  let loss = NaN;
+  try { loss = chainLossDb(items, freqMHz); } catch { /* unknown cable */ }
+  const lossTxt = Number.isFinite(loss) ? `${loss < 0 ? '+' : ''}${Math.abs(loss).toFixed(1)} dB` : '';
+  return `${parts.length ? parts.join(' + ') : 'no cable'}${lossTxt ? `, ${lossTxt}` : ''}`;
+}
+
+/** Cable run tag beside each receive antenna of a mic link ("A: 15 m RG58, 6.4 dB"), with collision avoidance. */
+export function drawRxCableTags(ctx, th, vp, link, placer, lengthUnit = 'm', canvasW = Infinity) {
+  if (link.kind === 'iem' || !link.rx) return;
+  const dv = link.rx.diversity;
+  const ants = [{ k: 'A', pos: link.rx.pos, chain: link.chain }];
+  if (dv && dv.enabled && dv.antennaB && dv.antennaB.pos) ants.push({ k: 'B', pos: dv.antennaB.pos, chain: Array.isArray(dv.antennaB.chain) ? dv.antennaB.chain : link.chain });
+  for (const a of ants) {
+    const p = vp.worldToScreen(a.pos.x, a.pos.y);
+    const text = `${ants.length > 1 ? `${a.k}: ` : ''}${cableTagText(a.chain, link.freqMHz, lengthUnit)}`;
+    setFont(ctx, th, 11, '600');
+    const w = ctx.measureText(text).width;
+    const tx = Math.max(4, Math.min(p.x + 18, canvasW - w - 6)); // keep the tag inside the canvas
+    const y = placer.place(w, tx + w / 2, p.y + (a.k === 'A' ? 30 : 46), 14);
+    ctx.save();
+    ctx.strokeStyle = th.inkSoft; ctx.lineWidth = 1; ctx.setLineDash(a.k === 'A' ? [] : [3, 3]);
+    ctx.beginPath(); ctx.moveTo(p.x + 6, p.y + 8); ctx.lineTo(Math.min(p.x + 16, tx), y - 4); ctx.stroke();
+    ctx.restore();
+    haloText(ctx, th, text, tx, y, { px: 11, weight: '600', color: th.ink });
   }
 }
 
