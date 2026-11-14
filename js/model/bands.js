@@ -145,13 +145,13 @@ export const REGIONS = Object.freeze({
     rasterKHz: 25,
     minSpacingKHz: 300,
     ranges: Object.freeze([
-      Object.freeze({ id: 'us-uhf-470-608', fromMHz: 470, toMHz: 608, use: ['mic', 'iem'], maxPowerMw: 250, powerBasis: 'EIRP', licence: 'varies', note: 'TV channels 14-36 (Part 74 style); licensing eligibility and the TV-band database rules apply.' }),
-      Object.freeze({ id: 'us-uhf-614-698', fromMHz: 614, toMHz: 698, use: ['mic', 'iem'], maxPowerMw: 250, powerBasis: 'EIRP', licence: 'varies', note: 'Legacy extent of the old TV band. Most of it is now cellular (600 MHz); only small gaps remain usable.' }),
+      Object.freeze({ id: 'us-uhf-470-608', fromMHz: 470, toMHz: 608, use: ['mic', 'iem'], maxPowerMw: 250, powerBasis: 'conducted', licence: 'varies', note: 'Unverified: Part 74 style limit is transmitter output power at the antenna terminals (conducted), not EIRP. TV channels 14-36 (Part 74 style); licensing eligibility and the TV-band database rules apply.' }),
+      Object.freeze({ id: 'us-uhf-614-698', fromMHz: 614, toMHz: 698, use: ['mic', 'iem'], maxPowerMw: 250, powerBasis: 'conducted', licence: 'varies', note: 'Unverified: Part 74 style limit is transmitter output power at the antenna terminals (conducted), not EIRP. Legacy extent of the old TV band. Most of it is now cellular (600 MHz); only small gaps remain usable.' }),
       Object.freeze({ id: 'us-902-928', fromMHz: 902, toMHz: 928, use: ['mic', 'iem'], maxPowerMw: 50, powerBasis: 'EIRP', licence: 'exempt', note: 'ISM band, shared with many other users.' }),
-      Object.freeze({ id: 'us-vhf-169-172', group: 'vhf', fromMHz: 169, toMHz: 172, use: ['mic', 'iem'], maxPowerMw: 50, powerBasis: 'EIRP', licence: 'varies', note: 'Part 74 style VHF low segment (approx); check the current rules.' }),
-      Object.freeze({ id: 'us-vhf-174-216', group: 'vhf', fromMHz: 174, toMHz: 216, use: ['mic', 'iem'], maxPowerMw: 50, powerBasis: 'EIRP', licence: 'varies', note: 'VHF is TV Band III (174-216 MHz); DAB and digital TV occupy most of it in many countries, so use bandIIIChannelsToBlocked / dabBlocksToBlocked to exclude what is on air at the venue. VHF high band, TV channels 7-13 (6 MHz each).' }),
-      Object.freeze({ id: 'us-2g4', group: '2g4', fromMHz: 2400, toMHz: 2483.5, use: ['mic', 'iem'], maxPowerMw: 1000, powerBasis: 'EIRP', licence: 'exempt', hopping: true, note: '2.4 GHz ISM (Part 15), shared with Wi-Fi and Bluetooth; higher EIRP is possible with directional antennas. Systems hop on their own.' }),
-      Object.freeze({ id: 'us-5g8', group: '5g8', fromMHz: 5725, toMHz: 5850, use: ['mic', 'iem'], maxPowerMw: 1000, powerBasis: 'EIRP', licence: 'exempt', hopping: true, note: '5.8 GHz ISM / U-NII-3 (Part 15), shared with Wi-Fi channels 149-165.' }),
+      Object.freeze({ id: 'us-vhf-169-172', group: 'vhf', fromMHz: 169, toMHz: 172, use: ['mic', 'iem'], maxPowerMw: 50, powerBasis: 'conducted', licence: 'varies', note: 'Unverified: Part 74 style limit is transmitter output power at the antenna terminals (conducted), not EIRP. Part 74 style VHF low segment (approx); check the current rules.' }),
+      Object.freeze({ id: 'us-vhf-174-216', group: 'vhf', fromMHz: 174, toMHz: 216, use: ['mic', 'iem'], maxPowerMw: 50, powerBasis: 'conducted', licence: 'varies', note: 'Unverified: Part 74 style limit is transmitter output power at the antenna terminals (conducted), not EIRP. VHF is TV Band III (174-216 MHz); DAB and digital TV occupy most of it in many countries, so use bandIIIChannelsToBlocked / dabBlocksToBlocked to exclude what is on air at the venue. VHF high band, TV channels 7-13 (6 MHz each).' }),
+      Object.freeze({ id: 'us-2g4', group: '2g4', fromMHz: 2400, toMHz: 2483.5, use: ['mic', 'iem'], maxPowerMw: 4000, powerBasis: 'EIRP', licence: 'exempt', hopping: true, note: 'Unverified: FCC 15.247 allows 1 W conducted with up to 6 dBi antenna gain, about 36 dBm (4 W) EIRP. 2.4 GHz ISM (Part 15), shared with Wi-Fi and Bluetooth; higher EIRP is possible with directional antennas. Systems hop on their own.' }),
+      Object.freeze({ id: 'us-5g8', group: '5g8', fromMHz: 5725, toMHz: 5850, use: ['mic', 'iem'], maxPowerMw: 4000, powerBasis: 'EIRP', licence: 'exempt', hopping: true, note: 'Unverified: FCC 15.247 allows 1 W conducted with up to 6 dBi antenna gain, about 36 dBm (4 W) EIRP. 5.8 GHz ISM / U-NII-3 (Part 15), shared with Wi-Fi channels 149-165.' }),
     ]),
     blocked: Object.freeze([
       Object.freeze({ fromMHz: 608, toMHz: 614, label: 'Radio astronomy / medical telemetry (TV channel 37)' }),
@@ -233,22 +233,48 @@ const profileKey = (freqMHz) => (freqMHz >= 174 && freqMHz <= 240 ? 'vhf-174-216
 /** library.js BAND_PROFILES entry for a carrier in the VHF, 2.4 GHz or 5.8 GHz bands (null elsewhere; UHF has the REGIONS table). */
 export const bandProfileAt = (freqMHz) => { const k = profileKey(freqMHz); return k ? { key: k, ...BAND_PROFILES[k] } : null; };
 
-/** Typical transmitter output (dBm) for a link kind at a carrier in the VHF / 2.4 / 5.8 GHz bands, else null. mic 15 / IEM 17 (VHF), 10 / 13 (2.4 GHz), 10 / 10 (5.8 GHz). */
+/** Typical transmitter output (dBm) for a link kind at a carrier in the VHF / 2.4 / 5.8 GHz bands, else null. mic 15 / IEM 17 (VHF), 10 / 13 (2.4 GHz), 10 / 10 (5.8 GHz).
+ * With a region it is never above that region's limit for the device (mic: handheld figure, IEM: stationary IEM transmitter figure; 0 dBi antenna assumed). */
 export function typicalTxDbm(kind, freqMHz, regionId) {
   const p = bandProfileAt(freqMHz);
   if (!p) return null;
   const t = p.typicalTxDbm[kind === 'iem' ? 'iem' : 'mic'];
-  const l = regionId ? bandLimitDbm(regionId, freqMHz) : null;
+  const l = regionId ? bandLimitDbm(regionId, freqMHz, { device: kind === 'iem' ? 'iem-tx' : 'handheld' }) : null;
   return l ? Math.min(t, l.maxDbm) : t; // with a region: never above that region's limit (UK 2.4 GHz audio PMSE: 10 dBm)
 }
 
-/** Regional power limit in dBm (transmitter-output basis of the profile) for the VHF / 2.4 / 5.8 GHz bands: { maxDbm, basis } or null. Planning estimate. */
-export function bandLimitDbm(regionId, freqMHz) {
+/** Half-wave dipole reference: EIRP = ERP + 2.15 dB. */
+export const ERP_TO_EIRP_DB = 2.15;
+
+/**
+ * bandLimitDbm(regionId, freqMHz, { device = 'handheld', antennaGainDbi = 0 }) -> { maxDbm, limitDbm, unit, device, basis } | null.
+ * maxDbm is the largest transmitter OUTPUT power (dBm, before the antenna) that keeps the radiated power within the limit:
+ *   EIRP limit: Tx + G <= limit          -> maxDbm = limit - G
+ *   ERP limit:  Tx + G - 2.15 <= limit   -> maxDbm = limit + 2.15 - G        (ERP is relative to a half-wave dipole)
+ *   conducted:  Tx <= limit              -> maxDbm = limit                   (gain not counted)
+ * device picks the figure of the range: 'handheld' (handheld mic) and 'iem-tx' (a stationary IEM transmitter, which is not
+ * body-worn) use the handheld / other figure; 'bodyworn' (bodypack mic or IEM receiver-side body-worn device) uses the body-worn
+ * figure. Figures flagged draft or unverified in `basis`. Planning estimate.
+ */
+export function bandLimitDbm(regionId, freqMHz, { device = 'handheld', antennaGainDbi = 0 } = {}) {
   const x = rangeAt(regionId, freqMHz);
-  if (x && x.power) return { maxDbm: mwToDbm(Math.max(x.power.handheldMw, x.power.bodyWornMw)), basis: `${x.power.unit}, ${x.power.confidence}: ${x.power.note}` }; // the region's own power model (UK)
+  const g = Number.isFinite(antennaGainDbi) ? antennaGainDbi : 0;
+  if (x && x.power) {
+    const mw = device === 'bodyworn' ? x.power.bodyWornMw : x.power.handheldMw;
+    const limitDbm = mwToDbm(mw);
+    const unit = x.power.unit;
+    const maxDbm = unit === 'ERP' ? limitDbm + ERP_TO_EIRP_DB - g : unit === 'EIRP' ? limitDbm - g : limitDbm;
+    return { maxDbm, limitDbm, unit, device, basis: `${unit}, ${x.power.confidence}: ${x.power.note}` };
+  }
+  if (x && Number.isFinite(x.maxPowerMw)) { // EU / US tables: one figure per range, unverified
+    const limitDbm = mwToDbm(x.maxPowerMw);
+    const unit = x.powerBasis;
+    const maxDbm = unit === 'ERP' ? limitDbm + ERP_TO_EIRP_DB - g : unit === 'EIRP' ? limitDbm - g : limitDbm;
+    return { maxDbm, limitDbm, unit, device, basis: `${unit}, unverified: ${x.note}` };
+  }
   const p = bandProfileAt(freqMHz);
-  const l = p && p.limits.find((x) => x.region === regionId);
-  return l ? { maxDbm: l.maxDbm, basis: l.basis } : null;
+  const l = p && p.limits.find((q) => q.region === regionId);
+  return l ? { maxDbm: l.maxDbm, limitDbm: l.maxDbm, unit: 'conducted', device, basis: l.basis } : null;
 }
 
 export const REGION_IDS = Object.freeze(Object.keys(REGIONS));

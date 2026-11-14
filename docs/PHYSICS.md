@@ -1,4 +1,4 @@
-# Physics notes: RF Power Planner
+# Physics notes: RF Bench
 
 Owner: rf-physicist. Data lives in `js/model/library.js`; maths in `js/model/rf.js`.
 

@@ -167,11 +167,26 @@ export const CASCADE_TYPICAL = Object.freeze({
   defaultBoosterNfDb: 3
 });
 
-// External noise at the antenna (man-made plus galactic) as a noise figure at 600 MHz, dB above kT, approx. ITU-R P.372
-// gives man-made Fam = c - d log10 f (business area c = 76.8, d = 27.7: about 0 dB at 600 MHz), so galactic and ground
-// noise (about 1 to 3 dB) and local interference sources dominate. Near dimmers, LED walls and switch-mode supplies the
-// local noise can be 10 dB or more higher.
-export const EXTERNAL_NOISE_FIGURE_600MHZ_DB = Object.freeze({ quiet: 1, outdoor: 3, urban: 5, 'noisy-venue': 12 });
+// External noise at the antenna as a noise figure (dB above kT) versus frequency: ONE model for rf.js, the UI and the band profiles.
+// ITU-R P.372 man-made noise: Fam = c - 27.7 log10(f_MHz) dB, with c = 76.8 business/city, 72.5 residential, 67.2 rural. It is
+// power-summed with a constant galactic + ground floor (assumed 1 dB, approx; the real galactic term also falls with frequency).
+// The 'noisy-venue' entry adds local sources (dimmers, LED walls, switch-mode supplies): c chosen so the total is 12 dB at 600 MHz
+// (assumed). Results: business about 13 dB at 200 MHz and about 3.5 dB at 600 MHz; rural about 5 dB at 200 MHz.
+export const EXTERNAL_NOISE_MODEL = Object.freeze({
+  slopeDbPerDecade: 27.7,
+  floorDb: 1,
+  cDb: Object.freeze({ quiet: 67.2, outdoor: 72.5, urban: 76.8, 'noisy-venue': 88.59534449320424 }),
+});
+/** External noise figure in dB above kT of a named environment at freqMHz (0 for an unknown name or f <= 0). */
+export function externalNoiseFigureDb(name, freqMHz) {
+  const c = EXTERNAL_NOISE_MODEL.cDb[name];
+  if (!Number.isFinite(c) || !(freqMHz > 0)) return 0;
+  const fam = c - EXTERNAL_NOISE_MODEL.slopeDbPerDecade * Math.log10(freqMHz);
+  return 10 * Math.log10(Math.pow(10, fam / 10) + Math.pow(10, EXTERNAL_NOISE_MODEL.floorDb / 10));
+}
+// Values at 600 MHz for the UI labels (derived from the model above, one decimal).
+export const EXTERNAL_NOISE_FIGURE_600MHZ_DB = Object.freeze(Object.fromEntries(
+  Object.keys(EXTERNAL_NOISE_MODEL.cDb).map((k) => [k, Math.round(externalNoiseFigureDb(k, 600) * 10) / 10])));
 
 // In-band interference floor rise (dB) at 2.4 / 5.8 GHz from other users of the licence-exempt band (Wi-Fi, Bluetooth, ...).
 // Noise-floor rise at a Wi-Fi channel centre per venue level, from docs/PHYSICS-BANDS.md (library.js INTERFERENCE_MODEL: average Wi-Fi + Bluetooth

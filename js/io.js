@@ -8,11 +8,11 @@ export function sceneToBlob(scene) {
 }
 
 /** Trigger a browser download of the scene as JSON. */
-export function downloadScene(scene, filename = 'rf-power-scene.json') {
+export function downloadScene(scene, filename = 'rf-bench-scene.json') {
   const url = URL.createObjectURL(sceneToBlob(scene));
   const a = document.createElement('a');
   a.href = url;
-  a.download = filename;
+  a.download = String(filename).replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 100) || 'rf-bench-scene.json';
   document.body.append(a);
   a.click();
   a.remove();

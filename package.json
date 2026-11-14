@@ -1,9 +1,9 @@
 {
-  "name": "rf-power-planner",
+  "name": "rf-bench",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Static RF link-budget planner for wireless microphones and IEMs",
+  "description": "Static RF link-budget and physics demonstration tool for wireless microphones and IEMs",
   "scripts": {
     "test": "node --test tests/",
     "serve": "node scripts/serve.mjs"

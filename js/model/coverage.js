@@ -7,6 +7,7 @@ let ZP = {};
 try { ZP = await import('./zones-params.js'); } catch { ZP = {}; }
 
 export const COARSE_CELL_M = 1; // first (quick) pass
+export const MAX_GRID_CELLS = 4e6; // upper bound on nx * ny (about 20 MB of grids); a larger area gets a coarser cell instead
 export const FINE_CELL_M = 0.25; // fine pass at UHF (half a wavelength is 0.25 m at 600 MHz)
 export const DEFAULT_PASS_FRACTION = 0.95;
 
@@ -66,9 +67,15 @@ export function coverageGrid(scene, linkId, opts = {}) {
   const link = findLink(scene, linkId);
   if (!link) return null;
   const prev = opts.resume || null;
-  const cellM = prev ? prev.cellM : Math.max(0.05, opts.cellM || (opts.pass === 'coarse' ? COARSE_CELL_M : FINE_CELL_M));
   const lambdaM = wavelengthM(link.freqMHz);
   const b = prev ? null : opts.bounds || defaultBounds(scene);
+  let cellM = prev ? prev.cellM : Math.max(0.05, opts.cellM || (opts.pass === 'coarse' ? COARSE_CELL_M : FINE_CELL_M));
+  if (!prev) {
+    const w = b.x1 - b.x0, h = b.y1 - b.y0;
+    if (!Number.isFinite(w) || !Number.isFinite(h)) return null; // unusable bounds: no grid
+    const cells = (w / cellM) * (h / cellM);
+    if (cells > MAX_GRID_CELLS) cellM *= Math.sqrt(cells / MAX_GRID_CELLS) * 1.0001; // keeps nx * ny within the cap
+  }
   const x0 = prev ? prev.x0 : b.x0, y0 = prev ? prev.y0 : b.y0;
   const nx = prev ? prev.nx : Math.max(1, Math.ceil((b.x1 - b.x0) / cellM - 1e-9));
   const ny = prev ? prev.ny : Math.max(1, Math.ceil((b.y1 - b.y0) / cellM - 1e-9));

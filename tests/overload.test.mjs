@@ -48,15 +48,17 @@ test('overloadStep levels, headroom, distortion, AGC', () => {
   assert.ok(overloadStep(null, 20, CFG).distortionPct > 99.99 && overloadStep(null, 20, CFG).distortionPct <= 100);
   let pd = 0;
   for (let x = -80; x <= 40; x += 2) { const d = overloadStep(null, x, CFG).distortionPct; assert.ok(d >= pd - 1e-12 && d <= 100); pd = d; }
-  assert.ok(over.desenseDb > 2); // twice the 1 dB self-compression plus IM3 noise rise
+  near(over.desenseDb, 2, 1e-9); // lone carrier at P1dB: twice the 1 dB compression, no IM3 (needs a second carrier)
   // desense = 2 x compression + IM3 noise rise: at -25 dBm compression is 0 and the rise is small
   // strong tone: the IM3 noise rise is huge, but desense is capped (maxDesenseDb 40, never above blocker excess over noise)
-  near(overloadStep(null, -20, CFG).desenseDb, 40, 1e-9);
+  near(overloadStep(null, -20, { ...CFG, otherCarriersDbm: [-20] }).desenseDb, 40, 1e-9);
+  // a lone strong carrier makes no IM3 desense (physics review): only twice its compression
+  assert.ok(overloadStep(null, -30, { ...CFG, iip3Dbm: -12 }).desenseDb < 0.2);
   assert.ok(overloadStep(null, -8.2, CFG).desenseDb <= 40);
   assert.ok(overloadStep(null, -8.2, CFG).distortionPct <= 100);
   // blocker-over-noise cap: input -100 dBm is 13 dB over the noise floor, desense cannot exceed that
   assert.ok(overloadStep(null, -100, CFG).desenseDb <= 13.0);
-  near(overloadStep(null, -20, { ...CFG, maxDesenseDb: 25 }).desenseDb, 25, 1e-9);
+  near(overloadStep(null, -20, { ...CFG, maxDesenseDb: 25, otherCarriersDbm: [-20] }).desenseDb, 25, 1e-9);
 });
 
 test('overloadStep hysteresis sequence', () => {

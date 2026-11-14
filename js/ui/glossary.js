@@ -118,7 +118,7 @@ export function findTerms(text) {
 /** Terms from the glossary that occur in a piece of text (for legends and tests). */
 export function termsIn(text) { return [...new Set(findTerms(text).map((t) => t.term))]; }
 
-const SKIP = new Set(['SCRIPT', 'STYLE', 'CANVAS', 'BUTTON', 'SELECT', 'OPTION', 'TEXTAREA', 'INPUT', 'ABBR', 'SUMMARY', 'NOSCRIPT', 'SVG', 'CODE', 'PRE']);
+const SKIP = new Set(['SCRIPT', 'STYLE', 'CANVAS', 'H1', 'H2', 'H3', 'H4', 'LEGEND', 'BUTTON', 'SELECT', 'OPTION', 'TEXTAREA', 'INPUT', 'ABBR', 'SUMMARY', 'NOSCRIPT', 'SVG', 'CODE', 'PRE']);
 
 function shouldSkip(el) {
   for (let e = el; e; e = e.parentElement) {

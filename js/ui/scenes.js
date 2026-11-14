@@ -25,7 +25,7 @@ function readItems(storage) {
   try {
     const data = JSON.parse(text);
     if (!data || data.v !== 1 || !Array.isArray(data.items)) return { items: [], corrupt: true };
-    const items = data.items.filter((it) => it && typeof it.id === 'string' && typeof it.name === 'string' && typeof it.json === 'string')
+    const items = data.items.filter((it) => it && typeof it.id === 'string' && typeof it.name === 'string' && typeof it.json === 'string' && it.json.length <= LIMITS.maxSceneBytes) // a tampered or oversize entry is dropped
       .map((it) => ({ id: it.id, name: cleanName(it.name) || 'Untitled', savedAt: Number.isFinite(it.savedAt) ? it.savedAt : 0, json: it.json }));
     return { items, corrupt: items.length !== data.items.length };
   } catch { return { items: [], corrupt: true }; }

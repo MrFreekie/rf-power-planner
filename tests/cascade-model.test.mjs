@@ -237,7 +237,7 @@ test('external noise (off by default) raises the antenna noise floor and falls w
   const iem = createDefaultScene(); iem.environment = { ...iem.environment, externalNoise: 'noisy-venue', model: 'free-space' }; iem.reflectors = [];
   const il = createDefaultLink('iem'); delete il.branches; iem.links = [il];
   const ri = solveLink(iem, il);
-  assert.equal(ri.cascade.externalNoiseNfDb, 12);
+  near(ri.cascade.externalNoiseNfDb, 12, 1e-9);
   near(ri.marginDb, ri.inputPowerDbm - il.rx.sensitivityDbm - (ri.cascade.noiseFloorDbm - (kTB + ri.cascade.systemNfDb)), 1e-3);
   assert.ok(ri.cascade.noiseFloorDbm > kTB + ri.cascade.systemNfDb + 2);
 });

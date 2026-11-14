@@ -3,7 +3,7 @@ import { createStore } from './store.js';
 import { createDefaultScene, createDefaultLink, deserialize, serialize } from './model/scene.js';
 import { solveLink } from './model/rf.js';
 import { SURFACES } from './model/library.js';
-import { setUnits, setLinkKind, setPath, loadExample, setModulation, setCoverageMode, setImdEnabled } from './actions.js';
+import { setUnits, setLinkKind, setPath, loadExample, setModulation, setCoverageMode, setImdEnabled, resetScene } from './actions.js';
 import { EXAMPLES } from './examples.js';
 import { rxState } from './rxTracker.js';
 import { telemetry } from './telemetryTracker.js';
@@ -19,7 +19,6 @@ import { downloadScene, loadSceneFromFile } from './io.js';
 import { squelch, history } from './squelchTracker.js';
 import { mpx } from './mpxTracker.js';
 import { formatPower, formatLength, formatDb } from './model/units.js';
-import { resetScene } from './actions.js';
 import { mountWelcome } from './ui/onboarding.js';
 import { mountHelp } from './ui/help.js';
 import { mountScenes } from './ui/scenes.js';
@@ -28,9 +27,10 @@ import { mountCoordination } from './ui/coordination.js';
 import { mountGlossary } from './ui/glossary.js';
 
 const $ = (id) => document.getElementById(id);
+// The storage key keeps its original, pre-rename name on purpose: changing it would orphan scenes people already saved.
 const STORAGE_KEY = 'rf-power-planner.scene.v1';
 
-const history_ = window.history; // the sample history module below is also called `history`
+const browserHistory = window.history; // the sample history module below is also called `history`
 let hadStoredScene = false;
 let staleCleared = false;
 function loadInitialScene() {
@@ -103,8 +103,12 @@ $('file-load').addEventListener('change', async (e) => {
   const res = await loadSceneFromFile(file);
   if (!res.ok) { loadError = `Could not load ${file.name}: ${res.error}`; showError(loadError); return; }
   loadError = '';
+  stopWalk();
   store.setScene(res.scene);
   store.select(null);
+  history.clear();
+  $('example-note').hidden = true;
+  renderWalk();
 });
 let walkAll = false; // true while the running walk is the shared 'Walk all' one
 function renderWalk() {
@@ -177,10 +181,10 @@ function showStatus(msg, ms = 4000) {
 $('btn-share').addEventListener('click', async () => {
   let link;
   try { link = await buildShareLink(store.getScene(), location.origin + location.pathname + location.search); } catch (err) { showError(err.message); return; }
-  let copied = false;
+  let copied = false, prompted = false;
   try { await navigator.clipboard.writeText(link.url); copied = true; } catch { /* clipboard unavailable: fall back to a prompt */ }
-  if (!copied) { try { window.prompt('Copy this link', link.url); copied = true; } catch { /* ignore */ } }
-  if (!copied) { showStatus('Copy this link: ' + link.url + (link.venueOmitted && link.message ? ' ' + link.message : ''), 20000); return; }
+  if (!copied) { try { window.prompt('Copy this link', link.url); prompted = true; } catch { /* ignore */ } }
+  if (!copied && !prompted) { showStatus('Copy this link: ' + link.url + (link.venueOmitted && link.message ? ' ' + link.message : ''), 20000); return; }
   const note = 'The whole scene is stored in the link itself; nothing is uploaded.';
   showStatus((copied ? 'Copied. ' : '') + (link.warn ? `Long link (${(link.size / 1024).toFixed(1)} KB): some apps may cut it. ` : '') + note + (link.venueOmitted && link.message ? ' ' + link.message : ''), link.venueOmitted ? 10000 : 6000);
 });
@@ -197,7 +201,7 @@ $('share-ignore').addEventListener('click', () => { pendingShared = null; $('sha
 async function handleHash() {
   const h = parseHash(location.hash);
   if (!h) return;
-  try { history_.replaceState(null, '', location.pathname + location.search); } catch { /* ignore */ }
+  try { browserHistory.replaceState(null, '', location.pathname + location.search); } catch { /* ignore */ }
   if (h.kind === 'scene') {
     const r = await decodeScene(h.token);
     if (!r.ok) { showError(`Could not open the shared link: ${r.error}`); return; }
@@ -253,7 +257,7 @@ $('btn-batt-reset').addEventListener('click', () => {
 $('batt-scale').addEventListener('change', (e) => {
   const v = parseFloat(e.target.value);
   if (Number.isFinite(v) && v >= 1) setPath(store, 'links.0.telemetry.battery.timeScale', v);
-  else e.target.value = activeLink().telemetry.battery.timeScale;
+  else { const tl = activeLink().telemetry; if (tl && tl.battery) e.target.value = tl.battery.timeScale; }
 });
 // Reset to the default scene (asks first; undoable) and let the autosave overwrite the stored copy.
 $('btn-reset').addEventListener('click', () => {
@@ -284,7 +288,8 @@ $('btn-redo').addEventListener('click', () => store.redo());
 
 document.addEventListener('keydown', (e) => {
   if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'z') return;
-  if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
+  const t = e.target;
+  if (t instanceof HTMLInputElement || t instanceof HTMLSelectElement || t instanceof HTMLTextAreaElement || (t && t.isContentEditable)) return;
   e.preventDefault();
   if (e.shiftKey) store.redo(); else store.undo();
 });
@@ -415,8 +420,9 @@ try {
   await mountVenue({ button: $('btn-venue'), store, isLocked: () => document.body.dataset.readonly === 'true' });
 } catch (err) { console.error('venue', err); $('btn-venue').hidden = true; }
 
-handleHash();
-window.addEventListener('hashchange', handleHash);
+const openHash = () => handleHash().catch((err) => { console.error(err); showError(`Could not open the link: ${err.message}`); });
+openHash();
+window.addEventListener('hashchange', openHash);
 
 // Debug handle for the console.
 window.rfPlanner = { store, squelch, history, mpx, rxState, telemetry, digital, coverage, imd };

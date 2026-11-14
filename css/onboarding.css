@@ -14,7 +14,7 @@
 .ob-help[hidden] { display: none; }
 .ob-help-pane { padding: 0 12px; }
 .ob-help-btn {
-  min-height: 0; padding: 0 2px; border: 0; background: none; color: var(--blue-text, #2f5a8f);
+  min-height: 24px; padding: 0 4px; border: 0; background: none; color: var(--blue-text, #2f5a8f);
   text-decoration: underline; text-underline-offset: 2px; font-size: 12px; cursor: pointer;
 }
 .ob-help-btn:hover:not(:disabled) { background: none; text-decoration-thickness: 2px; }
@@ -49,7 +49,7 @@
 @media (max-width: 720px) {
   #welcome { padding: 8px 12px 10px; }
   .ob-details { padding: 6px 12px; }
-  .ob-body button, .ob-item button, .ob-help-btn { min-height: 36px; }
+  .ob-body button, .ob-item button { min-height: 36px; }
 }
 
 /* ---- glossary: acronyms and the single shared popover ---- */
@@ -69,7 +69,8 @@ abbr.gl:focus-visible { outline: 2px solid var(--focus, var(--ink, #1d2733)); ou
 }
 
 /* ---- frequency coordination ---- */
-.ob-field { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
+.ob-field { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; min-width: 0; max-width: 100%; }
+.ob-field select { min-width: 0; max-width: 100%; }
 .ob-field input[type="number"] { width: 4.5em; }
 .ob-coord-sum { margin: 6px 0; font-size: 13px; font-weight: 600; }
 
@@ -105,3 +106,4 @@ abbr.gl:focus-visible { outline: 2px solid var(--focus, var(--ink, #1d2733)); ou
 [data-theme="dark"] .fm-assumed { color: #ffcc66; background: rgba(255, 190, 60, 0.12); }
 [data-theme="dark"] .fm-sourced { color: #7fd69a; }
 [data-theme="dark"] .fm-warn { color: #ff9a9a; }
+@media (pointer: coarse), (max-width: 800px) { .ob-help-btn { min-height: 44px; min-width: 44px; } }

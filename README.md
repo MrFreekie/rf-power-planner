@@ -19,6 +19,8 @@ no accounts. Vanilla ES modules and Canvas 2D.
 - Squelch with hysteresis, RF overload and headroom, receive diversity (switching, true, ratio).
 - Multi-antenna IEM coverage with zones, a coverage heat map and fix suggestions.
 - Intermodulation: front-end, transmitter-to-transmitter and passive products, noise floor and coordination checks.
+- Venue underlay: import a venue drawing (SU4SV text) as a grey underlay with layer toggles and height shading.
+- Frequency coordination checks by region and band, a scene compare table and named scenes saved in the browser.
 - Printable report sheet, JSON save/load and shareable links (the scene is stored in the link; nothing is uploaded).
 
 **As a physics demonstration**
@@ -26,7 +28,9 @@ no accounts. Vanilla ES modules and Canvas 2D.
 - FM MPX stereo that degrades to mono as the signal weakens, the 19 kHz pilot, pilot-tone squelch and stray carriers.
 - Telemetry above the MPX band, battery sag and gauge error.
 - Digital links: QAM constellation, BER curve, adaptive modulation and the cliff effect.
-- Timeline of RF level, audio level and mute events; ready-made examples from the Examples menu.
+- Timeline of RF level, audio level and mute events, plus audio, MPX and RF spectrum views in the bottom bar.
+- Modulation lab: animated AM, FM, digital and stereo FM demonstrations, with pre-emphasis and companding.
+- Ready-made examples from the Examples menu; Undo/Redo (Ctrl+Z, Ctrl+Shift+Z) covers every edit.
 
 ## Run locally
 
@@ -39,6 +43,13 @@ ES modules need an HTTP origin (not `file://`):
     node --test tests/               # Node 20+
 
 `js/model/*` is pure (no DOM), so the physics runs under Node and is covered by unit tests with hand-computed values.
+`tests/app-wiring.test.mjs` also checks the app shell without a browser (element ids, module paths, import cycles, relative URLs).
+Tests that use local venue files in `tests/private-venues/` skip themselves when that folder is absent.
+
+## Privacy
+
+Everything runs in your browser. Scenes, saved scenes and settings are kept in `localStorage` on your device only.
+Share links carry the scene in the URL fragment (after `#`), which browsers do not send to the server. Nothing is uploaded.
 
 ## Layout
 
@@ -59,6 +70,7 @@ In the repository settings choose Pages, Source: GitHub Actions.
 Released under the [PolyForm Noncommercial License 1.0.0](LICENSE). You may use, modify and share it for
 noncommercial purposes (personal use, hobby projects, education, research, charities and similar organisations).
 Commercial use needs separate permission from the copyright holder.
+Copyright (c) 2026 Mark Hughes.
 
 ## Conventions
 

@@ -1,5 +1,5 @@
 // js/model/library.js
-// Static physical data for the RF Power Planner. Pure module: no DOM, no globals.
+// Static physical data for the RF Bench. Pure module: no DOM, no globals.
 // Units: MHz, dB, dBi, metres, degrees, S/m.
 //
 // Sources (values are rounded; `// approx` marks values interpolated or recalled
@@ -439,7 +439,6 @@ export const BAND_PROFILES = {
     typicalTxDbm: { mic: 15, iem: 17 }, typicalEirpDbm: { mic: 12, iem: 15 },
     note: 'DAB/DVB-T Band III broadcasters (ERP up to MW) share this spectrum: coordinate against local multiplex channels (5A 174.928 MHz to 13F 239.2 MHz).',
     rx: { noiseFigureDb: 7, channelBwKHz: 200, requiredCnrDb: 23, sensitivityDbm: -91, modulation: 'analog FM' },
-    externalNoiseFigureDb: { quiet: 3, outdoor: 7, urban: 10, 'noisy-venue': 18 }, // ITU-R P.372 man-made F_am = c - d log f: business 13 dB at 200 MHz; approx
   },
   'ism-2400': {
     name: '2.4 GHz ISM 2400-2483.5 MHz',
@@ -451,7 +450,6 @@ export const BAND_PROFILES = {
     typicalTxDbm: { mic: 10, iem: 13 }, typicalEirpDbm: { mic: 9, iem: 14 },
     note: 'Shared with Wi-Fi, Bluetooth and microwave ovens. Digital audio; no licence in most regions.',
     rx: { noiseFigureDb: 7, channelBwKHz: 2000, requiredCnrDb: 14, sensitivityDbm: -90, modulation: 'digital GFSK-like' },
-    externalNoiseFigureDb: { quiet: 0, outdoor: 0, urban: 0, 'noisy-venue': 0 }, // man-made noise negligible at 2.4 GHz; interference is INTERFERENCE_MODEL
   },
   'ism-5800': {
     name: '5.8 GHz ISM/SRD 5725-5875 MHz',
@@ -463,7 +461,6 @@ export const BAND_PROFILES = {
     typicalTxDbm: { mic: 10, iem: 10 }, typicalEirpDbm: { mic: 8, iem: 9 },
     note: 'Few mic/IEM products; FPV video, UNII-3 Wi-Fi and point-to-point links share it. Free-space loss is 7.7 dB above 2.4 GHz for equal antennas.',
     rx: { noiseFigureDb: 9, channelBwKHz: 2000, requiredCnrDb: 14, sensitivityDbm: -88, modulation: 'digital GFSK-like' },
-    externalNoiseFigureDb: { quiet: 0, outdoor: 0, urban: 0, 'noisy-venue': 0 },
   },
 };
 

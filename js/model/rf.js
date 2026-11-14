@@ -21,7 +21,7 @@
 import { CABLES, ANTENNAS, SURFACES, MATERIALS, cableDbPer100m as libraryCableDbPer100m, surfaceAt, materialAt } from './library.js';
 import { formatLength } from './units.js';
 import { hasFloorFeatures, floorHeightAt, floorSurfaceAt, absolutePos, allReflectors, chordsThrough, floorZoneFraction } from './floor.js';
-import { RX_PRESETS, RX_DEFAULTS, EXTERNAL_NOISE_FIGURE_600MHZ_DB, INTERFERENCE_RISE_DB, INTERFERENCE_LEVELS, INTERFERENCE_MIN_MHZ, interferenceBandOf, cascadeIip3Dbm as stagesIip3Dbm } from './rx-params.js';
+import { RX_PRESETS, RX_DEFAULTS, externalNoiseFigureDb, INTERFERENCE_RISE_DB, INTERFERENCE_LEVELS, INTERFERENCE_MIN_MHZ, interferenceBandOf, cascadeIip3Dbm as stagesIip3Dbm } from './rx-params.js';
 
 let ZP = {};
 try { ZP = await import('./zones-params.js'); } catch { ZP = {}; }
@@ -485,7 +485,8 @@ const BOLTZMANN_DBM_HZ = -174; // kT at 290 K
 /** External noise figure (dB above kT) at freqMHz from environment.externalNoise (name or dB at 600 MHz); 0 when unset. */
 export function externalNoiseNfDb(env, freqMHz) {
   const v = env && env.externalNoise;
-  const at600 = typeof v === 'number' ? v : EXTERNAL_NOISE_FIGURE_600MHZ_DB[v];
+  if (typeof v === 'string') return externalNoiseFigureDb(v, freqMHz);
+  const at600 = v;
   if (!Number.isFinite(at600) || at600 <= 0) return 0;
   return Math.max(0, at600 - 27.7 * Math.log10(freqMHz / 600));
 }

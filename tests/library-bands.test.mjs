@@ -150,10 +150,8 @@ test('band profiles: receiver numbers are self-consistent, limits present, typic
     const maxAny = Math.max(...p.limits.map((l) => l.maxDbm));
     assert.ok(p.typicalTxDbm.mic <= maxAny && p.typicalTxDbm.iem <= maxAny, id);
     assert.ok(p.limits.length >= 3 && p.limits.every((l) => l.basis && l.region));
-    const e = p.externalNoiseFigureDb;
-    assert.ok(e.quiet <= e.outdoor && e.outdoor <= e.urban && e.urban <= e['noisy-venue']);
+    assert.equal(p.externalNoiseFigureDb, undefined, 'one external-noise table only (rx-params.js)');
   }
-  assert.ok(BAND_PROFILES['vhf-174-216'].externalNoiseFigureDb.urban > 5); // man-made noise is higher at VHF than UHF
   assert.ok(BAND_PROFILES['ism-5800'].rx.noiseFigureDb >= BAND_PROFILES['ism-2400'].rx.noiseFigureDb);
   assert.ok(BAND_PROFILES['ism-5800'].rx.sensitivityDbm >= BAND_PROFILES['ism-2400'].rx.sensitivityDbm);
 });

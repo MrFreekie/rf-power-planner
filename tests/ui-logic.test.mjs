@@ -212,9 +212,9 @@ test('external noise: default urban, validation, old scenes stay Off', () => {
 test('external noise selector: options carry the frequency-scaled figure', () => {
   const o = Object.fromEntries(noiseOptions('urban', 600));
   assert.match(o.off, /Off \(0 dB\)/);
-  assert.equal(o.urban, 'Urban (+5 dB @600 MHz)');
-  assert.equal(Object.fromEntries(noiseOptions('urban', 1200)).urban, 'Urban (+5 dB @600 MHz; +0 dB at 1200 MHz)');
-  assert.match(Object.fromEntries(noiseOptions('urban', 470)).urban, /; \+7.9 dB at 470 MHz/);
+  assert.equal(o.urban, 'Urban (+3.5 dB @600 MHz)');
+  assert.equal(Object.fromEntries(noiseOptions('urban', 1200)).urban, 'Urban (+3.5 dB @600 MHz; +1.5 dB at 1200 MHz)');
+  assert.match(Object.fromEntries(noiseOptions('urban', 470)).urban, /; \+5 dB at 470 MHz/);
   assert.ok(noiseOptions(4, 600).some(([v]) => v === 'custom'));
   assert.equal(noiseValue(undefined), 'off'); assert.equal(noiseValue(0), 'off'); assert.equal(noiseValue('quiet'), 'quiet'); assert.equal(noiseValue(2), 'custom');
   assert.equal(noiseFromChoice('off'), 0); assert.equal(noiseFromChoice('urban'), 'urban'); assert.equal(noiseFromChoice('custom'), undefined);

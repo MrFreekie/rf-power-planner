@@ -71,7 +71,9 @@ export function compressionDbOf(inputDbm, cfg) {
  *              exceeds it (a product cannot be larger than the carriers that make it).
  *  agcAttenDb = clamp(input - sensitivityDbm, 0, agcRangeDb): AGC gain reduction, the AGC runs from sensitivity to
  *              sensitivity + agcRangeDb. agcExhausted = input beyond that range.
- *  desenseDb = 2 x compression + IM3 noise rise 10log10(1 + 10^((IM3sat - noiseFloor)/10)): cross-compression of a
+ *  desenseDb = 2 x compression (of the strongest carrier) + IM3 noise rise, the latter only when cfg.otherCarriersDbm lists other
+ *              carriers at the input (a lone carrier makes no IM3 product on its own channel);
+ *              originally: 2 x compression + IM3 noise rise 10log10(1 + 10^((IM3sat - noiseFloor)/10)): cross-compression of a
  *              weak signal by a strong one is about twice the self-compression in dB (cubic nonlinearity); the
  *              noise rise is the (saturated) IM3 product sitting in the channel. The result is capped by the smallest of
  *              (a) the blocker's excess over the noise floor (input - noiseFloor: it cannot raise the floor above
@@ -110,10 +112,22 @@ export function overloadStep(prevState, inputDbm, cfg) {
   const agcAttenDb = finite ? Math.min(c.agcRangeDb, Math.max(0, level - c.sensitivityDbm)) : 0;
   const agcExhausted = finite && level > c.sensitivityDbm + c.agcRangeDb;
   const noiseFloor = -174 + 10 * Math.log10(c.bandwidthHz) + c.noiseFigureDb;
-  const imdLevel = level + 20 * Math.log10(ratio / Math.sqrt(1 + ratio * ratio)); // saturated: never above the carrier
-  const rawDesense = 2 * compressionDb + (finite ? 10 * Math.log10(1 + Math.pow(10, (imdLevel - noiseFloor) / 10)) : 0);
+  // IM3 desense needs a SECOND carrier: a lone carrier makes no in-band IM3 product at its own frequency. Other carriers at the
+  // receiver input (dBm, from the scene IMD tones) are passed as cfg.otherCarriersDbm; the worst product 2 f_a - f_b of the
+  // two strongest tones of {wanted, others} is 2 Pa + Pb - 2 IIP3 (3:1 slope), saturated so it never exceeds its carriers.
+  const others = Array.isArray(c.otherCarriersDbm) ? c.otherCarriersDbm.filter(Number.isFinite) : [];
+  let imNoiseRiseDb = 0;
+  if (finite && others.length) {
+    const all = [level, ...others].sort((a, b) => b - a).slice(0, 2);
+    const prod = Math.max(2 * all[0] + all[1], 2 * all[1] + all[0]) - 2 * iip3;
+    const imdLevel = Math.min(prod, all[1]); // saturated: never above a carrier
+    imNoiseRiseDb = 10 * Math.log10(1 + Math.pow(10, (imdLevel - noiseFloor) / 10));
+  }
+  const worst = finite ? Math.max(level, ...others) : -Infinity;
+  const compWorst = finite ? compressionDbOf(worst, c) : 0;
+  const rawDesense = 2 * compWorst + imNoiseRiseDb;
   const desenseDb = finite
-    ? Math.max(0, Math.min(rawDesense, level - noiseFloor, agcAttenDb + 2 * compressionDb, c.maxDesenseDb))
+    ? Math.max(0, Math.min(rawDesense, worst - noiseFloor, agcAttenDb + 2 * compWorst, c.maxDesenseDb))
     : 0;
   return { level: name, headroomDb: overT - level, compressionDb, distortionPct, agcAttenDb, agcExhausted, desenseDb };
 }

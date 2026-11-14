@@ -370,8 +370,9 @@ button.danger { color: var(--fail); border-color: var(--fail); }
 .pane-head > h2 { padding: 6px 4px 0 12px; }
 .ripple-ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; font-size: 12px; margin-top: 4px; }
 .ripple-ctl label { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
-.ripple-ctl input[type="checkbox"] { min-height: 0; width: auto; }
-.ripple-ctl input[type="range"] { min-height: 0; width: 90px; padding: 0; border: 0; background: transparent; }
+.ripple-ctl input[type="checkbox"] { width: 24px; height: 24px; }
+input[type="checkbox"], input[type="radio"] { width: 24px; height: 24px; }
+.ripple-ctl input[type="range"] { min-height: 24px; width: 90px; padding: 0; border: 0; background: transparent; }
 .ripple-ctl button { min-height: 26px; padding: 0 10px; font-size: 12px; }
 .ripple-ctl .rc-note { flex: 1 1 100%; margin: 0 0 2px; }
 .rc-sp { min-width: 5.5em; font-variant-numeric: tabular-nums; }
@@ -456,8 +457,8 @@ a { color: var(--blue-text); }
   .ripple-ctl button { min-height: 36px; min-width: 44px; padding: 0 12px; }
   .ripple-ctl label { min-height: 36px; }
   .ripple-ctl input[type="range"] { min-height: 36px; }
-  .cv-check input, input[type="checkbox"], input[type="radio"] { width: 22px; height: 22px; }
-  .ripple-ctl input[type="checkbox"] { width: 20px; height: 20px; }
+  .cv-check input, input[type="checkbox"], input[type="radio"] { width: 24px; height: 24px; }
+  .ripple-ctl input[type="checkbox"] { width: 24px; height: 24px; }
   .cv-check { min-height: 44px; }
   .cv-table tbody tr { height: 44px; }
   .cv-controls select { min-height: 44px; }
@@ -593,3 +594,4 @@ body.modlab-open { overflow: hidden; }
 .spectrum-about summary { cursor: pointer; }
 .spectrum-about p { margin: 4px 0 0; line-height: 1.4; }
 .spectra-tabs button[aria-selected="true"] { background: var(--ink); color: var(--paper); }
+summary { min-height: 24px; }

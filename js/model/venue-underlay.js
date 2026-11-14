@@ -16,6 +16,8 @@ export const VENUE_LIMITS = Object.freeze({
   maxShadesPerLayer: 4,
   maxCoordCm: 10000000, // saved-file bound: 100 km
   maxVertexM: 100000, // a vertex 100 km or more from the origin is a bad line
+  maxLineChars: 2000, // a longer text line cannot be a vertex or a label (stops regex work and memory on hostile input)
+  hardFactor: 4, // parsing stops, with the 'too big' message, at this multiple of maxLines / maxLayers (bounds memory)
 });
 
 export const VENUE_GREYS = Object.freeze({
@@ -32,6 +34,7 @@ const fmt = (n) => n.toLocaleString('en-GB');
 const MSG_NO_UNIT = 'This file does not say what its length unit is, so it does not look like an SU4SV export. Export it again from SketchUp with SU4SV, in metres.';
 const MSG_NO_LINES = 'No lines could be read from this file. It should be a text file written by SU4SV, in metres.';
 export const VENUE_TOO_BIG_MESSAGE = 'This file is larger than 8 MB, which is too much for a venue. Simplify the model in SketchUp and export it again.';
+export const VENUE_TOO_MANY_MESSAGE = 'This venue has far more lines or layers than can be kept. Simplify the model in SketchUp, for example by hiding or deleting detail the drawing does not need, and export it again.';
 export const VENUE_UNREADABLE_MESSAGE = 'This file could not be read.';
 export const VENUE_SAVED_UNREADABLE_MESSAGE = 'The venue lines could not be read';
 
@@ -54,6 +57,8 @@ export function parseVenueText(text) {
     let unit = null;
     let badLines = 0;
     let blocks = 0;
+    let keptLines = 0;
+    const TOO_BIG = { tooBig: true };
     let cur = null; // current block points [{x, y, z}]; null = no current layer
     let curLabel = null;
     const layers = new Map(); // name -> { name, lines: Map(key -> {x1,y1,x2,y2,z}), order: [] }
@@ -65,9 +70,15 @@ export function parseVenueText(text) {
       const swap = x1 > x2 || (x1 === x2 && y1 > y2);
       const key = swap ? `${x2},${y2},${x1},${y1}` : `${x1},${y1},${x2},${y2}`;
       let L = layers.get(name);
-      if (!L) { L = { name, lines: new Map() }; layers.set(name, L); }
+      if (!L) {
+        if (layers.size >= VENUE_LIMITS.maxLayers * VENUE_LIMITS.hardFactor) throw TOO_BIG;
+        L = { name, lines: new Map() }; layers.set(name, L);
+      }
       const have = L.lines.get(key);
-      if (have) { if (z < have.z) have.z = z; } else L.lines.set(key, { x1, y1, x2, y2, z });
+      if (have) { if (z < have.z) have.z = z; } else {
+        if (++keptLines > VENUE_LIMITS.maxLines * VENUE_LIMITS.hardFactor) throw TOO_BIG;
+        L.lines.set(key, { x1, y1, x2, y2, z });
+      }
     };
     const endBlock = () => {
       if (cur && cur.length >= 2) {
@@ -80,6 +91,10 @@ export function parseVenueText(text) {
     };
 
     for (const raw of rows) {
+      if (raw.length > VENUE_LIMITS.maxLineChars) { // cannot be a vertex or a label: skip without running any pattern on it
+        if (raw.trim()) badLines++;
+        continue;
+      }
       const line = raw.trim();
       if (!line) continue;
       if (line.startsWith('";')) {
@@ -100,6 +115,7 @@ export function parseVenueText(text) {
       const x = Number(v[1]), y = Number(v[2]), z = Number(v[3]);
       if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z) || Math.abs(x) >= VENUE_LIMITS.maxVertexM || Math.abs(y) >= VENUE_LIMITS.maxVertexM) { badLines++; continue; }
       cur.push({ x, y, z });
+      if (cur.length > VENUE_LIMITS.maxLines * VENUE_LIMITS.hardFactor) throw TOO_BIG;
     }
     endBlock();
 
@@ -126,6 +142,7 @@ export function parseVenueText(text) {
     };
     return { ok: true, underlay, edges: total, badLines, blocks };
   } catch (e) {
+    if (e && e.tooBig === true) return { ok: false, message: VENUE_TOO_MANY_MESSAGE };
     return { ok: false, message: VENUE_UNREADABLE_MESSAGE };
   }
 }
@@ -163,8 +180,10 @@ export function validateVenue(u) {
   if (!isObj(u) || !Array.isArray(u.layers)) return ['venue must be { layers: [...] }'];
   if (u.layers.length > VENUE_LIMITS.maxLayers) errors.push(`venue has more than ${VENUE_LIMITS.maxLayers} layers`);
   let lines = 0;
+  const names = new Set();
   for (const L of u.layers) {
     if (!isObj(L)) { errors.push('venue layer must be an object'); continue; }
+    if (typeof L.name === 'string') { if (names.has(L.name)) errors.push('venue layer names must be unique'); names.add(L.name); }
     if (typeof L.name !== 'string' || L.name.length < 1 || L.name.length > VENUE_LIMITS.maxNameChars) errors.push('venue layer name must be 1 to 80 characters');
     if (typeof L.hidden !== 'boolean') errors.push('venue layer hidden must be a boolean');
     if (!Array.isArray(L.shades) || L.shades.length > VENUE_LIMITS.maxShadesPerLayer) { errors.push('venue layer shades must be an array of at most 4'); continue; }

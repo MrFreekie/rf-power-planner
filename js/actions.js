@@ -4,7 +4,7 @@ import { buildExample } from './examples.js';
 import { IMD_PRESETS, COMBINER_PRESETS } from './model/imd-params.js';
 import { startWalk, stopWalk } from './walk.js';
 import { effectiveAntennaB } from './model/diversity.js';
-import { createDefaultScene, createDefaultLink, createChainItem, createReflector, createBranch, createZone, createPlatform, STAGE_LIMITS, PLATFORM_LIMITS, PLATFORM_MATERIALS, createImdTransmitter, defaultImdTransmitters, newId } from './model/scene.js';
+import { createDefaultScene, createDefaultLink, createChainItem, createReflector, createBranch, createZone, createPlatform, STAGE_LIMITS, PLATFORM_LIMITS, PLATFORM_MATERIALS, createImdTransmitter, defaultImdTransmitters, newId, SCENE_LIMITS } from './model/scene.js';
 import { applyFmPreset } from './model/fm-presets.js';
 import { validateVenue } from './model/venue-underlay.js';
 
@@ -75,7 +75,7 @@ export function addChainItem(store, linkId, item, index, opts = {}) {
   store.update((d) => {
     const link = findLink(d, linkId);
     const chain = link && targetChain(link, opts.target, true);
-    if (!chain) return;
+    if (!chain || chain.length >= SCENE_LIMITS.maxChain) return; // at the limit: no change (a loaded scene may not exceed it)
     const i = Number.isInteger(index) ? Math.max(0, Math.min(chain.length, index)) : chain.length;
     chain.splice(i, 0, made);
     ok = true;
@@ -160,8 +160,9 @@ export function setLinkKind(store, linkId, kind) {
 export function addReflector(store, reflector = {}) {
   const r = createReflector(reflector);
   if (typeof r.id !== 'string' || !r.id) r.id = newId('refl');
-  store.update((d) => { d.reflectors.push(r); });
-  return r.id;
+  let ok = false;
+  store.update((d) => { if (d.reflectors.length >= SCENE_LIMITS.maxReflectors) return; d.reflectors.push(r); ok = true; });
+  return ok ? r.id : null;
 }
 
 export function removeReflector(store, id) {
@@ -224,7 +225,7 @@ export function addBranch(store, linkId, branch = {}) {
   let ok = false;
   store.update((d) => {
     const link = d.links.find((l) => l.id === linkId);
-    if (!link || link.kind !== 'iem' || !Array.isArray(link.branches)) return;
+    if (!link || link.kind !== 'iem' || !Array.isArray(link.branches) || link.branches.length >= SCENE_LIMITS.maxBranches) return;
     const prev = lastOf(link.branches);
     if (!branch.pos) b.pos = { x: Math.min(d.stage.width, prev.pos.x + 3), y: prev.pos.y, z: prev.pos.z };
     if (!branch.antenna) b.antenna = structuredClone(prev.antenna);
@@ -289,8 +290,9 @@ export function setSplitter(store, linkId, splitter) {
 /** Add a coverage zone (rectangle by default). Returns its id. */
 export function addZone(store, zone = {}) {
   const z = createZone(zone);
-  store.update((d) => { if (!Array.isArray(d.zones)) d.zones = []; d.zones.push(z); });
-  return z.id;
+  let ok = false;
+  store.update((d) => { if (!Array.isArray(d.zones)) d.zones = []; if (d.zones.length >= SCENE_LIMITS.maxZones) return; d.zones.push(z); ok = true; });
+  return ok ? z.id : null;
 }
 
 export function removeZone(store, id) {
@@ -316,7 +318,7 @@ export function updateZone(store, id, patch = {}, o = {}) {
 export function addZonePoint(store, zoneId, point, index) {
   return store.update((d) => {
     const z = (d.zones || []).find((x) => x.id === zoneId);
-    if (!z || !Number.isFinite(point && point.x) || !Number.isFinite(point && point.y)) return;
+    if (!z || z.polygon.length >= SCENE_LIMITS.maxZonePoints || !Number.isFinite(point && point.x) || !Number.isFinite(point && point.y)) return;
     const i = Number.isInteger(index) ? Math.max(0, Math.min(z.polygon.length, index)) : z.polygon.length;
     z.polygon.splice(i, 0, { x: point.x, y: point.y });
   });
@@ -363,15 +365,18 @@ export function setImdEnabled(store, enabled) {
 /** Add a transmitter (position and frequency default to a free spot on the stage). Returns its id. */
 export function addImdTransmitter(store, tx = {}) {
   const t = createImdTransmitter(tx);
+  let ok = false;
   store.update((d) => {
     const m = imdOf(d);
+    if (m.transmitters.length >= SCENE_LIMITS.maxImdTransmitters) return; // the product count grows as N^5
     const last = m.transmitters[m.transmitters.length - 1];
     if (!tx.freqMHz) t.freqMHz = Math.round(((last ? last.freqMHz : 606) + 0.475) * 1000) / 1000;
     if (!tx.pos) t.pos = { x: Math.min(d.stage.width, (last ? last.pos.x : 2) + 1.5), y: last ? last.pos.y : 3, z: 1.5 };
     if (!tx.name) t.name = `Mic ${m.transmitters.length + 1}`;
     m.transmitters.push(t);
+    ok = true;
   });
-  return t.id;
+  return ok ? t.id : null;
 }
 
 export function removeImdTransmitter(store, id) {

@@ -256,6 +256,49 @@ export function createReflector(overrides = {}) {
 
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+const inRange = (v, lo, hi) => isNum(v) && v >= lo && v <= hi;
+
+/**
+ * Hard limits on what a loaded scene (file, share link, browser storage) may contain. They bound memory and CPU so that a
+ * hostile or corrupt scene cannot hang the tab: the solver loops are driven by these counts or by the stage/zone extent.
+ */
+export const SCENE_LIMITS = Object.freeze({
+  maxText: 4 * 1024 * 1024, // characters of scene JSON that deserialize() will parse
+  maxDepth: 24, maxNodes: 200000, maxString: 1000, // generic shape guard (the venue underlay is checked on its own)
+  maxLinks: 64, maxReflectors: 500, maxZones: 100, maxZonePoints: 500, maxImdTransmitters: 16, maxChain: 32, maxBranches: 16,
+  coordM: 10000, zoneCoordM: 2000, zM: 1000, maxFreqMHz: 1e6, maxDb: 1000, maxIdChars: 64,
+});
+const SL = SCENE_LIMITS;
+const ID_RE = /^[A-Za-z0-9_.:-]+$/;
+/** A key or id that is safe to use as a lookup key: short, plain characters, and not an Object.prototype name. */
+const isSafeId = (v) => typeof v === 'string' && v.length >= 1 && v.length <= SL.maxIdChars && ID_RE.test(v) && !(v in Object.prototype);
+const isFreq = (v) => v > 0 && v <= SL.maxFreqMHz;
+const isDbPos = (v) => isNum(v) && v >= 0 && v <= SL.maxDb;
+
+/** Generic shape guard: depth, node count, string length and prototype-pollution keys. Skips the venue (validateVenue checks it). */
+function checkShape(scene, errors) {
+  let nodes = 0;
+  const walk = (v, depth, path) => {
+    if (typeof v === 'string') {
+      if (v.length > SL.maxString) { errors.push(`${path} is too long (${v.length} characters, limit ${SL.maxString})`); return false; }
+      return true;
+    }
+    if (v === null || typeof v !== 'object') return true;
+    if (depth > SL.maxDepth) { errors.push('scene is nested too deeply'); return false; }
+    if (++nodes > SL.maxNodes) { errors.push('scene has too many values'); return false; }
+    if (Array.isArray(v)) {
+      for (let i = 0; i < v.length; i++) if (!walk(v[i], depth + 1, `${path}[${i}]`)) return false;
+      return true;
+    }
+    for (const k of Object.keys(v)) {
+      if (k === '__proto__' || k === 'constructor' || k === 'prototype') { errors.push(`${path} has a key that is not allowed`); return false; }
+      if (depth === 0 && k === 'venue') continue;
+      if (!walk(v[k], depth + 1, `${path}.${k.slice(0, 40)}`)) return false;
+    }
+    return true;
+  };
+  walk(scene, 0, 'scene');
+}
 
 /** Optional analogue-FM transmitter fields: fmPreset (a tx id of fm-presets.js) and lowIntermod (boolean). */
 function checkFmTx(t, path, errors) {
@@ -263,9 +306,28 @@ function checkFmTx(t, path, errors) {
   if (t.lowIntermod !== undefined && typeof t.lowIntermod !== 'boolean') errors.push(`${path}.lowIntermod must be a boolean`);
 }
 
-function checkPos(p, path, errors, keys = ['x', 'y', 'z']) {
+function checkPos(p, path, errors, keys = ['x', 'y', 'z'], xyLimit = SL.coordM) {
   if (!isObj(p)) { errors.push(`${path} must be an object`); return; }
-  for (const k of keys) if (!isNum(p[k])) errors.push(`${path}.${k} must be a finite number`);
+  for (const k of keys) {
+    const lim = k === 'z' ? SL.zM : k === 'az' || k === 'el' ? 3600 : xyLimit;
+    if (!isNum(p[k])) errors.push(`${path}.${k} must be a finite number`);
+    else if (Math.abs(p[k]) > lim) errors.push(`${path}.${k} is out of range (limit ${lim})`);
+  }
+}
+
+function checkCount(arr, max, path, errors) {
+  if (arr.length > max) { errors.push(`${path} has more than ${max} entries`); return false; }
+  return true;
+}
+
+/** Chain items: kind plus optional safe id and cable type; numeric fields, when present, must be finite and bounded. */
+function checkChainItem(c, path, errors) {
+  if (!isObj(c) || !CHAIN_KINDS.includes(c.kind)) { errors.push(`${path}.kind invalid`); return; }
+  if (c.id !== undefined && !isSafeId(c.id)) errors.push(`${path}.id must be a short plain string`);
+  if (c.cableType !== undefined && !isSafeId(c.cableType)) errors.push(`${path}.cableType invalid`);
+  for (const k of ['lengthM', 'gainDb', 'nfDb', 'lossDb', 'insertionLossDb', 'ports']) {
+    if (c[k] !== undefined && !(isNum(c[k]) && Math.abs(c[k]) <= SL.coordM)) errors.push(`${path}.${k} must be a bounded number`);
+  }
 }
 
 function checkAntenna(a, path, errors) {
@@ -279,6 +341,8 @@ function checkAntenna(a, path, errors) {
 export function validateScene(scene) {
   const errors = [];
   if (!isObj(scene)) return { ok: false, errors: ['scene must be an object'] };
+  checkShape(scene, errors);
+  if (errors.length) return { ok: false, errors };
   if (scene.version !== SCHEMA_VERSION) errors.push(`version must be ${SCHEMA_VERSION}`);
   if (scene.venue !== undefined) errors.push(...validateVenue(scene.venue));
   if (!isObj(scene.units) || !POWER_UNITS.includes(scene.units.power)) errors.push('units.power invalid');
@@ -307,7 +371,7 @@ export function validateScene(scene) {
   }
   const ids = new Set();
   const checkId = (id, path) => {
-    if (typeof id !== 'string' || !id) errors.push(`${path}.id must be a non-empty string`);
+    if (!isSafeId(id)) errors.push(`${path}.id must be a short plain string (letters, digits, - _ . :)`);
     else if (ids.has(id)) errors.push(`${path}.id duplicate: ${id}`);
     else ids.add(id);
   };
@@ -329,14 +393,14 @@ export function validateScene(scene) {
   }
   if (scene.zones !== undefined) {
     if (!Array.isArray(scene.zones)) errors.push('zones must be an array');
-    else scene.zones.forEach((z, i) => {
+    else if (!checkCount(scene.zones, SL.maxZones, 'zones', errors)) { /* reported */ } else scene.zones.forEach((z, i) => {
       const p = `zones[${i}]`;
       if (!isObj(z)) { errors.push(`${p} must be an object`); return; }
       checkId(z.id, p);
       if (!Array.isArray(z.polygon) || z.polygon.length < 3) errors.push(`${p}.polygon needs at least 3 points`);
-      else z.polygon.forEach((pt, j) => checkPos(pt, `${p}.polygon[${j}]`, errors, ['x', 'y']));
-      if (!isNum(z.zMin) || !isNum(z.zMax) || z.zMax <= z.zMin) errors.push(`${p}: zMax must exceed zMin`);
-      if (!isNum(z.requiredMarginDb)) errors.push(`${p}.requiredMarginDb must be a number`);
+      else if (checkCount(z.polygon, SL.maxZonePoints, `${p}.polygon`, errors)) z.polygon.forEach((pt, j) => checkPos(pt, `${p}.polygon[${j}]`, errors, ['x', 'y'], SL.zoneCoordM));
+      if (!inRange(z.zMin, -SL.zM, SL.zM) || !inRange(z.zMax, -SL.zM, SL.zM) || z.zMax <= z.zMin) errors.push(`${p}: zMax must exceed zMin`);
+      if (!inRange(z.requiredMarginDb, -SL.maxDb, SL.maxDb)) errors.push(`${p}.requiredMarginDb must be a number`);
       if (z.passAreaFraction !== undefined && !(z.passAreaFraction >= 0.5 && z.passAreaFraction <= 1)) errors.push(`${p}.passAreaFraction must be between 0.5 and 1`);
     });
   }
@@ -347,12 +411,12 @@ export function validateScene(scene) {
       if (typeof m.enabled !== 'boolean') errors.push('imd.enabled must be a boolean');
       if (typeof m.preset !== 'string' || !IMD_PRESET_IDS.includes(m.preset)) errors.push('imd.preset invalid');
       if (!Array.isArray(m.transmitters)) errors.push('imd.transmitters must be an array');
-      else m.transmitters.forEach((t, i) => {
+      else if (!checkCount(m.transmitters, SL.maxImdTransmitters, 'imd.transmitters', errors)) { /* reported */ } else m.transmitters.forEach((t, i) => {
         const p = `imd.transmitters[${i}]`;
         if (!isObj(t)) { errors.push(`${p} must be an object`); return; }
         checkId(t.id, p);
-        if (!(t.freqMHz > 0)) errors.push(`${p}.freqMHz must be positive`);
-        if (!isNum(t.powerDbm)) errors.push(`${p}.powerDbm must be a number`);
+        if (!isFreq(t.freqMHz)) errors.push(`${p}.freqMHz must be positive`);
+        if (!inRange(t.powerDbm, -SL.maxDb, SL.maxDb)) errors.push(`${p}.powerDbm must be a number`);
         checkPos(t.pos, `${p}.pos`, errors);
         checkAntenna(t.antenna, `${p}.antenna`, errors);
         checkFmTx(t, p, errors);
@@ -360,91 +424,93 @@ export function validateScene(scene) {
       checkPos(m.rxAntennaPos, 'imd.rxAntennaPos', errors);
       if (m.rxAntenna !== undefined) checkAntenna(m.rxAntenna, 'imd.rxAntenna', errors);
       const c = m.combiner;
-      if (!isObj(c) || !IMD_COMBINER_TYPES.includes(c.type) || !(c.isolationDb >= 0) || !(c.lossDb >= 0)) errors.push('imd.combiner must be {type: none|hybrid|isolated, isolationDb >= 0, lossDb >= 0}');
+      if (!isObj(c) || !IMD_COMBINER_TYPES.includes(c.type) || !isDbPos(c.isolationDb) || !isDbPos(c.lossDb)) errors.push('imd.combiner must be {type: none|hybrid|isolated, isolationDb >= 0, lossDb >= 0}');
       const q = m.pim;
-      if (!isObj(q) || !IMD_PIM_PRESETS.includes(q.preset) || (q.levelDbc !== null && !isNum(q.levelDbc))) errors.push('imd.pim must be {preset: none|good|corroded, levelDbc: number|null}');
-      if (!(m.channelBwKHz > 0)) errors.push('imd.channelBwKHz must be positive');
-      if (m.wantedFreqMHz !== null && !(m.wantedFreqMHz > 0)) errors.push('imd.wantedFreqMHz must be null or positive');
+      if (!isObj(q) || !IMD_PIM_PRESETS.includes(q.preset) || (q.levelDbc !== null && !inRange(q.levelDbc, -SL.maxDb, SL.maxDb))) errors.push('imd.pim must be {preset: none|good|corroded, levelDbc: number|null}');
+      if (!(m.channelBwKHz > 0 && m.channelBwKHz <= 1e6)) errors.push('imd.channelBwKHz must be positive');
+      if (m.wantedFreqMHz !== null && !isFreq(m.wantedFreqMHz)) errors.push('imd.wantedFreqMHz must be null or positive');
     }
   }
   if (scene.coverage !== undefined && (!isObj(scene.coverage) || !COVERAGE_MODES.includes(scene.coverage.mode))) {
     errors.push(`coverage.mode must be one of ${COVERAGE_MODES.join(', ')}`);
   }
   if (!Array.isArray(scene.reflectors)) errors.push('reflectors must be an array');
-  else scene.reflectors.forEach((r, i) => {
+  else if (!checkCount(scene.reflectors, SL.maxReflectors, 'reflectors', errors)) { /* reported */ } else scene.reflectors.forEach((r, i) => {
     const p = `reflectors[${i}]`;
     if (!isObj(r)) { errors.push(`${p} must be an object`); return; }
     checkId(r.id, p);
-    if (typeof r.material !== 'string') errors.push(`${p}.material must be a string`);
+    if (!isSafeId(r.material)) errors.push(`${p}.material must be a short plain string`);
     checkPos(r.p1, `${p}.p1`, errors, ['x', 'y']);
     checkPos(r.p2, `${p}.p2`, errors, ['x', 'y']);
-    if (!isNum(r.zMin) || !isNum(r.zMax) || r.zMax <= r.zMin) errors.push(`${p}: zMax must exceed zMin`);
-    if (r.transmissionLossDb !== undefined && !(r.transmissionLossDb >= 0)) errors.push(`${p}.transmissionLossDb must be a number >= 0`);
-    if (r.thicknessFactor !== undefined && !(r.thicknessFactor >= 0)) errors.push(`${p}.thicknessFactor must be a number >= 0`);
-    if (r.thicknessM !== undefined && !(r.thicknessM >= 0)) errors.push(`${p}.thicknessM must be a number >= 0`);
+    if (!inRange(r.zMin, -SL.zM, SL.zM) || !inRange(r.zMax, -SL.zM, SL.zM) || r.zMax <= r.zMin) errors.push(`${p}: zMax must exceed zMin`);
+    if (r.transmissionLossDb !== undefined && !isDbPos(r.transmissionLossDb)) errors.push(`${p}.transmissionLossDb must be a number >= 0`);
+    if (r.thicknessFactor !== undefined && !isDbPos(r.thicknessFactor)) errors.push(`${p}.thicknessFactor must be a number >= 0`);
+    if (r.thicknessM !== undefined && !isDbPos(r.thicknessM)) errors.push(`${p}.thicknessM must be a number >= 0`);
   });
   if (!Array.isArray(scene.links)) errors.push('links must be an array');
-  else scene.links.forEach((l, i) => {
+  else if (!checkCount(scene.links, SL.maxLinks, 'links', errors)) { /* reported */ } else scene.links.forEach((l, i) => {
     const p = `links[${i}]`;
     if (!isObj(l)) { errors.push(`${p} must be an object`); return; }
     checkId(l.id, p);
     if (!LINK_KINDS.includes(l.kind)) errors.push(`${p}.kind invalid`);
-    if (!(l.freqMHz > 0)) errors.push(`${p}.freqMHz must be positive`);
-    if (l.audio !== undefined && (!isObj(l.audio) || !AUDIO_SOURCES.includes(l.audio.source) || !isNum(l.audio.gainDb))) {
+    if (!isFreq(l.freqMHz)) errors.push(`${p}.freqMHz must be positive`);
+    if (l.audio !== undefined && (!isObj(l.audio) || !AUDIO_SOURCES.includes(l.audio.source) || !inRange(l.audio.gainDb, -SL.maxDb, SL.maxDb))) {
       errors.push(`${p}.audio must be {source: ${AUDIO_SOURCES.join('|')}, gainDb: number}`);
     }
     if (l.mpx !== undefined) {
       const m = l.mpx;
-      if (!isObj(m) || typeof m.enabled !== 'boolean' || typeof m.preset !== 'string' || !m.preset
+      if (!isObj(m) || typeof m.enabled !== 'boolean' || !isSafeId(m.preset)
         || !isObj(m.overrides) || typeof m.pilotSquelch !== 'boolean') {
         errors.push(`${p}.mpx must be {enabled:boolean, preset:string, overrides:object, pilotSquelch:boolean}`);
       }
     }
     if (l.telemetry !== undefined) {
       const t = l.telemetry, b = isObj(t) ? t.battery : null;
-      if (!isObj(t) || typeof t.enabled !== 'boolean' || typeof t.preset !== 'string' || !t.preset || typeof t.deviceName !== 'string'
-        || !isNum(t.gainDb) || !isObj(b) || !BATTERY_CHEMISTRY_IDS.includes(b.chemistry)
-        || !(b.startPercent >= 0 && b.startPercent <= 100) || !(b.timeScale >= 0) || typeof b.running !== 'boolean') {
+      if (!isObj(t) || typeof t.enabled !== 'boolean' || !isSafeId(t.preset) || typeof t.deviceName !== 'string'
+        || !inRange(t.gainDb, -SL.maxDb, SL.maxDb) || !isObj(b) || !BATTERY_CHEMISTRY_IDS.includes(b.chemistry)
+        || !(b.startPercent >= 0 && b.startPercent <= 100) || !(b.timeScale >= 0 && b.timeScale <= 1e9) || typeof b.running !== 'boolean') {
         errors.push(`${p}.telemetry must be {enabled, preset, battery:{chemistry, startPercent 0-100, timeScale >= 0, running}, deviceName, gainDb}`);
       }
     }
     if (l.modulation !== undefined) {
       const m = l.modulation, d = isObj(m) ? m.digital : null;
-      if (!isObj(m) || !MODULATION_TYPES.includes(m.type) || !isObj(d) || typeof d.preset !== 'string' || !d.preset
+      if (!isObj(m) || !MODULATION_TYPES.includes(m.type) || !isObj(d) || !isSafeId(d.preset)
         || !FIXED_ORDERS.includes(d.fixedOrder) || !isObj(d.overrides)) {
         errors.push(`${p}.modulation must be {type: analog-fm|digital, digital:{preset, fixedOrder: null|2|4|16|64|256, overrides}}`);
       }
     }
     if (l.kind === 'mic' && l.branches !== undefined) errors.push(`${p}: mic links have a single antenna (no branches)`);
-    if (l.splitter !== undefined && (!isObj(l.splitter) || typeof l.splitter.preset !== 'string' || !(l.splitter.insertionLossDb >= 0))) {
+    if (l.splitter !== undefined && (!isObj(l.splitter) || !isSafeId(l.splitter.preset) || !isDbPos(l.splitter.insertionLossDb))) {
       errors.push(`${p}.splitter must be {preset: string, insertionLossDb >= 0}`);
     }
     if (l.branches !== undefined && l.kind === 'iem') {
       if (!Array.isArray(l.branches) || !l.branches.length) errors.push(`${p}.branches must be a non-empty array`);
+      else if (l.branches.length > SL.maxBranches) errors.push(`${p}.branches has more than ${SL.maxBranches} entries`);
       else {
         const bids = new Set();
         l.branches.forEach((b, k) => {
           const bp = `${p}.branches[${k}]`;
           if (!isObj(b)) { errors.push(`${bp} must be an object`); return; }
-          if (typeof b.id !== 'string' || !b.id || bids.has(b.id)) errors.push(`${bp}.id must be a unique non-empty string`);
+          if (!isSafeId(b.id) || bids.has(b.id)) errors.push(`${bp}.id must be a unique short plain string`);
           else bids.add(b.id);
           checkPos(b.pos, `${bp}.pos`, errors);
           checkAntenna(b.antenna, `${bp}.antenna`, errors);
           if (!Array.isArray(b.chain)) errors.push(`${bp}.chain must be an array`);
-          else b.chain.forEach((c, m) => { if (!isObj(c) || !CHAIN_KINDS.includes(c.kind)) errors.push(`${bp}.chain[${m}].kind invalid`); });
+          else if (b.chain.length > SL.maxChain) errors.push(`${bp}.chain has more than ${SL.maxChain} entries`);
+          else b.chain.forEach((c, m) => checkChainItem(c, `${bp}.chain[${m}]`, errors));
         });
       }
     }
     if (l.interferer !== undefined) {
       const f = l.interferer;
-      if (!isObj(f) || typeof f.enabled !== 'boolean' || !isNum(f.levelDbm) || typeof f.hasPilot !== 'boolean' || !isNum(f.offsetKHz)) {
+      if (!isObj(f) || typeof f.enabled !== 'boolean' || !inRange(f.levelDbm, -SL.maxDb, SL.maxDb) || typeof f.hasPilot !== 'boolean' || !inRange(f.offsetKHz, -1e6, 1e6)) {
         errors.push(`${p}.interferer must be {enabled:boolean, levelDbm:number, hasPilot:boolean, offsetKHz:number}`);
       }
     }
     if (!isObj(l.tx)) errors.push(`${p}.tx must be an object`);
     else {
       checkId(l.tx.id, `${p}.tx`);
-      if (!isNum(l.tx.powerDbm)) errors.push(`${p}.tx.powerDbm must be a number`);
+      if (!inRange(l.tx.powerDbm, -SL.maxDb, SL.maxDb)) errors.push(`${p}.tx.powerDbm must be a number`);
       checkPos(l.tx.pos, `${p}.tx.pos`, errors);
       checkAntenna(l.tx.antenna, `${p}.tx.antenna`, errors);
       checkFmTx(l.tx, `${p}.tx`, errors);
@@ -452,12 +518,12 @@ export function validateScene(scene) {
     if (!isObj(l.rx)) errors.push(`${p}.rx must be an object`);
     else {
       checkId(l.rx.id, `${p}.rx`);
-      if (!isNum(l.rx.sensitivityDbm)) errors.push(`${p}.rx.sensitivityDbm must be a number`);
-      if (l.rx.requiredSnrDb !== undefined && !isNum(l.rx.requiredSnrDb)) errors.push(`${p}.rx.requiredSnrDb must be a number`);
-      if (!isNum(l.rx.bodyLossDb)) errors.push(`${p}.rx.bodyLossDb must be a number`);
+      if (!inRange(l.rx.sensitivityDbm, -SL.maxDb, SL.maxDb)) errors.push(`${p}.rx.sensitivityDbm must be a number`);
+      if (l.rx.requiredSnrDb !== undefined && !inRange(l.rx.requiredSnrDb, -SL.maxDb, SL.maxDb)) errors.push(`${p}.rx.requiredSnrDb must be a number`);
+      if (!inRange(l.rx.bodyLossDb, -SL.maxDb, SL.maxDb)) errors.push(`${p}.rx.bodyLossDb must be a number`);
       if (l.rx.squelch !== undefined) { // optional on load; migrateScene fills it in
         const q = l.rx.squelch;
-        if (!isObj(q) || typeof q.enabled !== 'boolean' || !isNum(q.thresholdDbm) || !(q.hysteresisDb >= 0)) {
+        if (!isObj(q) || typeof q.enabled !== 'boolean' || !inRange(q.thresholdDbm, -SL.maxDb, SL.maxDb) || !isDbPos(q.hysteresisDb)) {
           errors.push(`${p}.rx.squelch must be {enabled:boolean, thresholdDbm:number, hysteresisDb:number >= 0}`);
         }
       }
@@ -471,7 +537,7 @@ export function validateScene(scene) {
       if (l.rx.diversity !== undefined) {
         const d = l.rx.diversity;
         const b = isObj(d) ? d.antennaB : null;
-        if (!isObj(d) || typeof d.enabled !== 'boolean' || !DIVERSITY_MODES.includes(d.mode) || !isNum(d.hysteresisDb) || !(d.switchMs >= 0)
+        if (!isObj(d) || typeof d.enabled !== 'boolean' || !DIVERSITY_MODES.includes(d.mode) || !isNum(d.hysteresisDb) || !(d.switchMs >= 0 && d.switchMs <= 1e6)
           || !isObj(b) || !isObj(b.pos) || !isNum(b.pos.x) || !isNum(b.pos.y) || !isNum(b.pos.z)) {
           errors.push(`${p}.rx.diversity must be {enabled, mode: ${DIVERSITY_MODES.join('|')}, antennaB:{pos,antenna}, hysteresisDb, switchMs}`);
         } else {
@@ -484,10 +550,8 @@ export function validateScene(scene) {
           }
           if (b.chain !== undefined && b.chain !== null) {
             if (!Array.isArray(b.chain)) errors.push(`${p}.rx.diversity.antennaB.chain must be null or an array`);
-            else b.chain.forEach((c, m) => {
-              if (!isObj(c) || !CHAIN_KINDS.includes(c.kind)) { errors.push(`${p}.rx.diversity.antennaB.chain[${m}].kind invalid`); return; }
-              if (c.id !== undefined && (typeof c.id !== 'string' || !c.id)) errors.push(`${p}.rx.diversity.antennaB.chain[${m}].id must be a non-empty string`);
-            });
+            else if (b.chain.length > SL.maxChain) errors.push(`${p}.rx.diversity.antennaB.chain has more than ${SL.maxChain} entries`);
+            else b.chain.forEach((c, m) => checkChainItem(c, `${p}.rx.diversity.antennaB.chain[${m}]`, errors));
           }
         }
       }
@@ -495,11 +559,8 @@ export function validateScene(scene) {
       checkAntenna(l.rx.antenna, `${p}.rx.antenna`, errors);
     }
     if (!Array.isArray(l.chain)) errors.push(`${p}.chain must be an array`);
-    else l.chain.forEach((c, j) => {
-      if (!isObj(c) || !CHAIN_KINDS.includes(c.kind)) { errors.push(`${p}.chain[${j}].kind invalid`); return; }
-      // id is optional on load (older scenes); migrateScene fills it in.
-      if (c.id !== undefined && (typeof c.id !== 'string' || !c.id)) errors.push(`${p}.chain[${j}].id must be a non-empty string`);
-    });
+    else if (l.chain.length > SL.maxChain) errors.push(`${p}.chain has more than ${SL.maxChain} entries`);
+    else l.chain.forEach((c, j) => checkChainItem(c, `${p}.chain[${j}]`, errors)); // id is optional on load (older scenes); migrateScene fills it in
   });
   return { ok: errors.length === 0, errors };
 }
@@ -507,6 +568,10 @@ export function validateScene(scene) {
 /** Migration hook: bring an older scene up to SCHEMA_VERSION. Unknown future versions throw. */
 export function migrateScene(raw) {
   if (!isObj(raw)) throw new Error('Scene must be an object');
+  // cheap size guards before any per-item work (validateScene repeats them for scenes that do not come through here)
+  if (Array.isArray(raw.links) && raw.links.length > SL.maxLinks) throw new Error(`Scene has more than ${SL.maxLinks} links`);
+  if (Array.isArray(raw.zones) && raw.zones.length > SL.maxZones) throw new Error(`Scene has more than ${SL.maxZones} zones`);
+  if (Array.isArray(raw.platforms) && raw.platforms.length > PLATFORM_LIMITS.max) throw new Error(`Scene has more than ${PLATFORM_LIMITS.max} platforms`);
   const s = structuredClone(raw);
   if (s.version === undefined) s.version = 1; // pre-versioned files
   if (s.version > SCHEMA_VERSION) throw new Error(`Scene version ${s.version} is newer than supported ${SCHEMA_VERSION}`);
@@ -591,8 +656,11 @@ export function serialize(scene) {
 
 /** Parse JSON text, migrate and validate. Throws Error with a readable message on failure. */
 export function deserialize(text) {
+  if (typeof text !== 'string') throw new Error('Scene text must be a string');
+  if (text.length > SCENE_LIMITS.maxText) throw new Error('Scene is too large');
   let raw;
-  try { raw = JSON.parse(text); } catch (e) { throw new Error(`Invalid JSON: ${e.message}`); }
+  // keys that could reach Object.prototype are dropped at every depth (a plain JSON.parse keeps an own "__proto__" key)
+  try { raw = JSON.parse(text, (key, value) => (key === '__proto__' || key === 'constructor' || key === 'prototype' ? undefined : value)); } catch (e) { throw new Error(`Invalid JSON: ${e.message}`); }
   const scene = migrateScene(raw);
   const { ok, errors } = validateScene(scene);
   if (!ok) throw new Error(`Invalid scene: ${errors.join('; ')}`);

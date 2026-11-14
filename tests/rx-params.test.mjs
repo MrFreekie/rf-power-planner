@@ -123,3 +123,16 @@ test('cascade IIP3: a high-gain preamp lowers the effective intercept', () => {
   for (const v of Object.values(CASCADE_TYPICAL)) if (typeof v === 'object') assert.ok(v.min <= v.typical && v.typical <= v.max && Object.isFrozen(v));
   assert.ok(EXTERNAL_NOISE_FIGURE_600MHZ_DB.quiet < EXTERNAL_NOISE_FIGURE_600MHZ_DB['noisy-venue']);
 });
+
+import { externalNoiseFigureDb, EXTERNAL_NOISE_MODEL } from '../js/model/rx-params.js';
+test('external noise: one P.372-consistent model (business about 13 dB at 200 MHz, falls with frequency, floor 1 dB)', () => {
+  // hand: Fam = 76.8 - 27.7 log10(200) = 13.07 dB; power sum with the 1 dB floor: 10 log10(10^1.307 + 10^0.1) = 13.3 dB (tol 0.1)
+  assert.ok(Math.abs(externalNoiseFigureDb('urban', 200) - 13.3) < 0.1);
+  assert.ok(Math.abs(externalNoiseFigureDb('noisy-venue', 600) - 12) < 1e-9);
+  for (const k of Object.keys(EXTERNAL_NOISE_MODEL.cDb)) {
+    assert.ok(externalNoiseFigureDb(k, 200) > externalNoiseFigureDb(k, 600) && externalNoiseFigureDb(k, 600) >= externalNoiseFigureDb(k, 2400) - 1e-12);
+    assert.ok(externalNoiseFigureDb(k, 6000) >= EXTERNAL_NOISE_MODEL.floorDb - 1e-9);
+  }
+  assert.equal(externalNoiseFigureDb('nope', 600), 0);
+  assert.equal(externalNoiseFigureDb('urban', 0), 0);
+});
