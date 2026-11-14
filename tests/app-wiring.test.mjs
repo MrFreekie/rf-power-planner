@@ -30,8 +30,12 @@ test('every element id that app.js looks up exists in index.html', () => {
 test('index.html: local assets exist and URLs are relative (GitHub Pages sub-path)', () => {
   const refs = [...html.matchAll(/(?:href|src)="([^"#]+)"/g)].map((m) => m[1]);
   assert.ok(refs.length > 0);
+  // The only allowed external reference is the optional support link, which must not leak the page or opener.
+  const SUPPORT = 'https://buymeacoffee.com/fohengineer';
+  const support = html.match(/<a [^>]*href="https:\/\/buymeacoffee\.com\/fohengineer"[^>]*>/);
+  assert.ok(support && /rel="noopener noreferrer"/.test(support[0]) && /target="_blank"/.test(support[0]), 'support link needs target=_blank and rel=noopener noreferrer');
   for (const r of refs) {
-    if (/^data:/.test(r)) continue;
+    if (/^data:/.test(r) || r === SUPPORT) continue;
     assert.ok(!r.startsWith('/') && !/^https?:/.test(r), `non-relative reference ${r}`);
     assert.ok(fs.existsSync(path.join(root, r)), `missing file ${r}`);
   }

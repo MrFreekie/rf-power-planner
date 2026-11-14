@@ -15,6 +15,7 @@ import { mpxMessage, modeText, SPEC_DB } from './mpx.js';
 import { rxState } from '../rxTracker.js';
 import { distortMpxSpectrum, resolveAudioBandwidthHz } from '../model/spectrum-views.js';
 import { drawDistortionBadge, drawProductMarker, distortionAria } from './distortionDraw.js';
+import { createZoom, decimate } from './spectraZoom.js';
 import { drawMonoMpx, isStereoMpx, monoInputs, monoSummary, monoNotes, rfSubcarriers } from './spectraMono.js';
 export { drawMonoMpx, isStereoMpx, monoInputs, monoSummary, monoNotes, rfSubcarriers };
 
@@ -378,6 +379,34 @@ export function drawMpx(ctx, w, h, th, { state, link, hoverX, dist = null }) {
 
 // ---- DOM ---------------------------------------------------------------------------------------
 
+/** Text table alternative to a spectrum plot: { caption, cols, rows } or null. Pure; res is what compute() returns for that panel. */
+export function spectrumTable(id, res, inp0) {
+  const n1 = (v, d = 1) => (fin(v) ? v.toFixed(d) : '-');
+  if (!res) return null;
+  if (id === 'rf' && res.s && res.s.freqsMHz) {
+    const s = res.s, fc = (res.inp || inp0 || {}).carrierMHz;
+    const rows = decimate(s.freqsMHz.length).map((i) => [`${((s.freqsMHz[i] - fc) * 1000).toFixed(0)} kHz`, n1(s.levelsDbm[i]) + ' dBm']);
+    for (const c of (res.inp && res.inp.subcarriers) || []) rows.push([`${c.name} at +/- ${+c.offsetKhz.toFixed(1)} kHz`, n1(c.levelDbm) + ' dBm']);
+    rows.push(['Noise in RBW', n1(s.noiseDbm) + ' dBm']);
+    return { caption: `RF spectrum around ${fc} MHz: offset from the carrier and level`, cols: ['Offset', 'Level'], rows };
+  }
+  if (id === 'audio' && res.a && res.a.freqsHz) {
+    const a = res.a, stereo = !!(a.levelsDbR && a.levelsDbR.length);
+    const rows = AUDIO_BANDS.map((b) => { const i = nearestIndex(a.freqsHz, b); return stereo ? [`${hzText(b)}`, n1(a.levelsDb[i]) + ' dB', n1(a.levelsDbR[i]) + ' dB'] : [`${hzText(b)}`, n1(a.levelsDb[i]) + ' dB']; });
+    rows.push(stereo ? ['Noise floor', n1(a.floorDb) + ' dB', '-'] : ['Noise floor', n1(a.floorDb) + ' dB']);
+    return { caption: 'Audio spectrum at the octave band centres', cols: stereo ? ['Band', 'Left', 'Right'] : ['Band', 'Level'], rows };
+  }
+  if (id === 'mpx') {
+    let f = null, l = null;
+    if (res.m && res.m.freqKhz) { f = res.m.freqKhz; l = res.m.levelDb; }
+    else if (res.st) { try { const s = mpxSpectrum(res.st, { points: 120 }); f = s.freqKHz; l = s.levelDb; } catch { /* no table */ } }
+    if (!f) return null;
+    const rows = decimate(f.length).map((i) => [`${n1(f[i], 1)} kHz`, n1(l[i]) + ' dB']);
+    return { caption: 'MPX baseband spectrum: frequency and level', cols: ['Frequency', 'Level'], rows };
+  }
+  return null;
+}
+
 export function mountSpectra({ container, store, now = () => performance.now() }) {
   container.classList.add('spectra');
   container.textContent = '';
@@ -406,8 +435,9 @@ export function mountSpectra({ container, store, now = () => performance.now() }
     const title = el('h3', null, sp.label);
     let titleRow = title;
     if (sp.id === 'mpx') { titleRow = el('div', 'spectrum-title-row'); titleRow.append(title); }
-    const canvas = el('canvas', 'spectrum-canvas', null, { role: 'img', 'aria-label': sp.label, tabindex: '0' });
-    const sum = el('p', 'spectrum-sum', '', { role: 'status', 'aria-live': 'off' });
+    const canvas = el('canvas', 'spectrum-canvas', null, { role: 'button', 'aria-label': `Enlarge ${sp.label}`, 'aria-haspopup': 'dialog', title: `Click or press Enter to enlarge the ${sp.label}`, tabindex: '0' });
+    const sum = el('p', 'spectrum-sum', '', { role: 'status', 'aria-live': 'off', id: `spectra-sum-${sp.id}` });
+    canvas.setAttribute('aria-describedby', sum.id);
     const about = el('details', 'spectrum-about'); about.append(el('summary', null, 'About this spectrum'));
     const aboutBody = el('p', null, ''); about.append(aboutBody);
     panel.append(titleRow, canvas, sum, about);
@@ -505,11 +535,11 @@ export function mountSpectra({ container, store, now = () => performance.now() }
     cache[id] = res;
     return { res, link, mst };
   }
-  function makeDraw(id) {
-    return (ctx, w, h, th) => {
+  function makeDraw(id, big = false) {
+    return (ctx, w, h, th, hvOverride) => {
       const t0 = now();
       const { res, link, mst } = compute(id, w);
-      const hv = panels[id].hover;
+      const hv = big ? hvOverride : panels[id].hover;
       if (id === 'audio') {
         if (!res) note(ctx, w, h, th, link ? 'Audio spectrum model not loaded.' : 'No link selected.'); else drawAudio(ctx, w, h, th, res.a, res.inp, hv);
       } else if (id === 'rf') {
@@ -520,7 +550,7 @@ export function mountSpectra({ container, store, now = () => performance.now() }
         else if (!res || !res.m) note(ctx, w, h, th, 'MPX baseband model not loaded.');
         else drawMonoMpx(ctx, w, h, th, { m: res.m, inp: res.inp, hoverX: hv });
       }
-      panels[id].canvas.dataset.ms = (now() - t0).toFixed(2);
+      if (!big) panels[id].canvas.dataset.ms = (now() - t0).toFixed(2);
     };
   }
   function updateText() {
@@ -541,7 +571,7 @@ export function mountSpectra({ container, store, now = () => performance.now() }
     for (const id of Object.keys(texts)) { const nt = notes[id].join(' '); if (nt !== panels[id].aboutBody.textContent) panels[id].aboutBody.textContent = nt; }
     for (const id of Object.keys(texts)) {
       const p = panels[id];
-      if (texts[id] !== p.lastText) { p.lastText = texts[id]; p.sum.textContent = texts[id]; p.canvas.setAttribute('aria-label', texts[id]); }
+      if (texts[id] !== p.lastText) { p.lastText = texts[id]; p.sum.textContent = texts[id]; }
     }
   }
   for (const sp of SPECTRA) {
@@ -549,13 +579,31 @@ export function mountSpectra({ container, store, now = () => performance.now() }
     p.host = createCanvasHost(p.canvas, makeDraw(sp.id));
     p.canvas.addEventListener('pointermove', (e) => { const b = p.canvas.getBoundingClientRect(); p.hover = e.clientX - b.left; p.host.invalidate(); });
     p.canvas.addEventListener('pointerleave', () => { p.hover = null; p.host.invalidate(); });
-    p.canvas.addEventListener('keydown', (e) => { // keyboard hover marker: arrows move it, Escape clears
+    p.canvas.addEventListener('click', () => openZoom(sp.id));
+    p.canvas.addEventListener('keydown', (e) => { // Enter or Space enlarges; arrows move the hover marker, Escape clears it
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openZoom(sp.id); return; }
       const b = p.canvas.getBoundingClientRect();
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); p.hover = Math.min(b.width, Math.max(0, (p.hover ?? b.width / 2) + (e.key === 'ArrowRight' ? 8 : -8))); p.host.invalidate(); }
       else if (e.key === 'Escape') { p.hover = null; p.host.invalidate(); }
     });
   }
-  function invalidateAll() { for (const sp of SPECTRA) { const p = panels[sp.id]; if (p.host && !p.panel.hidden) p.host.invalidate(); } updateText(); }
+  // ---- enlarged view in a native dialog ----
+  const zoom = createZoom({
+    doc: document,
+    hostFactory: (canvas, draw) => createCanvasHost(canvas, draw),
+    describe: (id) => ({ title: SPECTRA.find((x) => x.id === id).label, summary: panels[id].lastText || '' }),
+    table: (id) => { const { res } = compute(id, 300); return spectrumTable(id, res); },
+    draw: (id, ctx, w, h, th, hv) => zoomDraws[id](ctx, w, h, th, hv),
+  });
+  const zoomDraws = {};
+  for (const sp of SPECTRA) zoomDraws[sp.id] = makeDraw(sp.id, true);
+  const canZoom = (id) => !(id === 'mpx' && panels.mpx.canvas.hidden);
+  function openZoom(id) { if (canZoom(id)) zoom.open(id, panels[id].canvas); }
+  function invalidateAll() {
+    for (const sp of SPECTRA) { const p = panels[sp.id]; if (p.host && !p.panel.hidden) p.host.invalidate(); }
+    updateText();
+    if (zoom.isOpen()) { if (canZoom(zoom.state.id)) zoom.update(); else zoom.close(); }
+  }
 
   function tick(ts) {
     loop = 0;
@@ -585,7 +633,7 @@ export function mountSpectra({ container, store, now = () => performance.now() }
   const unsub = [store.subscribe(() => invalidateAll())];
   if (running) loop = requestAnimationFrame(tick);
   return {
-    setRunning, invalidate: invalidateAll, panels,
-    destroy() { running = false; if (loop) cancelAnimationFrame(loop); document.removeEventListener('visibilitychange', onVis); if (ro) ro.disconnect(); unsub.forEach((u) => u && u()); for (const sp of SPECTRA) panels[sp.id].host.destroy(); container.textContent = ''; },
+    setRunning, invalidate: invalidateAll, panels, zoom, openZoom,
+    destroy() { running = false; if (loop) cancelAnimationFrame(loop); document.removeEventListener('visibilitychange', onVis); if (ro) ro.disconnect(); unsub.forEach((u) => u && u()); zoom.destroy(); for (const sp of SPECTRA) panels[sp.id].host.destroy(); container.textContent = ''; },
   };
 }

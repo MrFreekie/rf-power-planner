@@ -7,6 +7,7 @@ export const LIMIT_OF = Object.freeze({
   zone: () => SCENE_LIMITS.maxZones,
   transmitter: () => SCENE_LIMITS.maxImdTransmitters,
   platform: () => PLATFORM_LIMITS.max,
+  band: () => 16,
 });
 
 /** limitText('reflector') -> 'Limit reached (500 reflectors).' */

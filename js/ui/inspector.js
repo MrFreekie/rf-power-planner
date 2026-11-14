@@ -7,7 +7,9 @@ import { CABLES, ANTENNAS, SURFACES, MATERIALS, BANDS, GROUND_PLANE_LABELS, GROU
 import { setAntennaField, setAntennaType, antennaOf } from '../actions.js';
 import { POLARISATION_LABELS, ORIENTATION_HINT, POLARISATION_HINT } from './antennaFields.js';
 import { CHAIN_PRESETS, DC_MODES, FILTER_TYPES } from '../model/chain-presets.js';
-import { addAudience, updateAudience, removeAudience, setCeiling, addOverheadPanel, updateOverheadPanel, removeOverheadPanel, setP2pField, setAntennaDesignBand, densityChoiceId } from '../actionsAreas.js';
+import { addAudience, updateAudience, removeAudience, setCeiling, addOverheadPanel, updateOverheadPanel, removeOverheadPanel, setP2pField, setAntennaDesignBand, densityChoiceId, setWallField, setImdIntercept, setImdFilter, addImdBand, updateImdBand, removeImdBand, setImdHarmonic } from '../actionsAreas.js';
+import { IIP2_PRESETS, DEFAULT_IIP2_DBM, IIP4_OVER_IIP2_DB } from '../model/imd-even.js';
+import { WALL_CONSTRUCTIONS, WALL_NOISE_PRESETS, WALL_NOISE_LIMITS } from '../model/ledwall.js';
 import { AUDIENCE_DENSITY_PRESETS, AUDIENCE_DENSITY_LIMITS, AUDIENCE_DB_PER_M_PER_PERSON, AUDIENCE_MAX_LOSS_DB } from '../model/audience.js';
 import { CEILING_MATERIALS, CEILING_LIMITS } from '../model/ceiling.js';
 import { ANTENNA_BANDS, antennaMatch, resolveDesignBand } from '../model/antenna-band.js';
@@ -31,7 +33,7 @@ const IMD_PRESETS = [['mic-rack-typical', 'Mic rack, typical'], ['iem-combiner-n
 import { createChainItem } from '../model/scene.js';
 import { dispAxis, internalAxis, dispRange, COORD_HINT } from './coords.js';
 import { txLimitHint, getCoordRegion } from './region.js';
-import { addOrLimit } from './limitNote.js';
+import { addOrLimit, showLimit } from './limitNote.js';
 import { txPresetOptions, powerOptionChoices, currentPowerOption, lowIntermodAvailable, presetNotes, txFigures, rxFigures, tuningHint, rxPresetChoices, isFmRxPreset, LOW_IM_LABEL } from './fmui.js';
 import { setTxFmPreset, setTxPowerOption, setTxLowIntermod, setRxFmPreset, setImdTransmitterFm } from '../actions.js';
 import { noiseOptions, noiseValue, noiseFromChoice, noiseHint, interferenceApplies, interferenceOptions, interferenceValue, interferenceHint, rxPresetOffer } from './noise.js';
@@ -41,7 +43,7 @@ import {
 } from '../actions.js';
 import {
   clamp, parseNumber, formatNumber, lengthToUi, lengthFromUi, powerFieldRange, powerUiToDbm,
-  bandForFreq, bandCentre, pathRows, lossText,
+  bandForFreq, bandCentre, lossText,
 } from './fields.js';
 
 const getIn = (obj, path) => path.split('.').reduce((o, k) => (o == null ? undefined : o[k]), obj);
@@ -61,7 +63,7 @@ export function mountInspector({ container, store }) {
   let updaters = [];
   let refs = {};
   let session = 0; // bumped on focus so each editing burst is its own undo step
-  const open = { stage: false, plats: false, chainB: true, imd: true, aud: false, ovh: false, p2p: true, link: true, tx: false, rx: false, env: false, chain: true, refl: false, paths: false };
+  const open = { stage: false, plats: false, chainB: true, imd: true, aud: false, ovh: false, p2p: true, link: true, tx: false, rx: false, env: false, chain: true, refl: false };
   let lastSel = Symbol('none');
 
   const getCtx = () => {
@@ -605,27 +607,9 @@ export function mountInspector({ container, store }) {
     const fb = section('refl', 'Reflectors');
     buildReflectors(fb, c);
 
-    // Paths
-    const pb = section('paths', 'Paths');
-    const ptable = el('table', 'paths-table');
-    ptable.innerHTML = '<thead><tr><th scope="col">Ray</th><th scope="col" class="num">Length</th><th scope="col" class="num">Delay (ns)</th><th scope="col" class="num">vs direct (dB)</th></tr></thead><tbody></tbody>';
-    const pbody = ptable.querySelector('tbody');
-    pb.append(ptable);
-    updaters.push((cc) => {
-      refs.paths.summary.textContent = `Paths (${cc.result ? cc.result.paths.length : 0})`;
-      ptable.querySelector('th:nth-child(2)').textContent = `Length (${cc.lu})`;
-      pbody.textContent = '';
-      for (const r of pathRows(cc.result, cc.scene, cc.lu)) {
-        const tr = el('tr');
-        const k = el('td', null, r.kind);
-        tr.append(k, el('td', 'num', r.length), el('td', 'num', r.delayNs), el('td', 'num', r.relDb));
-        pbody.append(tr);
-      }
-    });
-
     const p2pb = c.link.kind === 'p2p' ? section('p2p', 'Point-to-point path', 'Heights are above a common flat datum. Terrain profiles, multiple edges, rain and ducting are not modelled.') : null;
     if (p2pb) buildP2p(p2pb);
-    const secs = ['stage', 'plats', ...(p2pb ? ['p2p'] : []), 'aud', 'ovh', 'link', 'tx', 'rx', 'env', 'chain', ...(refs.chainB ? ['chainB'] : []), 'refl', 'paths'];
+    const secs = ['stage', 'plats', ...(p2pb ? ['p2p'] : []), 'aud', 'ovh', 'link', 'tx', 'rx', 'env', 'chain', ...(refs.chainB ? ['chainB'] : []), 'refl'];
     if (c.scene.imd && c.scene.imd.enabled) { buildImd(section('imd', 'Intermod demo'), c); secs.unshift('imd'); }
     container.append(...secs.map((n) => refs[n].details));
   }
@@ -663,6 +647,41 @@ export function mountInspector({ container, store }) {
         get: (cc) => cc.scene.imd.channelBwKHz ?? 200, set: (cc, v, o) => setPath(store, 'imd.channelBwKHz', v, o),
       }),
     );
+    // even-order products (second and fourth order, imd-even.js): receiver or booster intercepts, other bands in use, filters before and after
+    const iip2 = (cc) => (Number.isFinite(cc.scene.imd.iip2Dbm) ? cc.scene.imd.iip2Dbm : DEFAULT_IIP2_DBM);
+    const evenHead = el('h3', 'cv-sug-h', 'Even-order intermod (second and fourth order)');
+    body.append(evenHead, el('p', 'hint', 'Products such as f1 + f2 and 2f land far from the carriers, so they matter for wideband boosters, mixed bands on one antenna and harmonics. Intercepts are assumed planning numbers (flag U).'));
+    body.append(
+      selectField({
+        key: 'imd-iip2p', label: 'Nonlinear stage', options: [['custom', 'Custom IIP2'], ...Object.entries(IIP2_PRESETS).map(([id, p]) => [id, `${p.label} [${p.flag}]`])],
+        get: (cc) => Object.entries(IIP2_PRESETS).find(([, p]) => p.iip2Dbm === iip2(cc))?.[0] || 'custom',
+        set: (cc, v) => { if (IIP2_PRESETS[v]) { setImdIntercept(store, 'iip2Dbm', IIP2_PRESETS[v].iip2Dbm); setImdIntercept(store, 'iip4Dbm', null); } },
+      }),
+      numberField({ key: 'imd-iip2', label: 'IIP2', min: -100, max: 200, step: 1, unit: 'dBm (higher is better)', decimals: 1, get: (cc) => iip2(cc), set: (cc, v, o) => setImdIntercept(store, 'iip2Dbm', v, o) }),
+      numberField({ key: 'imd-iip4', label: 'IIP4', min: -100, max: 200, step: 1, unit: `dBm (default IIP2 + ${IIP4_OVER_IIP2_DB})`, decimals: 1, get: (cc) => (Number.isFinite(cc.scene.imd.iip4Dbm) ? cc.scene.imd.iip4Dbm : iip2(cc) + IIP4_OVER_IIP2_DB), set: (cc, v, o) => setImdIntercept(store, 'iip4Dbm', v, o) }),
+    );
+    (m.bands || []).forEach((b, i) => {
+      const B = (cc) => (cc.scene.imd.bands || [])[i];
+      const head = el('div', 'ci-head'); head.append(el('strong', null, `Other band ${i + 1}`), button('×', `imd-band${i}-del`, () => removeImdBand(store, i), { label: `Remove other band ${i + 1}`, cls: 'danger' }));
+      const box = el('div', 'ci'), fl = el('div', 'ci-fields'); box.append(head, fl);
+      fl.append(
+        textField({ key: `imd-band${i}-name`, label: 'Name', get: (cc) => B(cc)?.name, set: (cc, v, o) => updateImdBand(store, i, { name: v }, o) }),
+        numberField({ key: `imd-band${i}-lo`, label: 'From', min: 1, max: 100000, step: 1, unit: 'MHz', decimals: 1, get: (cc) => B(cc)?.loMHz ?? 0, set: (cc, v, o) => updateImdBand(store, i, { loMHz: v }, o) }),
+        numberField({ key: `imd-band${i}-hi`, label: 'To', min: 1, max: 100000, step: 1, unit: 'MHz', decimals: 1, get: (cc) => B(cc)?.hiMHz ?? 0, set: (cc, v, o) => updateImdBand(store, i, { hiMHz: v }, o) }),
+      );
+      body.append(box);
+    });
+    body.append(button('Add a band the system uses', 'imd-band-add', (e) => { if (!addImdBand(store)) showLimit(e && e.currentTarget, 'band'); }));
+    for (const [which, title] of [['filterBefore', 'Filter before the nonlinear stage (cleans the tones)'], ['filterAfter', 'Filter after it (cleans the products)']]) {
+      const F = (cc) => cc.scene.imd[which];
+      const has = (cc) => !!F(cc);
+      body.append(
+        selectField({ key: `imd-${which}`, label: title, options: [['none', 'None'], ['bandpass', 'Bandpass']], get: (cc) => (has(cc) ? 'bandpass' : 'none'), set: (cc, v) => setImdFilter(store, which, v === 'none' ? null : {}) }),
+        numberField({ key: `imd-${which}-lo`, label: 'Pass from', min: 1, max: 100000, step: 1, unit: 'MHz', decimals: 1, visible: has, get: (cc) => F(cc)?.passLoMHz ?? 470, set: (cc, v, o) => setImdFilter(store, which, { passLoMHz: v }, o) }),
+        numberField({ key: `imd-${which}-hi`, label: 'Pass to', min: 1, max: 100000, step: 1, unit: 'MHz', decimals: 1, visible: has, get: (cc) => F(cc)?.passHiMHz ?? 608, set: (cc, v, o) => setImdFilter(store, which, { passHiMHz: v }, o) }),
+        numberField({ key: `imd-${which}-rej`, label: 'Rejection outside', min: 0, max: 200, step: 1, unit: 'dB', decimals: 0, visible: has, get: (cc) => F(cc)?.rejectionDb ?? 40, set: (cc, v, o) => setImdFilter(store, which, { rejectionDb: v }, o) }),
+      );
+    }
     m.transmitters.forEach((t, i) => {
       const T = (cc) => cc.scene.imd.transmitters[i];
       const k = (s) => `imd-t${t.id}-${s}`;
@@ -675,6 +694,8 @@ export function mountInspector({ container, store }) {
         textField({ key: k('name'), label: 'Name', get: (cc) => T(cc)?.name, set: (cc, v, o) => updateImdTransmitter(store, t.id, { name: v }, o) }),
         numberField({ key: k('f'), label: 'Frequency', min: 100, max: 6000, step: 0.025, unit: 'MHz', decimals: 3, get: (cc) => T(cc)?.freqMHz ?? 0, set: (cc, v, o) => updateImdTransmitter(store, t.id, { freqMHz: v }, o) }),
         numberField({ key: k('p'), label: 'Power', min: -10, max: 40, step: 1, unit: 'dBm', decimals: 1, get: (cc) => T(cc)?.powerDbm ?? 0, set: (cc, v, o) => updateImdTransmitter(store, t.id, { powerDbm: v }, o) }),
+        numberField({ key: k('h2'), label: 'Second harmonic', min: 0, max: 200, step: 1, unit: 'dB below carrier (default 50)', decimals: 0, get: (cc) => T(cc)?.h2Dbc ?? 50, set: (cc, v, o) => setImdHarmonic(store, t.id, { h2Dbc: v }, o) }),
+        numberField({ key: k('hf'), label: 'Harmonic filter', min: 0, max: 200, step: 1, unit: 'dB extra rejection', decimals: 0, get: (cc) => T(cc)?.harmonicFilterDb ?? 0, set: (cc, v, o) => setImdHarmonic(store, t.id, { harmonicFilterDb: v }, o) }),
         selectField({ key: k('fm'), label: 'Equipment preset', options: () => txPresetOptions(), get: (cc) => T(cc)?.fmPreset || '', set: (cc, v) => setImdTransmitterFm(store, t.id, { fmPreset: v || null }) }),
         selectField({
           key: k('li'), label: LOW_IM_LABEL, options: [['off', 'Off'], ['on', 'On']],
@@ -1211,6 +1232,36 @@ export function mountInspector({ container, store }) {
         get: (cc) => lengthToUi(R(cc)?.zMax ?? 1, cc.lu), set: (cc, v, o) => setPath(store, `${base}.zMax`, lengthFromUi(v, cc.lu), o),
       }),
     );
+    // video wall: construction and noise (ledwall.js); shown for every reflector, the noise rows follow the preset
+    const wallFlag = (flag) => (flag ? ` [${flag}]` : '');
+    form.append(
+      selectField({
+        key: 'refl-cons', label: 'Construction', options: [['none', 'Not specified (use the material above)'], ...Object.entries(WALL_CONSTRUCTIONS).map(([id, k]) => [id, k.label + wallFlag(k.flag)])],
+        get: (cc) => R(cc)?.construction || 'none', set: (cc, v) => setWallField(store, rid, 'construction', v),
+      }),
+    );
+    if (String(c.scene.reflectors[idx].construction || '').startsWith('mesh')) form.append(numberField({
+      key: 'refl-hole', label: 'Mesh hole size', min: 0.01, max: 2000, step: 1, unit: 'mm (shielding falls as holes approach half a wavelength)', decimals: 1,
+      get: (cc) => R(cc)?.holeSizeMm ?? 10, set: (cc, v, o) => setWallField(store, rid, 'holeSizeMm', v, o),
+    }));
+    form.append(selectField({
+      key: 'refl-noise', label: 'Wall noise', options: Object.entries(WALL_NOISE_PRESETS).map(([id, p]) => [id, p.label + wallFlag(p.flag)]),
+      get: (cc) => R(cc)?.noise?.preset || 'off', set: (cc, v) => setWallField(store, rid, 'preset', v),
+    }));
+    const np = c.scene.reflectors[idx].noise?.preset || 'off';
+    if (np !== 'off') {
+      const NL = WALL_NOISE_LIMITS;
+      if (np === 'custom') form.append(
+        numberField({ key: 'refl-nlevel', label: 'Noise level', min: NL.levelDbuvmAt10m[0], max: NL.levelDbuvmAt10m[1], step: 1, unit: 'dBuV/m at 10 m, 600 MHz', decimals: 1, get: (cc) => R(cc)?.noise?.levelDbuvmAt10m ?? 40, set: (cc, v, o) => setWallField(store, rid, 'levelDbuvmAt10m', v, o) }),
+        numberField({ key: 'refl-ntilt', label: 'Noise tilt', min: NL.tiltDbPerDecade[0], max: NL.tiltDbPerDecade[1], step: 1, unit: 'dB per decade of frequency', decimals: 1, get: (cc) => R(cc)?.noise?.tiltDbPerDecade ?? 0, set: (cc, v, o) => setWallField(store, rid, 'tiltDbPerDecade', v, o) }),
+      );
+      form.append(
+        numberField({ key: 'refl-nrear', label: 'Rear loss', min: NL.rearLossDb[0], max: NL.rearLossDb[1], step: 1, unit: 'dB behind the wall', decimals: 1, get: (cc) => R(cc)?.noise?.rearLossDb ?? 8, set: (cc, v, o) => setWallField(store, rid, 'rearLossDb', v, o) }),
+        numberField({ key: 'refl-nheight', label: 'Noisy height', min: NL.heightM[0], max: NL.heightM[1], step: 0.1, unit: 'm above the bottom edge', decimals: 1, get: (cc) => R(cc)?.noise?.heightM ?? ((R(cc)?.zMax ?? 3) - (R(cc)?.zMin ?? 0)), set: (cc, v, o) => setWallField(store, rid, 'heightM', v, o) }),
+        selectField({ key: 'refl-nface', label: 'Facing (front = left of start to end)', options: [['left', 'Left of start to end'], ['right', 'Right of start to end']], get: (cc) => R(cc)?.noise?.facing || 'left', set: (cc, v) => setWallField(store, rid, 'facing', v) }),
+      );
+      form.append(el('p', 'hint', 'Presets are EMC emission limits (flag I) or assumed (U). The noise shows on the plan and in the link budget when the receiver floor rises.'));
+    }
     form.append(button('Remove reflector', 'refl-remove', () => { removeReflector(store, rid); store.select(null); }, { cls: 'danger' }));
     body.append(form);
   }
@@ -1223,10 +1274,11 @@ export function mountInspector({ container, store }) {
       c.link.chain.map((x, i) => `${x.id || i}:${x.kind}`),
       c.link.kind === 'iem' ? (c.link.rx.chain || []).map((x, i) => `${x.id || i}:${x.kind}`) : null,
       c.link.kind !== 'iem' && c.link.rx.diversity && c.link.rx.diversity.enabled && c.link.rx.diversity.antennaB ? (Array.isArray(c.link.rx.diversity.antennaB.chain) ? c.link.rx.diversity.antennaB.chain.map((x, i) => `${x.id || i}:${x.kind}`) : 'same') : null,
-      c.scene.reflectors.map((r) => `${r.id}:${r.name}`),
+      c.scene.reflectors.map((r) => `${r.id}:${r.name}:${r.id === c.sel ? `${r.construction || ''}/${(r.noise && r.noise.preset) || ''}` : ''}`),
       (c.scene.platforms || []).map((p) => `${p.id}:${p.name}`),
       (c.scene.audience || []).map((a) => `${a.id}:${a.name}`), (c.scene.overheadPanels || []).map((o) => `${o.id}:${o.name}`), !!(c.scene.ceiling),
       c.scene.imd && c.scene.imd.enabled ? c.scene.imd.transmitters.map((t) => t.id) : null,
+      c.scene.imd && c.scene.imd.enabled ? (c.scene.imd.bands || []).length : null,
     ]);
   }
 

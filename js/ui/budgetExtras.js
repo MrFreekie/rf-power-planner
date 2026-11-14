@@ -26,5 +26,10 @@ export function budgetExtras(r) {
     if (fin(q.horizonM)) rows.push({ label: 'Radio horizon', value: `${km(q.horizonM)}${q.beyondHorizon ? ' BEYOND HORIZON' : ''}`, severity: q.beyondHorizon ? 'warning' : 'ok' });
     rows.push({ label: 'Edge loss', value: q.edge === 'none' ? 'none (clear path)' : `${fin(q.diffractionLossDb) ? q.diffractionLossDb.toFixed(1) : '-'} dB, ${q.edge === 'earth' ? 'earth curvature' : 'obstacle'}`, severity: q.edge === 'none' ? 'ok' : 'warning' });
   }
+  const wn = r.wallNoise;
+  if (wn && fin(wn.dbm)) {
+    const rise = fin(wn.riseDb) ? wn.riseDb : 0, ch = fin(wn.marginChangeDb) ? wn.marginChangeDb : 0;
+    rows.push({ label: 'Video wall noise', value: `${wn.dbm.toFixed(1)} dBm in ${fin(wn.bandwidthKHz) ? Math.round(wn.bandwidthKHz) : '-'} kHz, noise floor +${rise.toFixed(1)} dB, margin ${ch >= 0 ? '+' : ''}${ch.toFixed(1)} dB${rise >= 3 ? ' WARNING' : ''}`, severity: rise >= 3 ? 'warning' : rise >= 0.5 ? 'info' : 'ok' });
+  }
   return rows;
 }

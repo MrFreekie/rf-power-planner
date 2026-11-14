@@ -5,6 +5,7 @@ import { AUDIENCE_KINDS, AUDIENCE_DENSITY_LIMITS, AUDIENCE_MAX } from './model/a
 import { CEILING_MATERIALS, CEILING_LIMITS } from './model/ceiling.js';
 import { ANTENNA_BANDS } from './model/antenna-band.js';
 import { antennaOf } from './actions.js';
+import { WALL_CONSTRUCTIONS, WALL_NOISE_LIMITS } from './model/ledwall.js';
 
 const fin = Number.isFinite;
 const clampTo = (v, [lo, hi]) => Math.min(hi, Math.max(lo, v));
@@ -145,4 +146,83 @@ export function setAntennaDesignBand(store, linkId, target, band, o = {}) {
     }
   }, opts(o));
   return changed;
+}
+
+// ---- video wall noise and construction (reflector fields) ------------------------------------------------------------------------------------
+export const WALL_NOISE_FIELDS = Object.freeze({
+  preset: ['off', 'class-b', 'class-a', 'noisy', 'custom'], facing: ['left', 'right'],
+});
+const clampN = (v, [lo, hi]) => Math.min(hi, Math.max(lo, v));
+/** Set a wall field: 'construction', 'holeSizeMm' (reflector level) or a noise field (preset, levelDbuvmAt10m, tiltDbPerDecade, rearLossDb, heightM, facing). null clears an optional field. */
+export function setWallField(store, reflectorId, field, value, o = {}) {
+  return store.update((d) => {
+    const r = (d.reflectors || []).find((x) => x.id === reflectorId);
+    if (!r) return;
+    if (field === 'construction') { if (value === null || value === '' || value === 'none') delete r.construction; else if (WALL_CONSTRUCTIONS[value]) r.construction = value; return; }
+    if (field === 'holeSizeMm') { if (value === null) delete r.holeSizeMm; else if (Number.isFinite(value)) r.holeSizeMm = Math.min(2000, Math.max(0.01, value)); return; }
+    if (!r.noise) r.noise = { preset: 'off' };
+    const n = r.noise;
+    if (field === 'preset') { if (WALL_NOISE_FIELDS.preset.includes(value)) { n.preset = value; if (value === 'custom') { if (!Number.isFinite(n.levelDbuvmAt10m)) n.levelDbuvmAt10m = 40; if (!Number.isFinite(n.tiltDbPerDecade)) n.tiltDbPerDecade = 0; } } return; }
+    if (field === 'facing') { if (WALL_NOISE_FIELDS.facing.includes(value)) n.facing = value; return; }
+    if (field === 'rearLossDb' && value === null) { delete n.rearLossDb; return; }
+    const lim = { levelDbuvmAt10m: WALL_NOISE_LIMITS.levelDbuvmAt10m, tiltDbPerDecade: WALL_NOISE_LIMITS.tiltDbPerDecade, rearLossDb: WALL_NOISE_LIMITS.rearLossDb, heightM: WALL_NOISE_LIMITS.heightM }[field];
+    if (lim && Number.isFinite(value)) n[field] = clampN(value, lim);
+  }, o && o.coalesce ? { coalesce: o.coalesce } : {});
+}
+
+// ---- even-order intermodulation (imd-even.js): scene.imd.iip2Dbm, iip4Dbm, bands, filterBefore, filterAfter and per-transmitter harmonics ---------------------
+export const EVEN_LIMITS = Object.freeze({ iip: [-100, 200], filterRejectionDb: [0, 200], harmonicDb: [0, 200], bands: 16, mhz: [1, 100000] });
+const imdIn = (d) => (d.imd && d.imd.enabled !== undefined ? d.imd : null);
+/** Set iip2Dbm / iip4Dbm (null removes: the model default applies). Bad numbers are ignored, values clamped. */
+export function setImdIntercept(store, field, value, o = {}) {
+  if (field !== 'iip2Dbm' && field !== 'iip4Dbm') return false;
+  return store.update((d) => {
+    const m = imdIn(d); if (!m) return;
+    if (value === null) delete m[field]; else if (fin(value)) m[field] = clampTo(value, EVEN_LIMITS.iip);
+  }, opts(o));
+}
+/** Pre or post filter: which = 'filterBefore' | 'filterAfter'. patch = { passLoMHz, passHiMHz, rejectionDb } merged into the filter; null removes it. */
+export function setImdFilter(store, which, patch, o = {}) {
+  if (which !== 'filterBefore' && which !== 'filterAfter') return false;
+  return store.update((d) => {
+    const m = imdIn(d); if (!m) return;
+    if (patch === null) { delete m[which]; return; }
+    const f = m[which] || { passLoMHz: 470, passHiMHz: 608, rejectionDb: 40 };
+    if (fin(patch.passLoMHz)) f.passLoMHz = clampTo(patch.passLoMHz, EVEN_LIMITS.mhz);
+    if (fin(patch.passHiMHz)) f.passHiMHz = clampTo(patch.passHiMHz, EVEN_LIMITS.mhz);
+    if (fin(patch.rejectionDb)) f.rejectionDb = clampTo(patch.rejectionDb, EVEN_LIMITS.filterRejectionDb);
+    if (!(f.passHiMHz > f.passLoMHz)) f.passHiMHz = Math.min(EVEN_LIMITS.mhz[1], f.passLoMHz + 1);
+    m[which] = f;
+  }, opts(o));
+}
+/** Other bands the system uses: { name, loMHz, hiMHz } (at most 16). */
+export function addImdBand(store, band = {}) {
+  let ok = false;
+  store.update((d) => {
+    const m = imdIn(d); if (!m) return;
+    m.bands = Array.isArray(m.bands) ? m.bands : [];
+    if (m.bands.length >= EVEN_LIMITS.bands) return;
+    const lo = fin(band.loMHz) ? clampTo(band.loMHz, EVEN_LIMITS.mhz) : 1785, hi = fin(band.hiMHz) && band.hiMHz > lo ? clampTo(band.hiMHz, EVEN_LIMITS.mhz) : lo + 20;
+    m.bands.push({ name: typeof band.name === 'string' && band.name ? band.name.slice(0, 80) : 'Other band', loMHz: lo, hiMHz: hi }); ok = true;
+  });
+  return ok;
+}
+export function updateImdBand(store, index, patch = {}, o = {}) {
+  return store.update((d) => {
+    const m = imdIn(d), b = m && Array.isArray(m.bands) ? m.bands[index] : null; if (!b) return;
+    if (typeof patch.name === 'string' && patch.name.length <= 80) b.name = patch.name;
+    if (fin(patch.loMHz)) b.loMHz = clampTo(patch.loMHz, EVEN_LIMITS.mhz);
+    if (fin(patch.hiMHz)) b.hiMHz = clampTo(patch.hiMHz, EVEN_LIMITS.mhz);
+    if (!(b.hiMHz > b.loMHz)) b.hiMHz = Math.min(EVEN_LIMITS.mhz[1], b.loMHz + 1);
+  }, opts(o));
+}
+export function removeImdBand(store, index) {
+  return store.update((d) => { const m = imdIn(d); if (m && Array.isArray(m.bands) && m.bands[index]) { m.bands.splice(index, 1); if (!m.bands.length) delete m.bands; } });
+}
+/** Per-transmitter second harmonic: h2Dbc (dB below the carrier) and harmonicFilterDb (null removes). */
+export function setImdHarmonic(store, txId, patch = {}, o = {}) {
+  return store.update((d) => {
+    const m = imdIn(d), t = m && (m.transmitters || []).find((x) => x.id === txId); if (!t) return;
+    for (const k of ['h2Dbc', 'harmonicFilterDb']) { if (patch[k] === null) delete t[k]; else if (fin(patch[k])) t[k] = clampTo(patch[k], EVEN_LIMITS.harmonicDb); }
+  }, opts(o));
 }

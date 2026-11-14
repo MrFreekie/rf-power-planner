@@ -28,6 +28,7 @@ import { mountGlossary } from './ui/glossary.js';
 import { mountPanels } from './ui/panels.js';
 import { activeLink as pickActiveLink } from './view/util.js';
 import { budgetExtras } from './ui/budgetExtras.js';
+import { pathRows } from './ui/fields.js';
 
 const $ = (id) => document.getElementById(id);
 // The storage key keeps its original, pre-rename name on purpose: changing it would orphan scenes people already saved.
@@ -237,6 +238,17 @@ $('btn-modlab').addEventListener('click', async () => {
     showError(`Could not open the modulation lab: ${err.message}`);
   }
 });
+// VNA lab (virtual network analyser overlay, loaded on first use)
+let vnaLab = null;
+$('btn-vnalab').addEventListener('click', async () => {
+  try {
+    if (!vnaLab) { const mod = await import('./view/vnaLab.js'); vnaLab = mod.mountVnaLab({ container: $('vnalab'), store }); }
+    vnaLab.isOpen() ? vnaLab.close() : vnaLab.open();
+  } catch (err) {
+    console.error(err);
+    showError(`Could not open the VNA lab: ${err.message}`);
+  }
+});
 $('btn-report').addEventListener('click', async () => {
   try {
     const mod = await import('./view/report.js');
@@ -357,6 +369,21 @@ function renderExtras(r) {
   dl.hidden = rows.length === 0;
 }
 
+function renderPaths(r, scene) {
+  const body = $('paths-body');
+  const rows = r ? pathRows(r, scene, scene.units.length) : [];
+  $('paths-summary').textContent = `Paths (${rows.length})`;
+  $('paths-len-h').textContent = `Length (${scene.units.length})`;
+  const sig = JSON.stringify([rows, scene.units.length]);
+  if (body.dataset.sig === sig) return;
+  body.dataset.sig = sig;
+  body.replaceChildren(...rows.map((x) => {
+    const tr = document.createElement('tr');
+    for (const [v, cls] of [[x.kind, ''], [x.length, 'num'], [x.delayNs, 'num'], [x.relDb, 'num']]) { const td = document.createElement('td'); if (cls) td.className = cls; td.textContent = String(v); tr.append(td); }
+    return tr;
+  }));
+}
+
 function renderResults(scene) {
   const link = pickActiveLink(scene, store.getSelection());
   const status = $('r-status');
@@ -373,12 +400,14 @@ function renderResults(scene) {
     status.dataset.status = r.status;
     renderWarnings(r.warnings);
     renderExtras(r);
+    renderPaths(r, scene);
     showError(loadError);
   } catch (err) {
     for (const id of ['r-distance', 'r-rx', 'r-input', 'r-margin', 'r-nf', 'r-floor', 'r-status']) $(id).textContent = '-';
     status.dataset.status = '';
     renderWarnings([]);
     renderExtras(null);
+    renderPaths(null, scene);
     showError(`Could not solve link: ${err.message}`);
   }
 }

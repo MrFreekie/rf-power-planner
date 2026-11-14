@@ -18,6 +18,7 @@
   </svg>
   <h1 class="brand-name">RF Bench</h1>
   <p class="brand-tag">Plan, simulate, learn.</p>
+  <a class="brand-support" href="https://buymeacoffee.com/fohengineer" target="_blank" rel="noopener noreferrer" title="Opens Buy Me a Coffee in a new tab. Entirely optional.">Find this useful? Buy me a coffee</a>
   <span class="brand-alpha" title="Alpha: under heavy development, so errors may be present. Always build and verify real systems before use.">Alpha</span>
   <p class="brand-warn">Under heavy development, errors may be present. Build and verify real systems before use.</p>
 </div>
@@ -73,6 +74,7 @@
     <button type="button" id="btn-report" title="Open a printable link budget report">Report</button>
   </div>
   <button type="button" id="btn-modlab" aria-expanded="false" aria-controls="modlab" title="Animated AM, FM, digital, stereo FM and mic tone-key demonstrations">Modulation lab</button>
+  <button type="button" id="btn-vnalab" aria-expanded="false" aria-controls="vnalab" title="Virtual network analyser: antenna, cable and filter return loss, Smith chart, calibration and a fault library">VNA lab</button>
   <button type="button" id="btn-venue" aria-haspopup="dialog" title="Import a venue drawing as a grey underlay">Venue</button>
   <div class="group panels-group" role="group" aria-label="Panels">
     <button type="button" id="btn-panel-left" data-toggle="left" aria-expanded="true" aria-controls="leftpanel-body" title="Show or hide the budgets panel on the left (key B)">Left</button>
@@ -92,6 +94,7 @@
 </header>
 <section id="welcome" hidden></section>
 <section id="modlab" hidden></section>
+<section id="vnalab" hidden></section>
 <div id="share-bar" role="alertdialog" aria-label="Shared scene" hidden>
   <p id="share-bar-text">Load shared scene?</p>
   <button type="button" id="share-load">Load</button>
@@ -131,6 +134,10 @@
     <p id="app-error" role="alert" hidden></p>
   </aside>
   <section id="waterfall" aria-label="Signal level waterfall"></section>
+  <details id="paths-panel" class="paths-details">
+    <summary id="paths-summary">Paths (0)</summary>
+    <table class="paths-table" aria-label="Signal paths from transmitter to receiver"><thead><tr><th scope="col">Ray</th><th scope="col" class="num" id="paths-len-h">Length (m)</th><th scope="col" class="num">Delay (ns)</th><th scope="col" class="num">vs direct (dB)</th></tr></thead><tbody id="paths-body"></tbody></table>
+  </details>
   </div>
   </div>
   <div id="sidebar" data-panel="right">

@@ -3,6 +3,7 @@
 import { createCanvasHost, activeLink, setFont, haloText } from './util.js';
 import { imd } from '../imdTracker.js';
 import { formatPower } from '../model/units.js';
+import { evenOrderImd } from '../model/imd.js';
 
 export const MECH_COLORS = { 'front-end': '#4a78b5', 'tx-reverse': '#c77a1f', pim: '#7d5ba6' };
 export const MECH_NAMES = { 'front-end': 'Receiver front end (over the air)', 'tx-reverse': 'Transmitter reverse intermod', pim: 'Passive intermod (PIM)' };
@@ -68,7 +69,12 @@ export function mountImd({ container, store }) {
   const tbody = table.querySelector('tbody');
   tableWrap.append(table);
   const note = el('p', 'hint', 'Two strong carriers mix in a non-linear stage and create products at 2f1 - f2 and similar frequencies. When a product lands on a wanted channel it raises that channel’s noise floor or becomes a tone you can hear. Moving transmitters apart, adding isolation, or choosing different frequencies lowers the products. Values are illustrative.');
-  body.append(legend, spec, nums, sweepH, sweep, slopes, coordH, tableWrap, note);
+  const evenH = el('h3', 'cv-sug-h', 'Even-order products (second and fourth order)');
+  const evenWrap = el('div', 'cv-table-wrap'), evenTable = el('table', 'cv-table');
+  evenTable.innerHTML = '<caption class="hint">Products of the transmitter tones in the nonlinear stage, and radiated second harmonics. Levels are at the receiver input.</caption><thead><tr><th scope="col">Product</th><th class="num" scope="col">Frequency</th><th class="num" scope="col">Level</th><th scope="col">Lands in</th><th scope="col">Severity</th></tr></thead><tbody></tbody>';
+  const evenBody = evenTable.querySelector('tbody'); evenWrap.append(evenTable);
+  const evenNote = el('p', 'hint imd-even-note');
+  body.append(legend, spec, nums, sweepH, sweep, slopes, coordH, tableWrap, evenH, evenNote, evenWrap, note);
   container.append(h2, msg, body);
 
   // legend (DOM, so it wraps on phones)
@@ -253,6 +259,20 @@ export function mountImd({ container, store }) {
       tbody.append(tr);
     }
     if (state.coordination.length > rows.length) { const tr = el('tr'); const td = el('td', null, `+ ${state.coordination.length - rows.length} more`); td.colSpan = 5; tr.append(td); tbody.append(tr); }
+    // even-order products (imd-even.js)
+    evenBody.textContent = '';
+    let ev = null;
+    try { ev = evenOrderImd(scene); } catch { ev = null; }
+    const evRows = ev ? [...ev.products, ...ev.harmonics] : [];
+    evenNote.textContent = ev ? `${ev.inBandCount} in the wanted channel, ${ev.bandHitCount} in another band the system uses. IIP2 ${Number.isFinite(scene.imd.iip2Dbm) ? scene.imd.iip2Dbm : 30} dBm.` : '';
+    if (!evRows.length) { const tr = el('tr'); const td = el('td', null, 'No even-order products (add a second transmitter, or check the nonlinear stage settings).'); td.colSpan = 5; tr.append(td); evenBody.append(tr); }
+    for (const p of evRows.slice(0, 14)) {
+      const tr = el('tr'), chip = el('span', 'chip', String(p.severity).toUpperCase()); chip.dataset.sev = p.severity === 'critical' ? 'critical' : p.severity === 'warning' ? 'warning' : 'info';
+      const sevTd = el('td'); sevTd.append(chip);
+      tr.append(el('td', null, `${p.label} (order ${p.order}${p.kind === 'harmonic' ? ', harmonic' : ''})`), el('td', 'num', `${p.fMHz.toFixed(2)} MHz`), el('td', 'num', fmtDbm(p.levelDbm, scene.units.power)), el('td', null, p.landsIn || 'outside every band used'), sevTd);
+      evenBody.append(tr);
+    }
+    if (evRows.length > 14) { const tr = el('tr'); const td = el('td', null, `+ ${evRows.length - 14} more`); td.colSpan = 5; tr.append(td); evenBody.append(tr); }
     sHost.invalidate(); wHost.invalidate();
   }
 

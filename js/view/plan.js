@@ -25,6 +25,7 @@ import { resizeFromCorner, rotationFromPointer } from './platformGeom.js';
 import { dispX, dispY, describePos } from '../ui/coords.js';
 import { drawVenue } from './venueDraw.js';
 import { planExtent, farBounds } from './planExtent.js';
+import { drawWallNoise } from './wallNoiseDraw.js';
 import { drawAreas } from './areasDraw.js';
 import { updateAudience, updateOverheadPanel, addAudience } from '../actionsAreas.js';
 
@@ -121,6 +122,8 @@ export function createPlanView(canvas, store) {
       if (cov.fineGrid) heatFine(ctx, vp, cov.fineGrid, th, opts);
     }
 
+    if (link0) drawWallNoise(ctx, th, vp, scene, link0, solveCached(scene, link0), w, h);
+
     // ripples (wavefronts) under the walls and icons
     rip.drawPlan(ctx, th, vp, scene, w, h, link0);
 
@@ -167,7 +170,7 @@ export function createPlanView(canvas, store) {
 
   function wallLabel(r) {
     let info = null;
-    try { info = wallTransmissionInfo(r, (store.getScene().links[0] && store.getScene().links[0].freqMHz) || 600); } catch { /* unknown material */ }
+    try { info = wallTransmissionInfo(r, (activeLink(store.getScene(), store.getSelection()) || {}).freqMHz || 600); } catch { /* unknown material */ }
     if (!info || !Number.isFinite(info.lossDb)) return `${r.name} (${r.material})`;
     const th2 = Number.isFinite(info.thicknessM) ? `${(info.thicknessM * 100).toFixed(0)} cm, ` : '';
     return `${r.name} (${r.material}): ${th2}${info.lossDb.toFixed(1)} dB through`;

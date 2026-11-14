@@ -86,10 +86,10 @@ export function mountPanels({ doc = document, storage = (typeof localStorage !==
 
   // below 1100 px the budgets live at the top of the inspector column (as before), above they have their own panel
   function place() {
-    const results = doc.getElementById('results'), wf = doc.getElementById('waterfall');
+    const results = doc.getElementById('results'), wf = doc.getElementById('waterfall'), pp = doc.getElementById('paths-panel');
     const left = doc.getElementById('leftpanel-body'), right = doc.getElementById('sidebar-body');
     if (!results || !wf || !left || !right) return;
-    if (mq.matches) { left.append(results, wf); } else { right.prepend(results); right.append(wf); }
+    if (mq.matches) { left.append(results, wf); if (pp) left.append(pp); } else { right.prepend(results); right.append(wf); if (pp) right.append(pp); }
   }
   const onMq = () => { place(); apply(); };
   if (mq.addEventListener) mq.addEventListener('change', onMq); else if (mq.addListener) mq.addListener(onMq);
