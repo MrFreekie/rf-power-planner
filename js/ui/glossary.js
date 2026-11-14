@@ -77,6 +77,9 @@ export const GLOSSARY = Object.freeze({
   mW: { full: 'Milliwatt', meaning: 'One thousandth of a watt. Handheld microphones typically transmit 10 to 50 mW.' },
   'external noise': { full: 'External RF noise', meaning: 'Unwanted radio noise from TV transmitters, electronics and other sources picked up by the antenna. It raises the noise floor, so it lowers SNR and margin, and it is stronger at lower frequencies.', wrap: false },
   // plain words that are documented for the help legends but not auto-wrapped
+  'pre-emphasis': { full: 'Pre-emphasis', meaning: 'A treble boost (50 us in Europe, 75 us in the US) applied before an FM transmitter. The receiver de-emphasis cuts the treble back, which also cuts the hiss, so the audio is flat again with less noise. Both ends must match.', wrap: false },
+  'de-emphasis': { full: 'De-emphasis', meaning: 'The receiver treble cut that undoes the transmitter pre-emphasis and lowers the FM hiss. If it is missing the audio sounds bright; if the time constant is wrong the treble is off by a few dB.', wrap: false },
+  compander: { full: 'Compander', meaning: 'Compressor before the radio link and expander after it. Quiet sounds are lifted above the channel noise, then pushed back down, which cuts the noise. A mismatched pair gives level errors, and the noise can be heard to breathe with the signal.', wrap: false },
   squelch: { full: 'Squelch', meaning: 'A gate that mutes the audio when the radio signal is too weak, so you hear silence instead of noise.', wrap: false },
   diversity: { full: 'Antenna diversity', meaning: 'Using two receive antennas and choosing or combining the better, since fades rarely hit both at once.', wrap: false },
   Fresnel: { full: 'Fresnel zone', meaning: 'The ellipsoid of space around the direct path that should be clear of obstacles for full signal strength.', wrap: false },

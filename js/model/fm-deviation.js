@@ -38,6 +38,8 @@ export const FM_DEVIATION_DEFAULT_SYSTEMS = Object.freeze([
  * 15 kHz so the comparison is like for like (the products quote up to 18 kHz). Included with params.includeG3 or by the systems list.
  */
 export const FM_DEVIATION_G3_SYSTEM = Object.freeze({ id: 'sennheiser-g3-class', label: 'Mic system, Sennheiser G3 / 2000 class (+-24 kHz)', deviationKhz: 24, audioBwKhz: 15, toneKeyKhz: null, confidence: Object.freeze({ deviationKhz: 'sourced', audioBwKhz: 'assumed', toneKeyKhz: 'assumed' }) });
+/** Optional system: Shure PSM 900 / PSM 1000 class IEM, +-34 kHz at 1 kHz (sourced), 15 kHz audio (assumed). Appended with params.includePSM. */
+export const FM_DEVIATION_PSM_SYSTEM = Object.freeze({ id: 'shure-psm-class', label: 'IEM, Shure PSM 900 / 1000 class (+-34 kHz)', deviationKhz: 34, audioBwKhz: 15, toneKeyKhz: null, confidence: Object.freeze({ deviationKhz: 'sourced', audioBwKhz: 'assumed', toneKeyKhz: 'assumed' }) });
 export const FM_DEVIATION_EXTENDED_SYSTEMS = Object.freeze([FM_DEVIATION_G3_SYSTEM, ...FM_DEVIATION_DEFAULT_SYSTEMS]);
 
 /** Receiver adjacent-channel rejection table of the EM 3732 class (sourced): 75 dB at 400 kHz, 80 dB at 800 kHz. */
@@ -61,6 +63,7 @@ function acrAt(table, offsetKhz) {
  * fmDeviationComparison(params?) -> frozen result.
  * params (all optional):
  *   includeG3          true adds FM_DEVIATION_G3_SYSTEM (+-24 kHz) in front of the default systems (ignored when systems is given)
+ *   includePSM         true appends FM_DEVIATION_PSM_SYSTEM (+-34 kHz) (ignored when systems is given)
  *   systems            [{ id, label, deviationKhz, audioBwKhz, toneKeyKhz?, confidence? }]  default FM_DEVIATION_DEFAULT_SYSTEMS
  *   inputDbm           receive level at the receiver input, dBm (default -80)
  *   noiseFigureDb      receiver NF, dB (default 6, assumed)
@@ -77,7 +80,7 @@ function acrAt(table, offsetKhz) {
  *     confidence, assumed: [paramName] }] }
  */
 export function fmDeviationComparison(params = {}) {
-  const systems = params.systems && params.systems.length ? params.systems : params.includeG3 ? FM_DEVIATION_EXTENDED_SYSTEMS : FM_DEVIATION_DEFAULT_SYSTEMS;
+  const systems = params.systems && params.systems.length ? params.systems : [...(params.includeG3 ? FM_DEVIATION_EXTENDED_SYSTEMS : FM_DEVIATION_DEFAULT_SYSTEMS), ...(params.includePSM ? [FM_DEVIATION_PSM_SYSTEM] : [])];
   const inputDbm = Number.isFinite(params.inputDbm) ? params.inputDbm : -80;
   const nf = Number.isFinite(params.noiseFigureDb) ? params.noiseFigureDb : 6;
   const channels = params.channelBwsKhz && params.channelBwsKhz.length ? [...params.channelBwsKhz] : [200, 400];

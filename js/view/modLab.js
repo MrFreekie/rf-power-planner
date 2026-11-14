@@ -4,15 +4,17 @@
 // with prefers-reduced-motion it starts paused (Play / Step buttons).
 import { createCanvasHost, activeLink, solveCached, setFont, haloText, inkAlpha } from './util.js';
 import * as M from '../model/modulation-demo.js';
-import { stereoBlend, pilotStep } from '../model/mpx.js';
+import { stereoBlend, pilotStep, audioSnrDb } from '../model/mpx.js';
+import * as AP from '../model/audio-processing.js';
 import { fmDeviationComparison } from '../model/fm-deviation.js';
 
 const MODES = [
   { id: 'am', label: 'AM' }, { id: 'fm', label: 'FM' }, { id: 'digital', label: 'Digital' },
-  { id: 'mpx', label: 'Stereo FM (MPX)' }, { id: 'ms', label: 'Mid/Side (IEM)' }, { id: 'tone', label: 'Mic tone-key' },
+  { id: 'mpx', label: 'Stereo FM (MPX)' }, { id: 'ms', label: 'Mid/Side (IEM)' }, { id: 'pre', label: 'Pre-emphasis' }, { id: 'comp', label: 'Companding' }, { id: 'tone', label: 'Mic tone-key' },
 ];
 const WIN = 4;        // seconds of display time across the time-domain canvas
 const F0 = 0.5;       // base message frequency in display Hz (2 cycles per window)
+const AUX = new Set(['digital', 'ms', 'pre', 'comp']);
 const FC = 7;         // displayed carrier, display Hz (28 cycles per window): NOT the real carrier
 const SYM_RATE = 3;   // waveform symbols per second
 const CONS_RATE = 24; // constellation symbols per second (faster than the waveform so statistics build up)
@@ -36,6 +38,8 @@ export function mountModLab({ container, store, openButton }) {
     dig: { mode: 'QPSK', snr: 18, rate: 40 },
     mpx: { cnr: 38, programme: 'stereo', rds: false, leak: false, lp16: false },
     tone: { khz: M.TONE_KEY_DEFAULT_KHZ, devPct: 5, scenario: 'cycle' },
+    pre: { tau: '50', on: true, brk: 'ok', level: 0, hf: 60, cnr: 22 },
+    cmp: { ratio: 2, ref: -20, attack: 3, release: 100, tone: -30, noise: -60, mismatch: false, hfw: false },
     ms: { srcs: { ...M.MS_DEFAULTS.srcs }, hp: 0, width: 100, boost: 0, limit: 100, mono: false },
   };
   let time = 0, sweepPhase = 0, open = false, raf = 0, last = 0, pilotLocked = true, lastFocus = null;
@@ -136,6 +140,23 @@ export function mountModLab({ container, store, openButton }) {
         slider('mpx.cnr', 'Carrier-to-noise', 5, 45, 1, P.mpx, 'cnr', 'dB'),
         check('Weak signal: blend to mono', { get weak() { return P.mpx.cnr < 20; }, set weak(v) { P.mpx.cnr = v ? 15 : 38; } }, 'weak', () => syncInputs()),
         check('RDS (57 kHz)', P.mpx, 'rds'), check('Console sends 17-20 kHz content', P.mpx, 'leak'), check('16 kHz low-pass fix', P.mpx, 'lp16'));
+    } else if (P.mode === 'pre') {
+      P.sweepKey = null;
+      add(select('Time constant', [['50', '50 µs (EU/UK)'], ['75', '75 µs (US)']], P.pre, 'tau'),
+        check('Pre-emphasis at the transmitter', P.pre, 'on'),
+        select('Receiver de-emphasis', [['ok', 'Matches the transmitter'], ['missing', 'Missing'], ['wrong', 'Wrong time constant (50 vs 75)']], P.pre, 'brk'),
+        slider('pre.level', 'Programme level', -12, 18, 1, P.pre, 'level', 'dB', (v) => (v > 0 ? '+' : '') + fmt(v, 0)),
+        slider('pre.hf', 'HF content (cymbals)', 0, 100, 5, P.pre, 'hf', '%'),
+        slider('pre.cnr', 'Signal strength (carrier-to-noise)', 5, 45, 1, P.pre, 'cnr', 'dB'));
+    } else if (P.mode === 'comp') {
+      P.sweepKey = null;
+      add(slider('cmp.ratio', 'Ratio', 1.5, 4, 0.5, P.cmp, 'ratio', '', (v) => fmt(v, 1) + ':1'),
+        slider('cmp.ref', 'Reference level', -40, 0, 1, P.cmp, 'ref', 'dB'),
+        slider('cmp.attack', 'Attack', 1, 30, 1, P.cmp, 'attack', 'ms'),
+        slider('cmp.release', 'Release', 20, 500, 10, P.cmp, 'release', 'ms'),
+        slider('cmp.tone', 'Signal level', -60, -5, 1, P.cmp, 'tone', 'dB'),
+        slider('cmp.noise', 'Channel noise floor', -90, -40, 1, P.cmp, 'noise', 'dB'),
+        check('Mismatch expander', P.cmp, 'mismatch'), check('HF-weighted detector (generic)', P.cmp, 'hfw'));
     } else if (P.mode === 'ms') {
       P.sweepKey = null;
       const srcBox = el('div', 'ml-presets', null, { role: 'group', 'aria-label': 'Sources in the mix' });
@@ -155,7 +176,7 @@ export function mountModLab({ container, store, openButton }) {
         slider('tone.devPct', 'Tone level (illustrative)', 1, 15, 0.5, P.tone, 'devPct', '% of deviation', (v) => fmt(v, 1)),
         button('Reset to 32.768 kHz', () => { P.tone.khz = M.TONE_KEY_DEFAULT_KHZ; syncInputs(); }));
     }
-    sceneBtn.hidden = !(P.mode === 'fm' || P.mode === 'digital' || P.mode === 'mpx' || P.mode === 'ms');
+    sceneBtn.hidden = !(P.mode === 'fm' || P.mode === 'digital' || P.mode === 'mpx' || P.mode === 'ms' || P.mode === 'pre');
   }
   const syncInputs = () => { for (const k of Object.keys(inputs)) { const i = inputs[k]; if (i.obj) i.input.value = i.obj[i.prop]; i.show(); } };
 
@@ -164,6 +185,8 @@ export function mountModLab({ container, store, openButton }) {
     fm: 'The displayed carrier is scaled down (28 cycles per window); the real one is hundreds of MHz. Deviation squeezes and stretches the cycles; the instantaneous-frequency trace is in real kHz. The spectrum shows the exact Bessel sidebands for the main tone. Carson bandwidth = 2 (deviation + modulation frequency).',
     digital: 'Waveform: the carrier is scaled down to 3 cycles per symbol. The constellation runs faster than the waveform so the statistics build up. Noise is simulated (repeatable); the curve is ideal coherent-detection theory. Real systems add error correction, which moves the cliff.',
     mpx: 'Baseband (what the stereo decoder sees after the FM demodulator). In the time view 1 Hz stands for 1 kHz, so the 19 kHz pilot and 38 kHz subcarrier are in true ratio. In stereo IEM systems the 19 kHz pilot also flags stereo; a mono transmitter sends no pilot. Mic receivers are mono: a stereo IEM signal comes out as the mono sum.',
+    pre: 'Pre-emphasis boosts the highs before the FM modulator and the receiver\'s de-emphasis undoes it. FM noise rises 6 dB per octave (the noise triangle), so cutting the highs back at the receiver cuts that noise while the programme returns to flat. The price is headroom: the boosted highs reach the deviation limit sooner. Time is scaled down (2 Hz stands for 1 kHz, 17 Hz for 10 kHz); noise in the time view is drawn 25 dB larger than real so you can see it.',
+    comp: 'A compander squeezes the programme into a narrower dynamic range before the channel (compressor) and restores it at the receiver (expander), so channel noise is pushed down by the expander when the signal is quiet. Amplitude is drawn on a dB scale so the noise floor is visible. The detector, ratio and time constants here are generic textbook values, not any manufacturer\'s curve, and real wireless-microphone companders are proprietary and do not interoperate with this model.',
     ms: 'General engineering practice, not manufacturer-specific. A stereo IEM mix is split into M (mid) = (L+R)/2 and S (side) = (L-R)/2. M is sent as ordinary baseband (0 to 15 kHz); S is sent on the suppressed 38 kHz subcarrier (23 to 53 kHz) next to the 19 kHz pilot, and both share one deviation budget. The receiver rebuilds L = M + S and R = M - S, so a weak signal that makes S noisy makes the decoder blend toward mono. Time is scaled down; noise is drawn to the SNR shown.',
     tone: 'Analogue mic systems add a continuous ultrasonic tone above the audio before the FM modulator (reported as 32.768 kHz for Shure, medium confidence for Sennheiser). It is NOT the 19 kHz stereo pilot. The receiver opens only when the carrier is strong enough AND the tone is detected, so an interferer without the tone stays muted. All levels here are illustrative.',
   };
@@ -172,6 +195,8 @@ export function mountModLab({ container, store, openButton }) {
     fm: 'Confidence: the deviation figures are class values from published specs or assumed (see the table footnote); treat them as illustrative. Wider deviation gives a better SNR above threshold but needs more bandwidth, so the receiver reaches its threshold at a higher input level.',
     digital: 'Digital radio-mic systems have no analogue tone: they use preambles, sync words and addressing so that only the right link unmutes (concept only).',
     mpx: 'Confidence: broadcast FM structure is standard. Stereo IEM examples reported second-hand: Sennheiser SR 2000 pilot about 5 kHz of 24/48 kHz nominal/peak deviation, Shure PSM900 19 kHz with 34 kHz reference deviation. A mic receiver with pilot detection on stays muted on an IEM transmitter (no mic tone); IEM receivers ignore the mic tone. Audio above 15 kHz leaks into the pilot region (distortion, poor stereo image, or a mute); the usual fix is a 16 kHz low-pass on the feed.',
+    pre: 'Standard: the RC networks, 50 µs (3.18 kHz corner, EU/UK) and 75 µs (2.12 kHz, US), the noise triangle and a de-emphasis noise gain of about 10 dB (50 µs) and 13 dB (75 µs) over 20 Hz to 15 kHz. Illustrative: the programme level, HF content and the deviation reference (22.5 kHz at 0 dB with a 75 kHz limit, broadcast-style numbers; wireless mics and IEMs use other deviations and their own audio processing).',
+    comp: 'Standard: the idea of compress, transmit, expand, with a static law out = ref + (in - ref) / ratio. Illustrative: every number here (ratio, reference, attack, release, the HF weighting corner and boost). Level error from a mismatched expander grows away from the reference level. Noise pumping (breathing) follows the programme envelope because the expander gain tracks the signal.',
     ms: 'Confidence: the M/S split, the 38 kHz subcarrier, the 19 kHz pilot and the 22 dB stereo noise penalty are standard FM stereo practice (the penalty value is the planner\'s MPX model). The source levels, the side compressor and the deviation budget numbers are illustrative.',
     tone: 'Confidence: 32.768 kHz is crystal-derived (high for Shure, medium for Sennheiser), second-hand or manual sources. The tone deviation is not published, so the level slider is illustrative. The detector design is not verified: probably a narrow filter or PLL. In Shure systems the tone amplitude also falls with battery voltage (verified for Shure only). Sennheiser G1 had no tone; later generations do. A transmitter that is muted can drop the tone so the receiver mutes.',
   };
@@ -180,7 +205,7 @@ export function mountModLab({ container, store, openButton }) {
   function setMode(m) {
     P.mode = m; for (const k of Object.keys(tabBtns)) tabBtns[k].setAttribute('aria-pressed', String(k === m));
     buildControls(); note.textContent = NOTES[m]; help.textContent = HELP[m]; help.hidden = !HELP[m];
-    auxCv.hidden = m !== 'digital' && m !== 'ms'; row.classList.toggle('ml-one', m !== 'digital' && m !== 'ms'); msx.hidden = m !== 'ms'; buildMsExtra();
+    auxCv.hidden = !AUX.has(m); row.classList.toggle('ml-one', !AUX.has(m)); msx.hidden = !(m === 'ms' || m === 'pre' || m === 'comp'); buildMsExtra();
     cnt.key = ''; buildCompare(); changed(true);
   }
   function changed(force) { host.invalidateAll(); if (P.playing && open) kick(); if (force) { auxHost.invalidate(); } }
@@ -198,8 +223,8 @@ export function mountModLab({ container, store, openButton }) {
       if (cas && Number.isFinite(cas.systemNfDb)) P.fm.nfDb = cas.systemNfDb;
       if (dig) { P.dig.snr = lab.snrDb; const o = link.modulation.digital && link.modulation.digital.fixedOrder; P.dig.mode = o === 2 ? 'BPSK' : o === 16 ? '16QAM' : 'QPSK'; }
       else P.fm.dev = lab.devKhz;
-      if (cnr !== null) P.mpx.cnr = clamp(Math.round(cnr), 5, 45);
-      const want = dig ? 'digital' : P.mode === 'ms' ? 'ms' : link.kind === 'iem' && link.mpx && link.mpx.enabled && P.mode === 'mpx' ? 'mpx' : P.mode === 'mpx' ? 'mpx' : P.mode === 'digital' || P.mode === 'fm' ? (dig ? 'digital' : 'fm') : 'fm';
+      if (cnr !== null) { P.mpx.cnr = clamp(Math.round(cnr), 5, 45); P.pre.cnr = P.mpx.cnr; }
+      const want = dig ? 'digital' : (P.mode === 'ms' || P.mode === 'pre') ? P.mode : link.kind === 'iem' && link.mpx && link.mpx.enabled && P.mode === 'mpx' ? 'mpx' : P.mode === 'mpx' ? 'mpx' : P.mode === 'digital' || P.mode === 'fm' ? (dig ? 'digital' : 'fm') : 'fm';
       if (want !== P.mode) setMode(want); else { syncInputs(); buildCompare(); changed(); }
       status.textContent = `Pre-set from ${link.name || 'the selected link'}: input ${r ? fmt(r.inputPowerDbm, 1) : '-'} dBm, carrier-to-noise ${cnr === null ? '-' : fmt(cnr, 1)} dB, channel ${fmt(lab.channelKhz, 0)} kHz. The deviation is an illustrative class value, the scene does not store one.`;
     } catch (err) { console.error(err); status.textContent = 'Could not read the scene numbers.'; }
@@ -271,8 +296,10 @@ export function mountModLab({ container, store, openButton }) {
     else if (mode === 'digital') timeDigital(ctx, w, h, th);
     else if (mode === 'mpx') timeMpx(ctx, w, h, th);
     else if (mode === 'ms') timeMs(ctx, w, h, th);
+    else if (mode === 'pre') timePre(ctx, w, h, th);
+    else if (mode === 'comp') timeComp(ctx, w, h, th);
     else timeTone(ctx, w, h, th);
-    haloText(ctx, th, mode === 'ms' ? 'time scaled down (illustrative)' : mode === 'mpx' ? 'time: audio 1 Hz stands for 1 kHz' : mode === 'tone' ? 'time scrolls left, now at the right edge' : 'scaled carrier, time scrolls left', w - 6, h - 6, { align: 'right', px: 12, color: th.inkSoft });
+    if (mode === 'comp') { /* lanes carry their own captions */ } else haloText(ctx, th, mode === 'ms' ? 'time scaled down (illustrative)' : mode === 'pre' ? 'time scaled down (illustrative)' : mode === 'mpx' ? 'time: audio 1 Hz stands for 1 kHz' : mode === 'tone' ? 'time scrolls left, now at the right edge' : 'scaled carrier, time scrolls left', w - 6, h - 6, { align: 'right', px: 12, color: th.inkSoft });
     timeCv.dataset.ms = (performance.now() - t0).toFixed(2);
   }
   function timeAm(ctx, w, h, th) {
@@ -371,6 +398,8 @@ export function mountModLab({ container, store, openButton }) {
     else if (P.mode === 'digital') specDigital(ctx, w, h, th);
     else if (P.mode === 'mpx') specMpx(ctx, w, h, th);
     else if (P.mode === 'ms') specMs(ctx, w, h, th);
+    else if (P.mode === 'pre') specPre(ctx, w, h, th);
+    else if (P.mode === 'comp') specComp(ctx, w, h, th);
     else specTone(ctx, w, h, th);
     specCv.dataset.ms = (performance.now() - t0).toFixed(2);
   }
@@ -471,6 +500,8 @@ export function mountModLab({ container, store, openButton }) {
   function drawAux(ctx, w, h, th) {
     ctx.fillStyle = th.paper; ctx.fillRect(0, 0, w, h);
     if (P.mode === 'ms') { auxMs(ctx, w, h, th); return; }
+    if (P.mode === 'pre') { auxPre(ctx, w, h, th); return; }
+    if (P.mode === 'comp') { auxComp(ctx, w, h, th); return; }
     if (P.mode !== 'digital') return;
     const m = P.dig.mode, snr = P.dig.snr, pts = M.constellation(m), stack = w < 520;
     const cs = stack ? Math.min(w - 20, h * 0.56) : Math.min(h - 16, w * 0.5), cx0 = stack ? w / 2 : 8 + cs / 2, cy0 = stack ? 8 + cs / 2 : h / 2;
@@ -519,7 +550,18 @@ export function mountModLab({ container, store, openButton }) {
     return `Mid/side demo. Deviation budget ${Math.round(b.total * 100)} percent of the limit${b.over ? ', over-deviation' : ''}: M ${Math.round(b.mPart * 100)}, pilot ${Math.round(b.pilot * 100)}, S ${Math.round(b.sPart * 100)} percent. Carrier-to-noise ${P.mpx.cnr} dB: ${nz.blend > 0.98 ? 'stereo' : nz.blend < 0.02 ? 'blended to mono' : 'partly blended'}; left and right SNR ${fmt(nz.lrSnr, 1)} dB against ${fmt(nz.monoSnr, 1)} dB mono, and the S channel alone ${fmt(nz.sSnr, 1)} dB. In mono the ${worst.label ? worst.label.toLowerCase() : 'mix'} loses ${Number.isFinite(worst.lossDb) ? fmt(-worst.lossDb, 1) + ' dB' : 'everything'}. Side processing: high-pass ${P.ms.hp ? P.ms.hp + ' Hz' : 'off'}, width ${P.ms.width} percent, boost ${P.ms.boost} dB.`;
   }
   function buildMsExtra() {
-    msx.textContent = ''; if (P.mode !== 'ms') return;
+    msx.textContent = '';
+    if (P.mode === 'pre') {
+      const box = el('div', 'ml-tips'); box.append(el('h3', null, 'A broadcast-style audio chain (generic)'));
+      const ol = el('ol'); for (const st of AP.broadcastAudioChain()) { const li = el('li'); li.append(el('strong', null, st.label + ': '), doc.createTextNode(st.explain)); ol.append(li); }
+      box.append(ol); msx.append(box); return;
+    }
+    if (P.mode === 'comp') {
+      const box = el('div', 'ml-tips'); box.append(el('h3', null, 'What to look for'));
+      const ul = el('ul'); for (const t of ['Compressor and expander are mirror images: the combined line is straight, so the programme comes back unchanged.', 'Channel noise is only reduced where the expander is turned down, i.e. at low signal levels. Loud passages mask the noise; quiet ones are cleaned up.', 'Because the expander gain follows the signal, the noise floor rises and falls with the programme: breathing or pumping, most obvious on decays and with long release times.', 'A mismatched expander gives a level error that grows away from the reference level: the programme is too loud or too quiet, and gets squeezed or stretched.', 'Real wireless-microphone companders are proprietary: only a matched transmitter and receiver are meant to work together.']) ul.append(el('li', null, t));
+      box.append(ul); msx.append(box); return;
+    }
+    if (P.mode !== 'ms') return;
     const mono = M.msSourceMono(msP());
     const tb = el('table', 'ml-table'); tb.append(el('caption', null, P.ms.mono ? 'Check in mono: what disappears when L and R are summed' : 'Mono safety: level change of each source when L and R are summed'));
     const th = el('thead'), hr = el('tr'); for (const h of ['Source', 'Change in mono']) hr.append(el('th', null, h, { scope: 'col' })); th.append(hr); tb.append(th);
@@ -597,6 +639,146 @@ export function mountModLab({ container, store, openButton }) {
     haloText(ctx, th, P.ms.mono ? 'mono check: L = R = M' : nz.blend > 0.98 ? 'STEREO' : nz.blend < 0.02 ? 'MONO (blended)' : `BLEND ${Math.round(nz.blend * 100)}%`, bx0, y + 4, { px: 13, weight: '700', color: nz.blend > 0.98 ? th.pass : th.warnText });
   }
 
+
+  // ---- Pre-emphasis ---------------------------------------------------------------------------------------
+  let extraStatus = '';
+  const preTau = () => +P.pre.tau;
+  const rxTauOf = () => (P.pre.brk === 'missing' ? null : P.pre.brk === 'wrong' ? (preTau() === 50 ? 75 : 50) : preTau());
+  const preNetDb = (f) => (P.pre.on ? AP.emphasisMagnitudeDb(f, preTau(), 'pre') : 0) + (rxTauOf() ? AP.emphasisMagnitudeDb(f, rxTauOf(), 'de') : 0);
+  const PRE_A = { lf: 0.6 };
+  const preAHf = () => 0.5 * P.pre.hf / 100;
+  function preDev(f) { const d = AP.preEmphasisDeviation({ freqHz: f, levelDb: P.pre.level, tauUs: preTau() }); return P.pre.on ? d.deviationKhz : d.deviationKhz / Math.pow(10, d.boostDb / 20); }
+  function preTotals() { const lf = PRE_A.lf * preDev(1000), hf = preAHf() * preDev(10000), total = lf + hf; return { lf, hf, total, over: total > 75 }; }
+  function preSnr() { const rx = rxTauOf(), base = audioSnrDb(P.pre.cnr, { stereo: false }); const imp = rx ? AP.deEmphasisNoiseImprovementDb({ tauUs: rx }).improvementDb : 0; return { flat: base, withDe: base + imp, imp }; }
+  function preDescribe() {
+    const t = preTotals(), n = preSnr(), rx = rxTauOf(), maxErr = Math.max(...[100, 1000, 5000, 10000, 15000].map((f) => Math.abs(preNetDb(f))));
+    extraStatus = `${t.over ? 'OVER-DEVIATION. ' : ''}${maxErr < 0.5 ? 'Chain matched' : 'Tonal error up to ' + fmt(maxErr, 1) + ' dB'}`;
+    return `Pre-emphasis demo, ${preTau()} microsecond network with corner ${fmt(AP.emphasisCornerHz(preTau()) / 1000, 2)} kHz, pre-emphasis ${P.pre.on ? 'on' : 'off'}, receiver de-emphasis ${rx ? rx + ' microseconds' : 'missing'}. Peak deviation ${fmt(t.total, 0)} kHz against a 75 kHz limit${t.over ? ', over-deviation' : ''}. Audio SNR ${fmt(n.flat, 1)} dB without de-emphasis, ${fmt(n.withDe, 1)} dB with it (a gain of ${fmt(n.imp, 1)} dB). Net tonal error at 10 kHz ${fmt(preNetDb(10000), 1)} dB.`;
+  }
+  function timePre(ctx, w, h, th) {
+    const hh = h / 3, A = hh / 2 - 6, t = preTotals(), tt = (x) => time + (x / w) * 2, aLF = PRE_A.lf, aHF = preAHf();
+    lane(ctx, th, 0, hh, 'Programme: low tone (1 kHz) plus highs (10 kHz)', w); lane(ctx, th, hh, hh, P.pre.on ? 'Transmitted deviation (kHz), pre-emphasised' : 'Transmitted deviation (kHz), no pre-emphasis', w); lane(ctx, th, 2 * hh, hh, 'Receiver output (noise drawn 25 dB larger)', w);
+    const wave = (x, aL, aH) => aL * Math.cos(2 * Math.PI * 2 * tt(x)) + aH * Math.cos(2 * Math.PI * 17 * tt(x) + 1);
+    trace(ctx, w, (x) => hh / 2 - A * 0.8 * wave(x, aLF, aHF), th.blue, 1.4);
+    const S = (hh / 2 - 6) / 110;
+    ctx.setLineDash([4, 3]); ctx.strokeStyle = th.fail; ctx.lineWidth = 1; ctx.beginPath(); for (const sg of [1, -1]) { ctx.moveTo(0, hh * 1.5 - sg * 75 * S); ctx.lineTo(w, hh * 1.5 - sg * 75 * S); } ctx.stroke(); ctx.setLineDash([]);
+    haloText(ctx, th, '+75 limit', w - 4, hh * 1.5 - 75 * S - 3, { align: 'right', px: 11, color: th.fail });
+    trace(ctx, w, (x) => hh * 1.5 - clamp(S * wave(x, t.lf / aLF * aLF, t.hf), -1.2 * 110 * S, 1.2 * 110 * S), t.over ? th.fail : th.ink, 1.3);
+    const g = (f) => Math.pow(10, preNetDb(f) / 20), snr = preSnr(), rx = rxTauOf();
+    const nAmp = Math.pow(10, -(snr.flat + (rx ? snr.imp : 0) - 25) / 20) * 0.5;
+    trace(ctx, w, (x) => 2.5 * hh - A * 0.8 * clamp(wave(x, aLF * g(1000), aHF * g(10000)) + nzr(x * 3, 11) * nAmp * (rx ? 0.6 : 1.4), -1.3, 1.3), P.pre.brk === 'ok' && P.pre.on ? th.pass : th.warnText, 1.4);
+  }
+  function specPre(ctx, w, h, th) {
+    const L = 44, B = 40, T = 10, pw = w - L - 10, ph = h - B - T, Y0 = T + ph, ymin = -30, ymax = 30;
+    const X = (f) => L + (Math.log10(f / 20) / 3) * pw, Y = (db) => T + ((ymax - clamp(db, ymin, ymax)) / (ymax - ymin)) * ph;
+    ctx.fillStyle = th.paper; ctx.fillRect(0, 0, w, h); setFont(ctx, th, 12); ctx.fillStyle = th.inkSoft; ctx.textBaseline = 'alphabetic';
+    ctx.textAlign = 'center'; for (const [f, lb] of [[20, '20'], [100, '100'], [1000, '1k'], [10000, '10k'], [20000, '20k']]) { ctx.strokeStyle = th.grid; ctx.beginPath(); ctx.moveTo(X(f), T); ctx.lineTo(X(f), Y0); ctx.stroke(); ctx.fillText(lb, clamp(X(f), L + 8, w - 16), Y0 + 16); }
+    ctx.textAlign = 'right'; ctx.fillText('Hz', w - 6, h - 6);
+    ctx.textAlign = 'right'; for (let d = ymin; d <= ymax; d += 10) { ctx.strokeStyle = d === 0 ? th.gridMajor : th.grid; ctx.beginPath(); ctx.moveTo(L, Y(d)); ctx.lineTo(L + pw, Y(d)); ctx.stroke(); ctx.fillStyle = th.inkSoft; ctx.fillText(String(d), L - 4, Y(d) + 4); }
+    const fs = []; for (let i = 0; i <= 160; i++) fs.push(20 * Math.pow(1000, i / 160));
+    const rx = rxTauOf(), tau = preTau();
+    const flat = fs.map((f) => AP.fmNoiseSpectrumDb(f)), de = fs.map((f) => AP.fmNoiseSpectrumDb(f, { tauUs: rx }));
+    if (rx) { ctx.fillStyle = `${th.fail}2a`; ctx.beginPath(); fs.forEach((f, i) => (i ? ctx.lineTo(X(f), Y(flat[i])) : ctx.moveTo(X(f), Y(flat[i])))); for (let i = fs.length - 1; i >= 0; i--) ctx.lineTo(X(fs[i]), Y(de[i])); ctx.closePath(); ctx.fill(); }
+    const line = (arr, col, lw, dash) => { ctx.setLineDash(dash || []); ctx.strokeStyle = col; ctx.lineWidth = lw; ctx.beginPath(); fs.forEach((f, i) => (i ? ctx.lineTo(X(f), Y(arr[i])) : ctx.moveTo(X(f), Y(arr[i])))); ctx.stroke(); ctx.setLineDash([]); };
+    line(flat, th.fail, 1.6); if (rx) line(de, th.fail, 1.6, [5, 3]);
+    line(AP.emphasisResponse(fs, tau, 'pre'), th.ink, 2); line(AP.emphasisResponse(fs, rx || tau, 'de'), th.blue, 2);
+    line(fs.map(preNetDb), th.pass, 2.6, [2, 3]);
+    for (const k of new Set([50, 75])) { const f1 = AP.emphasisCornerHz(k); ctx.strokeStyle = k === tau ? th.inkSoft : th.grid; ctx.setLineDash([2, 3]); ctx.beginPath(); ctx.moveTo(X(f1), T); ctx.lineTo(X(f1), Y0); ctx.stroke(); ctx.setLineDash([]); haloText(ctx, th, `${k} µs: ${fmt(f1 / 1000, 2)} kHz`, X(f1) + 3, T + (k === 50 ? 12 : 26), { px: 11, color: th.inkSoft }); }
+    const lg = [['pre-emphasis', th.ink], ['de-emphasis', th.blue], ['net (programme)', th.pass], ['FM noise', th.fail]];
+    lg.forEach(([t, c], i) => { haloText(ctx, th, t, L + 8 + (i % 2) * 130, Y0 - 34 + Math.floor(i / 2) * 16, { px: 11, color: c }); });
+    haloText(ctx, th, rx ? `de-emphasis cuts the noise by ${fmt(AP.deEmphasisNoiseImprovementDb({ tauUs: rx }).improvementDb, 1)} dB (dashed)` : 'no de-emphasis: the noise keeps the full triangle', L + pw - 4, Y0 - 6, { align: 'right', px: 11, color: th.fail });
+    haloText(ctx, th, 'dB, noise relative to 1 kHz', 4, 10, { px: 11, color: th.inkSoft });
+  }
+  function auxPre(ctx, w, h, th) {
+    ctx.fillStyle = th.paper; ctx.fillRect(0, 0, w, h);
+    const t = preTotals(), x0 = 12, x1 = w - 12, scale = 150, X = (v) => x0 + 62 + (v / scale) * (x1 - x0 - 66);
+    let y = 20; haloText(ctx, th, 'Peak deviation (limit 75 kHz)', x0, y, { px: 12, color: th.inkSoft });
+    if (t.over) haloText(ctx, th, 'OVER-DEVIATION', x1, y, { align: 'right', px: 12, weight: '700', color: th.fail }); else haloText(ctx, th, `headroom ${fmt(20 * Math.log10(75 / Math.max(t.total, 1e-6)), 1)} dB`, x1, y, { align: 'right', px: 12, color: th.inkSoft });
+    const rows = [['low', t.lf, th.ink], ['highs', t.hf, th.blue], ['total', t.total, t.over ? th.fail : th.pass]], top = y + 10;
+    rows.forEach(([nm, v, c], i) => { const yy = top + i * 20; ctx.fillStyle = th.ink; setFont(ctx, th, 12); ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(nm, x0, yy + 7); ctx.fillStyle = c; ctx.fillRect(X(0), yy, X(Math.min(v, scale)) - X(0), 14); haloText(ctx, th, fmt(v, 0) + ' kHz', Math.min(X(v) + 4, x1 - 50), yy + 12, { px: 11, color: th.ink }); });
+    ctx.strokeStyle = th.fail; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(X(75), top - 4); ctx.lineTo(X(75), top + 62); ctx.stroke();
+    if (t.over) { const on = th.reduceMotion || Math.floor(time * 4) % 2 === 0; if (on) { ctx.lineWidth = 3; ctx.strokeRect(x0 - 4, y - 14, x1 - x0 + 8, 88); } }
+    y = top + 90; haloText(ctx, th, 'Output level error versus the programme', x0, y, { px: 12, color: th.ink }); y += 18;
+    for (const f of [100, 1000, 5000, 10000, 15000]) { const e = preNetDb(f); haloText(ctx, th, `${f >= 1000 ? f / 1000 + ' kHz' : f + ' Hz'}: ${e >= 0 ? '+' : ''}${fmt(e, 1)} dB${Math.abs(e) < 0.5 ? '' : e > 0 ? ' (too bright)' : ' (dull)'}`, x0, y, { px: 12, color: Math.abs(e) < 0.5 ? th.pass : th.warnText }); y += 16; }
+    const n = preSnr(), rx = rxTauOf(); y += 8; haloText(ctx, th, `Audio SNR: ${fmt(n.flat, 1)} dB without de-emphasis`, x0, y, { px: 12, color: th.ink }); y += 16;
+    haloText(ctx, th, rx ? `${fmt(n.withDe, 1)} dB with de-emphasis (+${fmt(n.imp, 1)} dB)` : 'no de-emphasis: no noise benefit', x0, y, { px: 12, weight: '600', color: rx ? th.pass : th.fail });
+  }
+
+  // ---- Companding -----------------------------------------------------------------------------------------
+  let cKey = '', cD = null;
+  const cmpP = () => ({ ratio: +P.cmp.ratio, refDb: +P.cmp.ref, attackMs: +P.cmp.attack, releaseMs: +P.cmp.release, hfWeight: P.cmp.hfw ? { cornerHz: 1000, boostDb: 10 } : null });
+  const cmpRx = () => (P.cmp.mismatch ? { ...cmpP(), ratio: +P.cmp.ratio + 0.5, refDb: +P.cmp.ref + 6 } : cmpP());
+  function dbw(a) { const o = new Float32Array(a.length); for (let i = 0; i < a.length; i++) { const v = a[i], d = Math.max(0, (20 * Math.log10(Math.abs(v) + 1e-9) + 90) / 90); o[i] = Math.sign(v) * Math.min(1, d); } return o; }
+  function compData() {
+    const k = JSON.stringify(P.cmp); if (k === cKey && cD) return cD; cKey = k;
+    const p = cmpP(), rx = cmpRx();
+    const d = AP.companderNoiseDemo({ fs: 8000, toneHz: 250, toneDb: +P.cmp.tone, burstS: 0.6, tailS: 0.6, noiseDb: +P.cmp.noise, seed: 3, ...p, rxParams: rx });
+    cD = { d, p, rx, wIn: dbw(d.input), wCh: dbw(d.received), wOut: dbw(d.output), err: AP.companderMismatchErrorDb(+P.cmp.tone, p, rx), N: d.input.length };
+    return cD;
+  }
+  function compDescribe() {
+    const c = compData(), st = AP.companderNoiseStatic({ signalDb: +P.cmp.tone, noiseDb: +P.cmp.noise, ...c.p });
+    extraStatus = P.cmp.mismatch ? `Mismatched expander: level error ${fmt(c.err, 1)} dB` : 'Matched pair';
+    return `Companding demo, ratio ${fmt(P.cmp.ratio, 1)} to 1, reference ${P.cmp.ref} dB, attack ${P.cmp.attack} ms, release ${P.cmp.release} ms${P.cmp.hfw ? ', generic HF-weighted detector' : ''}. A ${P.cmp.tone} dB signal over a ${P.cmp.noise} dB channel noise floor: the expander cuts the noise by ${fmt(st.noiseReductionDb, 1)} dB while the signal plays and by ${fmt(st.silenceReductionDb, 1)} dB in silence; measured on the tail ${fmt(c.d.tailNoiseReductionDb, 1)} dB. ${P.cmp.mismatch ? 'Mismatched expander: the output level is ' + fmt(c.err, 1) + ' dB off at this signal level.' : 'Expander matches the compressor, so the level error is zero.'}`;
+  }
+  const compRev = () => (P.playing ? Math.min(1, ((time * 0.45) % 1.25)) : 1);
+  function timeComp(ctx, w, h, th) {
+    const c = compData(), hh = h / 4, rev = compRev(), N = c.N, A = hh / 2 - 5;
+    lane(ctx, th, 0, hh, 'Input (amplitude on a dB scale)', w); lane(ctx, th, hh, hh, 'Channel: compressed signal plus noise', w); lane(ctx, th, 2 * hh, hh, P.cmp.mismatch ? 'Output (mismatched expander)' : 'Output (expanded)', w); lane(ctx, th, 3 * hh, hh, 'Gain versus time (dB): compressor and expander', w);
+    const cols = (arr, yc, color) => { ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.beginPath(); const px = Math.floor(w * rev); for (let x = 0; x < px; x++) { const i0 = Math.floor((x / w) * N), i1 = Math.max(i0 + 1, Math.floor(((x + 1) / w) * N)); let lo = 2, hi = -2; for (let i = i0; i < i1; i++) { const v = arr[i]; if (v < lo) lo = v; if (v > hi) hi = v; } ctx.moveTo(x + 0.5, yc - hi * A); ctx.lineTo(x + 0.5, yc - lo * A); } ctx.stroke(); };
+    cols(c.wIn, hh / 2, th.blue); cols(c.wCh, hh * 1.5, th.ink); cols(c.wOut, hh * 2.5, P.cmp.mismatch ? th.warnText : th.pass);
+    const gy = (g) => 3 * hh + hh / 2 - ((clamp(g, -50, 20) - -15) / 70) * (hh - 12);
+    const line = (arr, color) => { ctx.strokeStyle = color; ctx.lineWidth = 1.6; ctx.beginPath(); const px = Math.floor(w * rev); for (let x = 0; x < px; x++) { const g = arr[Math.floor((x / w) * N)]; if (x === 0) ctx.moveTo(x, gy(g)); else ctx.lineTo(x, gy(g)); } ctx.stroke(); };
+    line(c.d.compressGainDb, th.ink); line(c.d.expandGainDb, th.blue);
+    haloText(ctx, th, 'compressor', w - 6, 3 * hh + 28, { align: 'right', px: 11, color: th.ink }); haloText(ctx, th, 'expander (the noise floor pumps here)', w - 6, 4 * hh - 6, { align: 'right', px: 11, color: th.blue });
+    const bx = (0.6 / 1.2) * w; ctx.setLineDash([3, 4]); ctx.strokeStyle = th.inkSoft; ctx.beginPath(); ctx.moveTo(bx, 0); ctx.lineTo(bx, h); ctx.stroke(); ctx.setLineDash([]); haloText(ctx, th, 'signal stops', bx + 4, 14, { px: 11, color: th.inkSoft });
+    if (rev < 1) { ctx.strokeStyle = th.ink; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(w * rev, 0); ctx.lineTo(w * rev, h); ctx.stroke(); }
+    haloText(ctx, th, '1.2 s, signal is a 250 Hz tone burst', w - 6, h - 6, { align: 'right', px: 11, color: th.inkSoft });
+  }
+  function specComp(ctx, w, h, th) {
+    const c = compData(), L = 44, B = 40, T = 10, pw = w - L - 10, ph = h - B - T, Y0 = T + ph, lo = -80, hi = 0;
+    const X = (v) => L + ((v - lo) / (hi - lo)) * pw, Y = (v) => T + ((hi - clamp(v, lo, hi)) / (hi - lo)) * ph;
+    ctx.fillStyle = th.paper; ctx.fillRect(0, 0, w, h); setFont(ctx, th, 12); ctx.fillStyle = th.inkSoft;
+    for (let d = lo; d <= hi; d += 20) { ctx.strokeStyle = th.grid; ctx.beginPath(); ctx.moveTo(X(d), T); ctx.lineTo(X(d), Y0); ctx.moveTo(L, Y(d)); ctx.lineTo(L + pw, Y(d)); ctx.stroke(); ctx.textAlign = 'center'; ctx.fillText(String(d), X(d), Y0 + 16); ctx.textAlign = 'right'; ctx.fillText(String(d), L - 4, Y(d) + 4); }
+    ctx.textAlign = 'right'; ctx.fillText('input level (dB re full scale)', w - 6, h - 6);
+    const lv = []; for (let v = lo; v <= hi; v += 1) lv.push(v);
+    const comp = AP.companderTransferCurve(lv, c.p), exp = AP.companderTransferCurve(lv, c.rx);
+    const draw = (vals, col, lw, dash) => { ctx.setLineDash(dash || []); ctx.strokeStyle = col; ctx.lineWidth = lw; ctx.beginPath(); lv.forEach((v, i) => { const y = Y(vals[i]); if (i) ctx.lineTo(X(v), y); else ctx.moveTo(X(v), y); }); ctx.stroke(); ctx.setLineDash([]); };
+    draw(lv, th.inkSoft, 1, [4, 4]);
+    draw(comp.map((p) => p.compressedDb), th.ink, 2); draw(exp.map((p) => p.expandedDb), th.blue, 2);
+    draw(lv.map((v) => AP.companderMismatchErrorDb(v, c.p, c.rx) + v), c.p === c.rx || !P.cmp.mismatch ? th.pass : th.warnText, 2.6, [2, 3]);
+    ctx.strokeStyle = th.fail; ctx.setLineDash([2, 3]); ctx.beginPath(); ctx.moveTo(X(+P.cmp.ref), T); ctx.lineTo(X(+P.cmp.ref), Y0); ctx.stroke(); ctx.setLineDash([]);
+    haloText(ctx, th, 'reference', X(+P.cmp.ref) + 3, T + 12, { px: 11, color: th.fail });
+    const tone = +P.cmp.tone; ctx.fillStyle = th.ink; ctx.beginPath(); ctx.arc(X(tone), Y(tone), 4, 0, 7); ctx.fill();
+    [['compressor', th.ink], ['expander', th.blue], [P.cmp.mismatch ? 'combined (mismatched)' : 'combined (straight line)', P.cmp.mismatch ? th.warnText : th.pass]].forEach(([t, col], i) => haloText(ctx, th, t, L + 8, Y0 - 50 + i * 16, { px: 11, color: col }));
+    haloText(ctx, th, 'output level (dB)', 4, 10, { px: 11, color: th.inkSoft });
+    if (P.cmp.mismatch) haloText(ctx, th, `level error ${c.err >= 0 ? '+' : ''}${fmt(c.err, 1)} dB at the signal level`, L + pw - 4, T + 14, { align: 'right', px: 12, weight: '600', color: th.warnText });
+  }
+  function auxComp(ctx, w, h, th) {
+    ctx.fillStyle = th.paper; ctx.fillRect(0, 0, w, h);
+    const c = compData(), L = 44, T = 40, B = 150, pw = w - L - 12, ph = Math.max(60, h - T - B), Y0 = T + ph, lo = -90, hi = -30, noise = +P.cmp.noise;
+    const X = (v) => L + ((v + 80) / 80) * pw, Y = (v) => T + ((hi - clamp(v, lo, hi)) / (hi - lo)) * ph;
+    haloText(ctx, th, 'Noise-floor meter: noise at the output versus signal level', 6, 16, { px: 12, color: th.inkSoft });
+    haloText(ctx, th, 'noise out (dB re full scale)', 6, 32, { px: 11, color: th.inkSoft });
+    setFont(ctx, th, 11); ctx.fillStyle = th.inkSoft;
+    for (let d = -90; d <= -30; d += 20) { ctx.strokeStyle = th.grid; ctx.beginPath(); ctx.moveTo(L, Y(d)); ctx.lineTo(L + pw, Y(d)); ctx.stroke(); ctx.textAlign = 'right'; ctx.fillText(String(d), L - 4, Y(d) + 4); }
+    for (let d = -80; d <= 0; d += 20) { ctx.textAlign = 'center'; ctx.fillText(String(d), X(d), Y0 + 14); }
+    ctx.textAlign = 'right'; ctx.fillText('signal level (dB)', w - 6, Y0 + 28);
+    ctx.setLineDash([5, 3]); ctx.strokeStyle = th.fail; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(L, Y(noise)); ctx.lineTo(L + pw, Y(noise)); ctx.stroke(); ctx.setLineDash([]);
+    ctx.strokeStyle = th.pass; ctx.lineWidth = 2.2; ctx.beginPath(); for (let v = -80; v <= 0; v += 1) { const st = AP.companderNoiseStatic({ signalDb: v, noiseDb: noise, ...c.p }); if (v === -80) ctx.moveTo(X(v), Y(st.noiseOutDb)); else ctx.lineTo(X(v), Y(st.noiseOutDb)); } ctx.stroke();
+    const tone = +P.cmp.tone, cur = AP.companderNoiseStatic({ signalDb: tone, noiseDb: noise, ...c.p });
+    ctx.fillStyle = th.ink; ctx.beginPath(); ctx.arc(X(tone), Y(cur.noiseOutDb), 4.5, 0, 7); ctx.fill();
+    haloText(ctx, th, 'channel noise, no expander', L + 6, Y(noise) - 5, { px: 11, color: th.fail }); haloText(ctx, th, 'with the expander: rises with the signal', L + 6, Y0 - 6, { px: 11, color: th.pass });
+    let y = Y0 + 50; const row = (t, col, wt) => { haloText(ctx, th, t, 10, y, { px: 12, color: col || th.ink, weight: wt || '' }); y += 17; };
+    row(`In silence the noise is cut by ${fmt(cur.silenceReductionDb, 1)} dB`, th.pass);
+    row(`While this signal plays: ${fmt(cur.noiseReductionDb, 1)} dB`, th.ink);
+    row(`Measured on the demo tail: ${fmt(c.d.tailNoiseReductionDb, 1)} dB`, th.ink);
+    row('So the noise floor moves with the programme (breathing).', th.inkSoft);
+    row(P.cmp.mismatch ? `Mismatched expander: level error ${c.err >= 0 ? '+' : ''}${fmt(c.err, 1)} dB at ${tone} dB` : 'Matched pair: level error 0 dB at every level', P.cmp.mismatch ? th.warnText : th.pass, '600');
+    if (P.cmp.mismatch) row(`and ${fmt(AP.companderMismatchErrorDb(-60, c.p, c.rx), 1)} dB at -60 dB, ${fmt(AP.companderMismatchErrorDb(-5, c.p, c.rx), 1)} dB at -5 dB`, th.warnText);
+    row('Generic detector: not any manufacturer\'s curve', th.inkSoft);
+  }
+
   // ---- hosts and summaries ----------------------------------------------------------------------------
   const tHost = createCanvasHost(timeCv, drawTime), sHost = createCanvasHost(specCv, drawSpec), auxHost = createCanvasHost(auxCv, drawAux);
   const host = { invalidateAll() { tHost.invalidate(); sHost.invalidate(); auxHost.invalidate(); updateText(); } };
@@ -607,13 +789,15 @@ export function mountModLab({ container, store, openButton }) {
     if (m === 'digital') { const { mode, snr, rate } = P.dig, cliff = M.snrForBer(mode, 1e-3); return `${mode === '16QAM' ? '16-QAM' : mode}, ${M.bitsPerSymbol(mode)} bit per symbol, SNR ${fmt(snr, 1)} dB. Ideal BER ${M.theoryBer(mode, snr).toExponential(1)}. BER reaches 1e-3 at ${fmt(cliff, 1)} dB, the cliff. Main lobe ${fmt(M.digitalBwKhz(mode, rate), 0)} kHz at ${rate} ksym/s. Simulated symbol errors in the last ${cnt.n} symbols: ${cnt.e}.`; }
     if (m === 'mpx') return `Stereo FM multiplex, carrier-to-noise ${P.mpx.cnr} dB: ${mpxCaption || mpxMode(mpxBlend())}. Baseband holds L plus R to 15 kHz, a 19 kHz pilot, and L minus R around a suppressed 38 kHz carrier from 23 to 53 kHz${P.mpx.rds ? ', and RDS at 57 kHz' : ''}.${P.mpx.leak && !P.mpx.lp16 ? ' Console content at 17 to 20 kHz disturbs the pilot.' : ''}`;
     if (m === 'ms') return msDescribe();
+    if (m === 'pre') return preDescribe();
+    if (m === 'comp') return compDescribe();
     return `Mic tone-key demo, scenario ${M.GATE_LABELS[P.tone.scenario]}. Tone ${fmt(P.tone.khz, 3)} kHz, not the 19 kHz stereo pilot. Receiver gate is ${gateOpenNow ? 'open' : 'muted'}. Illustrative levels.`;
   }
   let textTick = 0;
   function updateText() {
     const s = describe();
     if (s !== summaryText) { summaryText = s; summary.textContent = s; for (const c of [timeCv, specCv, auxCv]) c.setAttribute('aria-label', `Modulation lab. ${s}`); }
-    if (P.mode === 'mpx' || P.mode === 'tone' || P.mode === 'ms') { const st = P.mode === 'mpx' ? mpxCaption : P.mode === 'ms' ? msStatus : gateOpenNow ? 'Gate open' : 'Gate muted'; if (st && st !== status.dataset.last) { status.dataset.last = st; status.textContent = st; } }
+    if (P.mode === 'mpx' || P.mode === 'tone' || P.mode === 'ms' || P.mode === 'pre' || P.mode === 'comp') { const st = P.mode === 'mpx' ? mpxCaption : P.mode === 'ms' ? msStatus : (P.mode === 'pre' || P.mode === 'comp') ? extraStatus : gateOpenNow ? 'Gate open' : 'Gate muted'; if (st && st !== status.dataset.last) { status.dataset.last = st; status.textContent = st; } }
   }
 
   // ---- loop ----------------------------------------------------------------------------------------
@@ -621,7 +805,7 @@ export function mountModLab({ container, store, openButton }) {
     raf = 0;
     if (!open || doc.hidden || !P.playing) { last = 0; return; }
     const dt = last ? Math.min(0.1, (ts - last) / 1000) : 0; last = ts; time += dt; sweepPhase += dt; sweepApply();
-    tHost.invalidate(); sHost.invalidate(); if (P.mode === 'digital' || P.mode === 'ms') auxHost.invalidate();
+    tHost.invalidate(); sHost.invalidate(); if (AUX.has(P.mode)) auxHost.invalidate();
     if ((textTick += dt) > 0.25) { textTick = 0; updateText(); }
     raf = requestAnimationFrame(frame);
   }

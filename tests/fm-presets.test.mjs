@@ -34,13 +34,13 @@ function baseLink() {
 
 test('registry: five presets, roles, frozen, disclaimer and per-parameter confidence', () => {
   assert.deepEqual([...FM_PRESET_IDS].slice(0, 5), ['sennheiser-skm5200ii', 'sennheiser-em3732ii', 'shure-ur2', 'shure-ur1', 'shure-ur4d']);
-  assert.equal(FM_PRESET_IDS.length, 22);
-  assert.equal(FM_TX_PRESET_IDS.length, 14);
-  assert.equal(FM_RX_PRESET_IDS.length, 8);
-  assert.equal(new Set(FM_PRESET_IDS).size, 22);
-  assert.equal(listFmPresets().length, 22);
-  assert.equal(listFmPresets({ role: 'tx' }).length, 14);
-  assert.equal(listFmPresets({ role: 'rx' }).length, 8);
+  assert.equal(FM_PRESET_IDS.length, 48);
+  assert.equal(FM_TX_PRESET_IDS.length, 31);
+  assert.equal(FM_RX_PRESET_IDS.length, 17);
+  assert.equal(new Set(FM_PRESET_IDS).size, 48);
+  assert.equal(listFmPresets().length, 48);
+  assert.equal(listFmPresets({ role: 'tx' }).length, 31);
+  assert.equal(listFmPresets({ role: 'rx' }).length, 17);
   assert.equal(getFmPreset('nope'), null);
   assert.match(FM_PRESET_DISCLAIMER, /based on published specs; some figures assumed/i);
   for (const id of FM_PRESET_IDS) {
@@ -396,7 +396,7 @@ test('example scene: FM deviation comparison note matches the function', () => {
 import { FM_DEVIATION_G3_SYSTEM, FM_DEVIATION_EXTENDED_SYSTEMS } from '../js/model/fm-deviation.js';
 
 test('G3 / 2000 presets: ids, no invented products, no ew 500 IEM, no SK/SKM 2050', () => {
-  const ids = FM_PRESET_IDS.filter((i) => i.startsWith('sennheiser-') && !['sennheiser-skm5200ii', 'sennheiser-em3732ii'].includes(i));
+  const ids = FM_PRESET_IDS.filter((i) => /^sennheiser-(sk|skm|em)(100|300|500)g3$|^sennheiser-(sr300iemg3|ek300iemg3|em2050|sk2000|skm2000|skp2000|sr2050iem|ek2000iem)$/.test(i));
   assert.equal(ids.length, 17);
   for (const bad of ['sennheiser-sk2050', 'sennheiser-skm2050', 'sennheiser-sr500iemg3', 'sennheiser-ek500iemg3', 'sennheiser-sr500iem']) assert.ok(!FM_PRESETS[bad], bad);
   for (const p of listFmPresets()) assert.ok(!/SK 2050|SKM 2050|500 IEM/.test(p.model), p.model);
@@ -540,4 +540,174 @@ test('example scene: deviation G3 vs SKM vs UR4D, note matches the function', ()
   assert.ok(ex.note.includes(`at most ${Math.round(maxOcc)} percent`));
   assert.match(ex.note, /assumed/);
   assert.ok(ex.note.split('. ').length <= 4);
+});
+
+// ---- G2, G4, IEM G4, 3000, 5000, 3254/3256, IEM G2, Shure PSM 900 / PSM 1000 ------------------------------------------
+import { FM_DEVIATION_PSM_SYSTEM } from '../js/model/fm-deviation.js';
+
+const NEW_TX = ['sennheiser-sk100g2', 'sennheiser-skm100g2', 'sennheiser-sk100g4s', 'sennheiser-skm100g4s', 'sennheiser-sk500g4', 'sennheiser-skm500g4', 'sennheiser-sriemg4',
+  'sennheiser-sk3063', 'sennheiser-skm3072', 'sennheiser-skp3000', 'sennheiser-skm5000', 'sennheiser-sr3254', 'sennheiser-sr3256', 'sennheiser-sr300iemg2', 'sennheiser-sr350iemg2', 'shure-p9t', 'shure-p10t'];
+const NEW_RX = ['sennheiser-em100g2', 'sennheiser-em100g4', 'sennheiser-em300500g4', 'sennheiser-ekiemg4', 'sennheiser-em3031-3032', 'sennheiser-ek3253', 'sennheiser-ek300iemg2', 'shure-p9ra', 'shure-p10r'];
+
+test('more families: ids registered, naming corrections enforced, existing ids kept', () => {
+  assert.equal(FM_PRESET_IDS.length, 48);
+  for (const id of [...NEW_TX, ...NEW_RX]) assert.ok(FM_PRESETS[id], id);
+  for (const id of NEW_TX) assert.equal(FM_PRESETS[id].role, 'tx', id);
+  for (const id of NEW_RX) assert.equal(FM_PRESETS[id].role, 'rx', id);
+  assert.equal(new Set(FM_PRESET_IDS).size, 48);
+  for (const keep of ['sennheiser-skm5200ii', 'sennheiser-em3732ii', 'shure-ur4d', 'sennheiser-sr2050iem', 'sennheiser-ek2000iem']) assert.ok(FM_PRESETS[keep]);
+  // products that do not exist must never appear in ids, labels, models or caveats
+  for (const p of listFmPresets()) {
+    const text = [p.id, p.label, p.model, p.caveat].join(' | ');
+    for (const bad of ['SKM 3000', 'EM 5000', 'ew 300 IEM G4', 'ew 500 IEM G4', 'SR 3300', 'SK 2050', 'SKM 2050', 'SK 3000']) assert.ok(!text.includes(bad), `${p.id} mentions ${bad}`);
+    for (const bad of ['skm3000', 'em5000', 'sr3300', 'sk3000']) assert.ok(!p.id.includes(bad));
+  }
+  // IEM G4 is one product; EM 100 G4 and EM 300-500 G4 exist; no separate ew 300 G4 transmitter was found
+  assert.equal(FM_PRESETS['sennheiser-sriemg4'].model, 'SR IEM G4');
+  assert.ok(!FM_PRESET_IDS.some((i) => /sk300g4|skm300g4/.test(i)));
+});
+
+test('G2 and G4 mics: deviation, windows, banks, power, sensitivity', () => {
+  const g2 = FM_PRESETS['sennheiser-em100g2'].params;
+  assert.deepEqual(g2.tuningWindows.map((w) => [w.fromMHz, w.toMHz]), [[518, 554], [626, 662], [740, 776], [786, 822], [830, 866]]);
+  assert.equal(g2.tuningWindowMaxMHz, 36); assert.equal(g2.frequencies, 1440); assert.equal(g2.channelsPerBank, 4); assert.equal(g2.factoryBanks, 8);
+  assert.ok(Math.abs(g2.sensitivityDbm - (20 * Math.log10(2.5) - 107)) < 0.06);   // -99.0 dBm
+  assert.equal(g2.diversityMode, 'true');
+  assert.deepEqual([g2.adjacentChannelRejectionMinDb, g2.intermodRejectionMinDb, g2.blockingRejectionMinDb], [65, 65, 70]);
+  assert.equal(FM_PRESETS['sennheiser-sk100g2'].params.powerOptions.length, 1);
+  assert.equal(FM_PRESETS['sennheiser-skm100g2'].confidence.powerOptions, 'assumed');
+  // G4: 42 MHz / 1680 for ew 100, 88 MHz / 3520 for 300-500
+  const w100 = FM_PRESETS['sennheiser-em100g4'].params;
+  assert.deepEqual(w100.tuningWindows.map((w) => w.id), ['A1', 'A', 'AS', 'G', 'GB', 'B', 'C', 'D', 'E', 'JB', 'K+', '1G8']);
+  assert.equal(w100.tuningWindowMaxMHz, 42); assert.equal(w100.frequencies, 1680);
+  const w500 = FM_PRESETS['sennheiser-em300500g4'].params;
+  assert.deepEqual(w500.tuningWindows.map((w) => w.id), ['Aw+', 'AS', 'Gw1', 'Gw', 'GBw', 'Bw', 'Cw', 'Dw', 'JB', 'K+']);
+  assert.equal(w500.tuningWindowMaxMHz, 88); assert.equal(w500.frequencies, 3520); assert.equal(w500.channelsPerBank, 32);
+  assert.equal(FM_PRESETS['sennheiser-em300500g4'].confidence.tuningWindows, 'inferred');   // Bw typo 526 read as 626
+  assert.equal(w500.tuningWindows.find((w) => w.id === 'Bw').fromMHz, 626);
+  assert.ok(w500.tuningWindows.every((w) => w.toMHz - w.fromMHz <= 88));
+  assert.deepEqual(FM_PRESETS['sennheiser-sk500g4'].params.powerOptions.map((o) => Math.round(10 ** (o.powerDbm / 10))), [10, 30, 50]);
+  assert.deepEqual(FM_PRESETS['sennheiser-skm100g4s'].params.powerOptions.map((o) => Math.round(10 ** (o.powerDbm / 10))), [30]);
+  for (const id of ['sennheiser-sk100g4s', 'sennheiser-sk500g4']) { const p = FM_PRESETS[id].params; assert.equal(p.deviationKhz, 24); assert.equal(p.peakDeviationKhz, 48); }
+  assert.equal(fmTuningCheck('sennheiser-em100g4', 1790).window, '1G8');
+  assert.equal(FM_PRESETS['sennheiser-em100g4'].confidence.intermodRejectionMinDb, 'inferred');
+});
+
+test('IEM G4, SR 3254 / 3256 / EK 3253, SR/EK IEM G2: pilot, diversity, power', () => {
+  const sr = FM_PRESETS['sennheiser-sriemg4'].params, ek = FM_PRESETS['sennheiser-ekiemg4'].params;
+  assert.equal(sr.mpxPilotKhz, 19); assert.equal(sr.pilotDeviationKhz, 5);
+  assert.equal(ek.diversityMode, 'ratio'); assert.equal(FM_PRESETS['sennheiser-ekiemg4'].confidence.diversityMode, 'assumed');
+  assert.deepEqual(ek.limiterRangeDb, { min: -18, max: -6 }); assert.equal(FM_PRESETS['sennheiser-ekiemg4'].confidence.limiterRangeDb, 'assumed');
+  assert.ok(Math.abs(ek.sensitivityDbm - (20 * Math.log10(4) - 107)) < 0.06);
+  assert.ok(ek.tuningWindows.some((w) => w.id === 'C-TH' && w.fromMHz === 748.2));
+  assert.ok(!sr.tuningWindows.some((w) => w.id === 'C-TH'));
+  assert.equal(FM_PRESETS['sennheiser-sriemg4'].confidence.powerOptions, 'inferred');
+  assert.equal(FM_PRESETS['sennheiser-sr3254'].params.pilotDeviationKhz, 5);
+  assert.deepEqual(FM_PRESETS['sennheiser-sr3254'].params.powerOptions.map((o) => Math.round(10 ** (o.powerDbm / 10))), [50, 100]);
+  assert.equal(FM_PRESETS['sennheiser-sr3256'].params.tuningStepKhz, 5);
+  assert.equal(FM_PRESETS['sennheiser-ek3253'].params.diversityMode, 'none');
+  assert.ok(Math.abs(FM_PRESETS['sennheiser-ek3253'].params.sensitivityDbm - (20 * Math.log10(1.5) - 107)) < 0.06);   // -103.5
+  assert.equal(FM_PRESETS['sennheiser-sr300iemg2'].params.pilotDeviationKhz, 4);   // G2 +-4 kHz, not +-5
+  assert.equal(FM_PRESETS['sennheiser-sr350iemg2'].params.powerOptions.map((o) => Math.round(10 ** (o.powerDbm / 10))).join(), '100,15');
+  assert.deepEqual(FM_PRESETS['sennheiser-sr300iemg2'].params.powerOptions.map((o) => Math.round(10 ** (o.powerDbm / 10))), [20]);
+  assert.equal(FM_PRESETS['sennheiser-ek300iemg2'].params.diversityMode, 'none');
+  assert.equal(FM_PRESETS['sennheiser-ek300iemg2'].params.intermodRejectionMinDb, 70);
+  // non-diversity receivers switch the link's diversity off when applied
+  assert.equal(applyFmPreset(baseLink(), 'sennheiser-ek3253').rx.diversity.enabled, false);
+  assert.equal(applyFmPreset(baseLink(), 'sennheiser-em100g4').rx.diversity.enabled, true);
+});
+
+test('3000 and 5000 series: +-40 / +-56 kHz, 24 MHz window, 50 mW SKM 5000, assumed gaps flagged', () => {
+  for (const id of ['sennheiser-sk3063', 'sennheiser-skm3072', 'sennheiser-skp3000', 'sennheiser-skm5000', 'sennheiser-em3031-3032']) {
+    const p = FM_PRESETS[id].params;
+    assert.equal(p.deviationKhz, 40); assert.equal(p.peakDeviationKhz, 56);
+  }
+  assert.equal(FM_PRESETS['sennheiser-em3031-3032'].params.tuningWindowMaxMHz, 24);
+  assert.deepEqual([FM_PRESETS['sennheiser-em3031-3032'].params.tuningWindows[0].fromMHz, FM_PRESETS['sennheiser-em3031-3032'].params.tuningWindows[0].toMHz], [450, 960]);
+  assert.equal(FM_PRESETS['sennheiser-skm5000'].params.tuningWindowMaxMHz, 24);
+  assert.deepEqual(FM_PRESETS['sennheiser-skm5000'].params.powerOptions.map((o) => Math.round(10 ** (o.powerDbm / 10))), [50]);
+  assert.equal(FM_PRESETS['sennheiser-skm5000'].params.tuningWindows.length, 4);
+  assert.deepEqual(FM_PRESETS['sennheiser-skp3000'].params.powerOptions.map((o) => Math.round(10 ** (o.powerDbm / 10))), [30]);
+  assert.equal(FM_PRESETS['sennheiser-sk3063'].confidence.powerOptions, 'assumed');
+  assert.equal(FM_PRESETS['sennheiser-em3031-3032'].confidence.sensitivityUv, 'assumed');
+  assert.equal(FM_PRESETS['sennheiser-em3031-3032'].params.adjacentChannelRejectionMinDb, undefined);   // not found: not invented
+  assert.equal(FM_PRESETS['sennheiser-skp3000'].params.pilotSquelchSwitchable, undefined);
+  // EM 3732-II keeps its derived planner value and gains the data-sheet typical
+  const em = FM_PRESETS['sennheiser-em3732ii'].params;
+  assert.ok(Math.abs(em.sensitivityDbm - (-99)) < 0.05);
+  assert.equal(em.typicalSensitivityUv, 1.5);
+  assert.ok(Math.abs(em.typicalSensitivityDbm - (20 * Math.log10(1.5) - 107)) < 0.06);
+});
+
+test('Shure PSM 900 / PSM 1000: deviation, pilot, power, SINAD mapping, squelch', () => {
+  for (const id of ['shure-p9t', 'shure-p10t']) {
+    const p = FM_PRESETS[id].params;
+    assert.equal(p.deviationKhz, 34); assert.equal(p.mpxPilotKhz, 19); assert.equal(p.pilotToleranceKhz, 0.3);
+    assert.deepEqual(p.powerOptions.map((o) => Math.round(10 ** (o.powerDbm / 10))), [10, 50, 100]);
+    assert.equal(FM_PRESETS[id].confidence.powerOptions, 'inferred');
+    assert.equal(p.compander, 'Audio Reference Companding');
+    assert.equal(FM_PRESETS[id].manufacturer, 'Shure');
+  }
+  assert.equal(FM_PRESETS['shure-p9t'].params.tuningWindowMaxMHz, 36);
+  assert.equal(FM_PRESETS['shure-p10t'].params.tuningWindowMaxMHz, 72);
+  assert.equal(FM_PRESETS['shure-p9t'].params.compatibleFrequenciesPerBand, 20);
+  assert.equal(FM_PRESETS['shure-p10t'].params.compatibleFrequenciesPerBand, 39);
+  assert.ok(FM_PRESETS['shure-p9t'].params.tuningWindows.some((w) => w.id === 'X1' && w.fromMHz === 944));
+  assert.ok(FM_PRESETS['shure-p10t'].params.tuningWindows.some((w) => w.id === 'L8' && w.toMHz === 698));
+  for (const id of ['shure-p9ra', 'shure-p10r']) {
+    const p = FM_PRESETS[id].params;
+    // 2.2 uV: 20 log10(2.2) - 107 = -100.15 dBm (stored to 0.1 dB, tolerance 0.06)
+    assert.ok(Math.abs(p.sensitivityDbm - (20 * Math.log10(2.2) - 107)) < 0.06);
+    assert.equal(p.sensitivityCriterion, '20 dB SINAD');
+    // CNR mapping on the UR SINAD line: 8 dB at 12 dB SINAD, 13 dB at 30 dB SINAD -> 20 dB SINAD = 8 + 5 * 8 / 18 = 10.2 dB (tolerance 0.05)
+    assert.ok(Math.abs(p.requiredCnrDb - (8 + 5 * (20 - 12) / 18)) < 0.05);
+    assert.ok(Math.abs(impliedRequiredCnrDb(p.sensitivityDbm, p.noiseFigureDb, 200) - p.requiredCnrDb) < 0.1);
+    // squelch default 22 dB SINAD -> CNR 8 + 5 * 10 / 18 = 10.78 -> level = kTB + NF + CNR = -99.6 dBm (tolerance 0.1)
+    assert.ok(Math.abs(p.squelch.thresholdDbm - (KTB_200K + p.noiseFigureDb + 8 + 5 * (22 - 12) / 18)) < 0.1);
+    assert.deepEqual(p.volumeLimiterSteps, { min: 3, max: 9 });
+    assert.equal(p.deviationKhz, 34);
+    assert.deepEqual([p.adjacentChannelRejectionMinDb, p.intermodRejectionMinDb, p.blockingRejectionMinDb], [70, 70, 80]);
+    assert.equal(p.antennaInput, undefined);                       // bodypack: no BNC input claimed
+    assert.equal(FM_PRESETS[id].confidence.diversityMode, 'assumed');
+    assert.equal(p.diversityMode, 'none');
+    assert.equal(isAssumed(id, 'sensitivityDbm'), true);
+    assert.equal(isAssumed(id, 'volumeLimiterSteps'), false);
+  }
+  // PSM receiver applies like the others and changes the margin by its own sensitivity
+  const base = sceneWith(baseLink());
+  const psm = sceneWith(applyFmPreset(baseLink(), 'shure-p9ra'));
+  const d = solveLink(psm, psm.links[0]).marginDb - solveLink(base, base.links[0]).marginDb;
+  assert.ok(Math.abs(d - (-95 - (-100.2))) < 0.1, String(d));   // more margin: 5.2 dB lower sensitivity level
+  assert.equal(validateScene(psm).ok, true);
+});
+
+test('all new receivers: planner level rules and implied CNR', () => {
+  for (const id of NEW_RX) {
+    const r = RX_PRESETS[id];
+    assert.ok(r && r.fmPreset, id);
+    assert.ok(Math.abs(impliedRequiredCnrDb(r.sensitivityDbm, r.noiseFigureDb, r.channelBwKhz) - r.requiredCnrDb) < 0.1, id);
+    assert.ok(r.sensitivityDbm + r.agcRangeDb <= r.p1dBDbm && r.p1dBDbm <= r.maxInputDbm, id);
+    assert.equal(FM_PRESETS[id].confidence.p1dBDbm, 'assumed');
+  }
+  for (const id of NEW_TX) {
+    const p = FM_PRESETS[id];
+    assert.ok(p.params.powerOptions.length >= 1 && p.sources.length >= 1 && p.caveat.length > 10, id);
+    assert.ok(!p.caveat.includes('\n'));
+    const o = fmPowerOption(id);
+    assert.ok(o && Number.isFinite(o.powerDbm), id);
+  }
+});
+
+test('fmDeviationComparison: optional PSM +-34 kHz system', () => {
+  assert.equal(fmDeviationComparison().systems.length, 4);
+  assert.equal(fmDeviationComparison({ includeG3: true }).systems.length, 5);
+  const r = fmDeviationComparison({ includePSM: true });
+  assert.equal(r.systems.length, 5);
+  const psm = r.systems.find((s) => s.id === 'shure-psm-class');
+  assert.equal(psm.carsonBwKhz, 98);                             // 2 (34 + 15)
+  assert.ok(Math.abs(psm.modulationIndex - 34 / 15) < 1e-12);
+  assert.ok(Math.abs(psm.snrVsReferenceDb - 20 * Math.log10(34 / 40)) < 1e-9);   // vs the first (+-40 kHz) system: -1.41 dB
+  assert.equal(psm.confidence.deviationKhz, 'sourced');
+  assert.equal(FM_DEVIATION_PSM_SYSTEM.deviationKhz, 34);
+  assert.equal(fmDeviationComparison({ includeG3: true, includePSM: true }).systems.length, 6);
 });

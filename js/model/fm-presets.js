@@ -86,57 +86,62 @@ const SRC_G3 = {
 };
 
 // Transmitter entry. o: { id, model, kind, series, options[], ranges, windowMHz, freqs, chPerBank, userBanks, devConf, powerConf, audioKhz, ppm, extra, caveat, sources, extraConf }
+function clean(obj) { const out = {}; for (const [k, v] of Object.entries(obj)) if (v !== undefined && v !== null && v !== false) out[k] = v; return out; }
 function senTx(o) {
-  const peak = 48;
+  const dev = o.dev ?? 24, peak = o.peak ?? 48;
+  const mfr = o.mfr || 'Sennheiser';
   return {
-    id: o.id, label: `Sennheiser ${o.model} class ${o.kind} (FM)`, manufacturer: 'Sennheiser', model: o.model, role: 'tx',
-    params: {
-      powerOptions: o.options, defaultPowerOptionId: o.options.length > 1 ? 'std-30mw' : o.options[0].id,
-      deviationKhz: 24, peakDeviationKhz: peak, audioBwKhz: o.audioKhz,
+    id: o.id, label: `${mfr} ${o.model} class ${o.kind} (FM)`, manufacturer: mfr, model: o.model, role: 'tx',
+    params: clean({
+      powerOptions: o.options, defaultPowerOptionId: o.defaultPowerId || (o.options.length > 1 ? 'std-30mw' : o.options[0].id),
+      deviationKhz: dev, peakDeviationKhz: peak, audioBwKhz: o.audioKhz,
       occupiedBwKhz: 2 * (peak + o.audioKhz),     // Carson at peak deviation, ASSUMED (not published)
-      tuningStepKhz: 25, tuningWindows: o.ranges, tuningWindowMaxMHz: o.windowMHz, frequencies: o.freqs,
-      factoryBanks: 20, channelsPerBank: o.chPerBank, userBanks: o.userBanks, stabilityPpm: o.ppm,
-      pilotSquelchSwitchable: true,
+      tuningStepKhz: o.stepKhz || 25, tuningWindows: o.ranges, tuningWindowMaxMHz: o.windowMHz, frequencies: o.freqs,
+      factoryBanks: o.factoryBanks === undefined ? 20 : o.factoryBanks, channelsPerBank: o.chPerBank, userBanks: o.userBanks, stabilityPpm: o.ppm,
+      pilotSquelchSwitchable: o.pilotSq === undefined ? true : o.pilotSq,
       paConversionDb: 20, lowIntermod: { available: false },
       ...(o.extra || {}),
-    },
+    }),
     confidence: {
-      powerOptions: o.powerConf, defaultPowerOptionId: A, deviationKhz: o.devConf, peakDeviationKhz: o.devConf, audioBwKhz: S,
-      occupiedBwKhz: A, tuningStepKhz: S, tuningWindows: o.rangesConf || S, tuningWindowMaxMHz: S, frequencies: S,
-      factoryBanks: S, channelsPerBank: S, userBanks: o.userBanksConf || S, stabilityPpm: S, pilotSquelchSwitchable: S,
+      powerOptions: o.powerConf, defaultPowerOptionId: A, deviationKhz: o.devConf, peakDeviationKhz: o.devConf, audioBwKhz: o.audioConf || S,
+      occupiedBwKhz: A, tuningStepKhz: o.stepConf || S, tuningWindows: o.rangesConf || S, tuningWindowMaxMHz: o.windowConf || S, frequencies: S,
+      factoryBanks: S, channelsPerBank: S, userBanks: o.userBanksConf || S, stabilityPpm: o.ppmConf || S, pilotSquelchSwitchable: S,
       paConversionDb: A, lowIntermod: A, ...(o.extraConf || {}),
     },
     sources: o.sources, caveat: o.caveat,
   };
 }
 
-// Receiver entry. o: { id, model, kind, uv, typUv?, ranges, windowMHz, freqs, chPerBank, userBanks, acr, im, blk, diversity, ... }
+// Receiver entry. o: { id, model, kind, uv, typUv?, cnr?, criterion?, ranges, windowMHz, freqs, chPerBank, userBanks, acr, im, blk, diversity ('true'|'switching'|'ratio'|'none'), ... }
 function senRx(o) {
   const sens = uvToDbm(o.uv);
-  const nf = Math.round(sens + 120.99 - 13);    // NF = sensitivity - kTB(200 kHz) - 13 dB CNR
+  const cnr = o.cnr ?? 13;
+  const nf = Math.round((sens + 120.99 - cnr) * 10) / 10;    // NF = sensitivity - kTB(200 kHz) - required CNR
   const iem = o.iem === true;
+  const mfr = o.mfr || 'Sennheiser';
+  const sq = o.squelchOptions === null ? undefined : (o.squelchOptions || { min: 5, max: 25, stepDb: 2 });
   return {
-    id: o.id, label: `Sennheiser ${o.model} class ${o.kind} (FM)`, manufacturer: 'Sennheiser', model: o.model, role: 'rx',
-    params: {
-      sensitivityDbm: sens, sensitivityUv: o.uv, sensitivityCriterion: '52 dBA rms S/N',
+    id: o.id, label: `${mfr} ${o.model} class ${o.kind} (FM)`, manufacturer: mfr, model: o.model, role: 'rx',
+    params: clean({
+      sensitivityDbm: sens, sensitivityUv: o.uv, sensitivityCriterion: o.criterion || '52 dBA rms S/N',
       ...(o.typUv ? { typicalSensitivityDbm: uvToDbm(o.typUv), typicalSensitivityUv: o.typUv } : {}),
-      channelBwKhz: 200, requiredCnrDb: 13, noiseFigureDb: nf,
+      channelBwKhz: 200, requiredCnrDb: cnr, noiseFigureDb: nf,
       agcRangeDb: iem ? 60 : 65, p1dBDbm: iem ? -22 : -18, iip3Dbm: iem ? -12 : -8, maxInputDbm: iem ? -15 : -10, overloadHysteresisDb: 3, hotMarginDb: 10,
-      squelch: { thresholdDbm: dbuvToDbm(SQUELCH_DEFAULT_DBUV), hysteresisDb: 3 },
-      squelchOptionsDbuv: o.squelchOptions || { min: 5, max: 25, stepDb: 2 },
-      diversityMode: o.diversity, deviationKhz: 24, peakDeviationKhz: 48,
-      tuningStepKhz: 25, tuningWindows: o.ranges, tuningWindowMaxMHz: o.windowMHz, frequencies: o.freqs,
-      factoryBanks: 20, channelsPerBank: o.chPerBank, userBanks: o.userBanks,
+      squelch: { thresholdDbm: o.squelchDbm ?? dbuvToDbm(SQUELCH_DEFAULT_DBUV), hysteresisDb: 3 },
+      squelchOptionsDbuv: sq,
+      diversityMode: o.diversity, deviationKhz: o.dev ?? 24, peakDeviationKhz: o.peak ?? 48,
+      tuningStepKhz: o.stepKhz || 25, tuningWindows: o.ranges, tuningWindowMaxMHz: o.windowMHz, frequencies: o.freqs,
+      factoryBanks: o.factoryBanks === undefined ? 20 : o.factoryBanks, channelsPerBank: o.chPerBank, userBanks: o.userBanks,
       adjacentChannelRejectionMinDb: o.acr, intermodRejectionMinDb: o.im, blockingRejectionMinDb: o.blk,
-      pilotSquelchSwitchable: true, antennaInput: { connector: 'BNC', impedanceOhm: 50, ...(o.bias ? { dcBiasV: o.bias } : {}) },
+      pilotSquelchSwitchable: o.pilotSq === undefined ? true : o.pilotSq, antennaInput: o.noAntenna ? undefined : { connector: 'BNC', impedanceOhm: 50, ...(o.bias ? { dcBiasV: o.bias } : {}) },
       ...(o.extra || {}),
-    },
+    }),
     confidence: {
       sensitivityDbm: I, sensitivityUv: o.uvConf || S, sensitivityCriterion: S, ...(o.typUv ? { typicalSensitivityDbm: I, typicalSensitivityUv: S } : {}),
       channelBwKhz: A, requiredCnrDb: A, noiseFigureDb: I,
       agcRangeDb: A, p1dBDbm: A, iip3Dbm: A, maxInputDbm: A, overloadHysteresisDb: A, hotMarginDb: A,
       squelch: A, squelchOptionsDbuv: o.squelchConf || S, diversityMode: o.diversityConf || S, deviationKhz: o.devConf || S, peakDeviationKhz: o.devConf || S,
-      tuningStepKhz: S, tuningWindows: o.rangesConf || S, tuningWindowMaxMHz: S, frequencies: S,
+      tuningStepKhz: o.stepConf || S, tuningWindows: o.rangesConf || S, tuningWindowMaxMHz: o.windowConf || S, frequencies: S,
       factoryBanks: S, channelsPerBank: S, userBanks: o.userBanksConf || S,
       adjacentChannelRejectionMinDb: o.figConf || S, intermodRejectionMinDb: o.figConf || S, blockingRejectionMinDb: o.figConf || S,
       pilotSquelchSwitchable: S, antennaInput: S, ...(o.extraConf || {}),
@@ -181,9 +186,9 @@ const SENNHEISER_G3_2000 = [
   senRx({ id: 'sennheiser-em2050', model: 'EM 2050 / EM 2000', kind: 'dual / single receiver', uv: 2, uvConf: A, ranges: S2000_RANGES, windowMHz: 75, freqs: 3000, chPerBank: 64, userBanks: 6, acr: 80, im: 75, blk: 80, diversity: 'true', bias: 11,
     sources: SRC_G3[2000], caveat: 'About 2 uV; the less-than sign was lost in the source, so under 2 uV is assumed. Same figures for the single-channel EM 2000. GBw 606-678 is 2000-series only.' }),
   senTx({ id: 'sennheiser-sk2000', model: 'SK 2000', kind: 'bodypack', options: [PWR.low, PWR.std, PWR.high], ranges: S2000_RANGES, windowMHz: 75, freqs: 3000, chPerBank: 64, userBanks: 6, devConf: S, powerConf: S, audioKhz: 18, ppm: 15,
-    sources: SRC_G3[2000], caveat: '10 / 30 / 50 mW. Occupied bandwidth is a Carson estimate (assumed). There is no SK 2050.' }),
+    sources: SRC_G3[2000], caveat: '10 / 30 / 50 mW. Occupied bandwidth is a Carson estimate (assumed).' }),
   senTx({ id: 'sennheiser-skm2000', model: 'SKM 2000', kind: 'handheld', options: [PWR.low, PWR.std, PWR.high], ranges: S2000_RANGES, windowMHz: 75, freqs: 3000, chPerBank: 64, userBanks: 6, devConf: S, powerConf: S, audioKhz: 18, ppm: 15,
-    sources: SRC_G3[2000], caveat: '10 / 30 / 50 mW. Occupied bandwidth is a Carson estimate (assumed). There is no SKM 2050.' }),
+    sources: SRC_G3[2000], caveat: '10 / 30 / 50 mW. Occupied bandwidth is a Carson estimate (assumed).' }),
   senTx({ id: 'sennheiser-skp2000', model: 'SKP 2000', kind: 'plug-on', options: [PWR.low, PWR.std, PWR.high], ranges: S2000_RANGES, windowMHz: 75, freqs: 3000, chPerBank: 64, userBanks: 6, devConf: S, powerConf: S, audioKhz: 18, ppm: 15,
     sources: SRC_G3[2000], caveat: '10 / 30 / 50 mW. Occupied bandwidth is a Carson estimate (assumed).' }),
   senTx({ id: 'sennheiser-sr2050iem', model: 'SR 2050 IEM', kind: 'IEM transmitter (dual stereo)', options: [PWR.low, PWR.std, PWR.high, PWR.xp], ranges: S2000_IEM_RANGES, windowMHz: 75, freqs: 3000, chPerBank: 32, userBanks: 6, devConf: S, powerConf: I, audioKhz: 15, ppm: 10,
@@ -192,6 +197,130 @@ const SENNHEISER_G3_2000 = [
     sources: SRC_G3['2000.5'], caveat: '10 / 30 / 50 mW; the 100 mW option belongs to the SR 2050XP version and is flagged assumed. 19 kHz pilot with +-5 kHz deviation is sourced.' }),
   senRx({ id: 'sennheiser-ek2000iem', model: 'EK 2000 IEM', kind: 'bodypack receiver', iem: true, uv: 4, typUv: 1.6, ranges: S2000_IEM_RANGES, windowMHz: 75, freqs: 3000, chPerBank: 32, userBanks: 6, acr: 80, im: 78, blk: 80, diversity: 'ratio', diversityConf: A,
     sources: SRC_G3['2000.5'], caveat: 'Under 4 uV (-95 dBm), typically 1.6 uV (-103 dBm) for 52 dBA S/N; the planner uses the guaranteed figure. Adaptive diversity is mapped to ratio combining (assumed).' }),
+];
+
+// ---- More Sennheiser families (G2, G4, IEM G4, 3000, 5000, 3254/3256, IEM G2) and Shure PSM 900 / PSM 1000 ----------------------
+// Same helpers and mapping notes as the G3 block above. Additional mappings:
+//  - PSM receivers quote sensitivity at 20 dB SINAD (2.2 uV = -100.2 dBm at 50 ohm, terminal voltage assumed). As for the UR
+//    mapping the quoted SINAD figure is the planner sensitivity; the required CNR comes from the UR SINAD line (12 dB SINAD ->
+//    8 dB CNR, 30 dB SINAD -> 13 dB CNR, linear in between, ASSUMED): 20 dB SINAD -> 10.2 dB, 22 dB SINAD -> 10.8 dB. NF is then derived
+//    (10.6 dB), and the squelch default (22 dB SINAD, +-3 dB) maps to kTB(200 kHz) + NF + 10.8 dB = -99.6 dBm (assumed).
+//  - Naming: there is no SKM 3000, no EM 5000, no ew 300 or 500 IEM G4 and no SR 3300; the corresponding real products are modelled
+//    (SK 3063, SKM 3072, SKP 3000, EM 3031 / EM 3032, SKM 5000, ew IEM G4, SR 3254 / SR 3256). G1 and the ew 300 / 500 G2 data sheets
+//    were not read, so those are gaps and have no presets.
+const mwId = (mw, id, label, extra) => ({ id, label, powerDbm: mwToDbm(mw), lowIntermod: false, ...(extra || {}) });
+const rng = (id, label, fromMHz, toMHz) => ({ id, label: `${label} ${fromMHz}-${toMHz} MHz`, fromMHz, toMHz });
+const G2_RANGES = [rng('518-554', '', 518, 554), rng('626-662', '', 626, 662), rng('740-776', '', 740, 776), rng('786-822', '', 786, 822), rng('830-866', '', 830, 866)].map((r) => ({ ...r, label: r.label.trim() }));
+const G2_IEM_RANGES = [rng('518-554', '', 518, 554), rng('572-608', '', 572, 608), rng('626-662', '', 626, 662), rng('740-776', '', 740, 776), rng('786-822', '', 786, 822), rng('830-866', '', 830, 866)].map((r) => ({ ...r, label: r.label.trim() }));
+const G4_100_RANGES = [rng('A1', 'A1', 470, 516), rng('A', 'A', 516, 558), rng('AS', 'AS', 520, 558), rng('G', 'G', 566, 608), rng('GB', 'GB', 606, 648), rng('B', 'B', 626, 668),
+  rng('C', 'C', 734, 776), rng('D', 'D', 780, 822), rng('E', 'E', 823, 865), rng('JB', 'JB', 806, 810), rng('K+', 'K+', 925, 937.5), rng('1G8', '1G8', 1785, 1800)];
+const G4_500_RANGES = [rng('Aw+', 'Aw+', 470, 558), rng('AS', 'AS', 520, 558), rng('Gw1', 'Gw1', 558, 608), rng('Gw', 'Gw', 558, 626), rng('GBw', 'GBw', 606, 678), rng('Bw', 'Bw', 626, 698),
+  rng('Cw', 'Cw', 718, 790), rng('Dw', 'Dw', 790, 865), rng('JB', 'JB', 806, 810), rng('K+', 'K+', 925, 937.5)];
+const G4_IEM_RANGES = G4_100_RANGES.filter((r) => !['JB', 'K+', '1G8'].includes(r.id));
+const G4_IEM_RX_RANGES = [...G4_IEM_RANGES, rng('C-TH', 'C-TH', 748.2, 757.8)];
+const SERIES3000_SKP_RANGES = [rng('518-554', '', 518, 554), rng('556-592', '', 556, 592), rng('576-612', '', 576, 612), rng('626-662', '', 626, 662), rng('670-706', '', 670, 706),
+  rng('696-732', '', 696, 732), rng('740-776', '', 740, 776), rng('786-822', '', 786, 822), rng('830-866', '', 830, 866)].map((r) => ({ ...r, label: r.label.trim() }));
+const SPAN_450_960 = [{ id: 'span', label: '450-960 MHz in 24 MHz windows', fromMHz: 450, toMHz: 960 }];
+const SKM5000_RANGES = [rng('A', 'A', 450, 570), rng('B', 'B', 550, 690), rng('C', 'C', 670, 820), rng('D', 'D', 800, 960)];
+const PSM900_RANGES = [rng('G6', 'G6 / G6E', 470, 506), rng('G7', 'G7 / G7E', 506, 542), rng('K1', 'K1 / K1E', 596, 632), rng('L6', 'L6 / L6E', 656, 692), rng('P7', 'P7', 702, 742),
+  rng('Q15', 'Q15', 750, 790), rng('R21', 'R21', 794, 806), rng('X7', 'X7', 925, 937.5), rng('X1', 'X1', 944, 952)];
+const PSM1000_RANGES = [rng('G10', 'G10', 470, 542), rng('H8Z', 'H8Z', 518, 582), rng('J8', 'J8', 554, 626), rng('K10E', 'K10E', 596, 668), rng('L8', 'L8', 626, 698), rng('L9E', 'L9E', 670, 742),
+  rng('P8', 'P8', 710, 790), rng('Q21', 'Q21', 710, 787), rng('Q22E', 'Q22E', 750, 822), rng('R27', 'R27', 794, 806), rng('X1', 'X1', 944, 952), rng('X7', 'X7', 925, 937.5)];
+const SRC2 = {
+  g2: ['Sennheiser EM 100 G2 manual', 'Sennheiser SK 100 G2 specifications'],
+  g4100: ['Sennheiser ew 100 G4 product specification'],
+  g4500: ['Sennheiser ew 500 G4 product specification', 'Sennheiser SK 500 G4 product specification'],
+  g4iem: ['Sennheiser ew IEM G4 product specification'],
+  s3000: ['Sennheiser EM 3031 / EM 3032 data sheet', 'Sennheiser SKP 3000 manual'],
+  s5000: ['Sennheiser SKM 5000 data sheet', 'Sennheiser EM 3732-II data sheet'],
+  sr3254: ['Sennheiser SR 3254 / SR 3256 manual', 'Sennheiser EK 3253 manual'],
+  iemg2: ['Sennheiser ew 300 IEM G2 manual'],
+  psm900: ['Shure PSM 900 specification sheets'],
+  psm1000: ['Shure PSM 1000 specification sheet'],
+};
+const PSM_SINAD_NOTE = 'Sensitivity is 2.2 uV (-100.2 dBm) at 20 dB SINAD; required CNR 10.2 dB comes from the UR SINAD line (assumed).';
+const psmExtraConf = { compander: S, mpxPilotKhz: S, pilotToleranceKhz: S, compatibleFrequenciesPerBand: S };
+const psmTx = (o) => senTx({ mfr: 'Shure', kind: 'IEM transmitter (dual stereo)', dev: 34, peak: 34, audioKhz: 15, audioConf: I, devConf: S, powerConf: I, stepKhz: 25, stepConf: A, windowConf: I,
+  factoryBanks: null, pilotSq: false, ppm: 2.5, defaultPowerId: 'low-10mw', options: [PWR.low, PWR.high, mwId(100, 'hi-100mw', '100 mW (band dependent)')],
+  extra: { compander: 'Audio Reference Companding', mpxPilotKhz: 19, pilotToleranceKhz: 0.3, compatibleFrequenciesPerBand: o.perBank }, extraConf: psmExtraConf, ...o });
+
+const SENNHEISER_MORE = [
+  // ---- evolution wireless G2: only ew 100 G2 data was read (ew 300 / 500 G2 and G1 are gaps) -------------------------
+  senTx({ id: 'sennheiser-sk100g2', model: 'SK 100 G2', kind: 'bodypack', options: [PWR.std], ranges: G2_RANGES, windowMHz: 36, freqs: 1440, factoryBanks: 8, chPerBank: 4, userBanks: 1, devConf: S, powerConf: S, audioKhz: 18, ppm: 15,
+    sources: SRC2.g2, caveat: '30 mW. Data from the ew 100 G2; the ew 300 / 500 G2 and G1 were not researched. Occupied bandwidth is a Carson estimate (assumed).' }),
+  senTx({ id: 'sennheiser-skm100g2', model: 'SKM 100 G2', kind: 'handheld', options: [PWR.std], ranges: G2_RANGES, windowMHz: 36, freqs: 1440, factoryBanks: 8, chPerBank: 4, userBanks: 1, devConf: S, powerConf: A, audioKhz: 18, ppm: 15,
+    sources: SRC2.g2, caveat: '30 mW assumed the same as the SK 100 G2. The ew 300 / 500 G2 and G1 were not researched. Occupied bandwidth is a Carson estimate (assumed).' }),
+  senRx({ id: 'sennheiser-em100g2', model: 'EM 100 G2', kind: 'receiver', uv: 2.5, ranges: G2_RANGES, windowMHz: 36, freqs: 1440, factoryBanks: 8, chPerBank: 4, userBanks: 1, acr: 65, im: 65, blk: 70, diversity: 'true',
+    squelchOptions: { values: [5, 15, 25], names: ['Low', 'Middle', 'High'] },
+    sources: SRC2.g2, caveat: 'Under 2.5 uV (-99.0 dBm) for 52 dBA S/N; noise figure derived (assumed). Five ranges of 36 MHz; the G1 generation has no pilot squelch and was not researched.' }),
+  // ---- evolution wireless G4 ----------------------------------------------------------------------------------------
+  senTx({ id: 'sennheiser-sk100g4s', model: 'SK 100 G4-S', kind: 'bodypack', options: [PWR.std], ranges: G4_100_RANGES, windowMHz: 42, freqs: 1680, chPerBank: 12, userBanks: 1, devConf: S, powerConf: S, audioKhz: 18, ppm: 15,
+    sources: SRC2.g4100, caveat: 'Maximum 30 mW. Ranges include 1G8 (1785-1800 MHz). The pilot-tone frequency is not published. Occupied bandwidth is a Carson estimate (assumed).' }),
+  senTx({ id: 'sennheiser-skm100g4s', model: 'SKM 100 G4-S', kind: 'handheld', options: [PWR.std], ranges: G4_100_RANGES, windowMHz: 42, freqs: 1680, chPerBank: 12, userBanks: 1, devConf: S, powerConf: S, audioKhz: 18, ppm: 15,
+    sources: SRC2.g4100, caveat: 'Maximum 30 mW. Ranges include 1G8 (1785-1800 MHz). Occupied bandwidth is a Carson estimate (assumed).' }),
+  senRx({ id: 'sennheiser-em100g4', model: 'EM 100 G4', kind: 'receiver', uv: 2.5, ranges: G4_100_RANGES, windowMHz: 42, freqs: 1680, chPerBank: 12, userBanks: 1, acr: 65, im: 65, blk: 70, figConf: I, diversity: 'true',
+    squelchOptions: { values: [5, 15, 25], names: ['Low', 'Middle', 'High'] },
+    sources: SRC2.g4100, caveat: 'Under 2.5 uV (-99.0 dBm) for 52 dBA S/N; the rejection column order comes from garbled text (inferred). Noise figure derived (assumed).' }),
+  senTx({ id: 'sennheiser-sk500g4', model: 'SK 500 G4', kind: 'bodypack', options: [PWR.low, PWR.std, PWR.high], ranges: G4_500_RANGES, rangesConf: I, windowMHz: 88, freqs: 3520, chPerBank: 32, userBanks: 6, devConf: S, powerConf: S, audioKhz: 18, ppm: 15,
+    sources: SRC2.g4500, caveat: '10 / 30 / 50 mW. The Bw range is printed as 526-698 MHz and read as 626-698 (inferred). Occupied bandwidth is a Carson estimate (assumed).' }),
+  senTx({ id: 'sennheiser-skm500g4', model: 'SKM 500 G4', kind: 'handheld', options: [PWR.low, PWR.std, PWR.high], ranges: G4_500_RANGES, rangesConf: I, windowMHz: 88, freqs: 3520, chPerBank: 32, userBanks: 6, devConf: S, powerConf: S, audioKhz: 18, ppm: 15,
+    sources: SRC2.g4500, caveat: '10 / 30 / 50 mW. The Bw range is printed as 526-698 MHz and read as 626-698 (inferred). Occupied bandwidth is a Carson estimate (assumed).' }),
+  senRx({ id: 'sennheiser-em300500g4', model: 'EM 300-500 G4', kind: 'receiver', uv: 2.5, ranges: G4_500_RANGES, rangesConf: I, windowMHz: 88, freqs: 3520, chPerBank: 32, userBanks: 6, acr: 75, im: 70, blk: 75, figConf: I, diversity: 'true',
+    sources: SRC2.g4500, caveat: 'Under 2.5 uV (-99.0 dBm) for 52 dBA S/N; rejection column order inferred. No ew 300 G4 transmitter power was found, so only the receiver is listed for ew 300 G4. Bw range typo read as 626-698.' }),
+  // ---- ew IEM G4 (one product; there is no separate 300 or 500 version) --------------------------------------------
+  senTx({ id: 'sennheiser-sriemg4', model: 'SR IEM G4', kind: 'IEM transmitter', options: [PWR.low, PWR.std, PWR.high], ranges: G4_IEM_RANGES, windowMHz: 42, freqs: 1680, chPerBank: 16, userBanks: 6, devConf: S, powerConf: I, audioKhz: 15, ppm: 10,
+    extra: { mpxPilotKhz: 19, pilotDeviationKhz: 5, antennaOutput: { connector: 'BNC', impedanceOhm: 50 } }, extraConf: { mpxPilotKhz: S, pilotDeviationKhz: S, antennaOutput: S },
+    sources: SRC2.g4iem, caveat: '10 / 30 / 50 mW switchable; the data sheet front page says up to 30 mW (regulation dependent, inferred). 19 kHz pilot with +-5 kHz deviation.' }),
+  senRx({ id: 'sennheiser-ekiemg4', model: 'EK IEM G4', kind: 'bodypack receiver', iem: true, uv: 4, typUv: 1.6, ranges: G4_IEM_RX_RANGES, windowMHz: 42, freqs: 1680, chPerBank: 16, userBanks: 6, acr: 65, im: 70, blk: 80, figConf: I, diversity: 'ratio', diversityConf: A,
+    extra: { limiterRangeDb: { min: -18, max: -6 } }, extraConf: { limiterRangeDb: A },
+    sources: SRC2.g4iem, caveat: 'Under 4 uV (-95 dBm), typically 1.6 uV (-103 dBm); adaptive diversity is mapped to ratio combining (assumed). The limiter range is assumed (the data sheet lists a limiter without figures here).' }),
+  // ---- 3000 series (SK 3063, SKM 3072, SKP 3000; EM 3031 / EM 3032) and 5000 series ---------------------------------
+  senTx({ id: 'sennheiser-sk3063', model: 'SK 3063', kind: 'bodypack', dev: 40, peak: 56, options: [PWR.std], ranges: SPAN_450_960, rangesConf: I, windowMHz: 24, windowConf: I, stepKhz: 5, stepConf: A, freqs: 32, factoryBanks: null, pilotSq: false, devConf: S, powerConf: A, audioKhz: 20, audioConf: A, ppm: 10, ppmConf: A,
+    sources: SRC2.s3000, caveat: 'Power, tuning and stability not found; the 30 mW of the SKP 3000 and the receiver 450-960 MHz / 24 MHz window are assumed. Deviation +-40 / +-56 kHz.' }),
+  senTx({ id: 'sennheiser-skm3072', model: 'SKM 3072', kind: 'handheld', dev: 40, peak: 56, options: [PWR.std], ranges: SPAN_450_960, rangesConf: I, windowMHz: 24, windowConf: I, stepKhz: 5, stepConf: A, freqs: 32, factoryBanks: null, pilotSq: false, devConf: S, powerConf: A, audioKhz: 20, audioConf: A, ppm: 10, ppmConf: A,
+    sources: SRC2.s3000, caveat: 'Power, tuning and stability not found; the 30 mW of the SKP 3000 and the receiver 450-960 MHz / 24 MHz window are assumed. Deviation +-40 / +-56 kHz.' }),
+  senTx({ id: 'sennheiser-skp3000', model: 'SKP 3000', kind: 'plug-on', dev: 40, peak: 56, options: [PWR.std], ranges: SERIES3000_SKP_RANGES, rangesConf: I, windowMHz: 36, stepKhz: 5, freqs: undefined, factoryBanks: null, chPerBank: 20, pilotSq: false, devConf: S, powerConf: S, audioKhz: 20, audioConf: A, ppm: 10,
+    sources: SRC2.s3000, caveat: '30 mW, 36 MHz switching bandwidth, 5 kHz steps; the range list on the source page is mixed with the G2 ranges (inferred). Occupied bandwidth is a Carson estimate (assumed).' }),
+  senRx({ id: 'sennheiser-em3031-3032', model: 'EM 3031 / EM 3032', kind: 'single / dual receiver', uv: 2, uvConf: A, criterion: '52 dBA S/N (assumed)', dev: 40, peak: 56, ranges: SPAN_450_960, windowMHz: 24, stepKhz: 5, stepConf: A, freqs: 32, factoryBanks: null, pilotSq: false, diversity: 'true', diversityConf: I,
+    squelchOptions: { minUv: 0, maxUv: 100, unit: 'uV' }, bias: undefined,
+    sources: SRC2.s3000, caveat: 'Sensitivity is not printed; 2 uV (-101 dBm) is a class value (assumed), a service note quoting 1 uV is unverified. RF squelch 0-100 uV adjustable; rejection figures not found.' }),
+  senTx({ id: 'sennheiser-skm5000', model: 'SKM 5000', kind: 'handheld', dev: 40, peak: 56, options: [mwId(50, 'std-50mw', '50 mW')], ranges: SKM5000_RANGES, windowMHz: 24, stepKhz: 5, stepConf: A, freqs: 16, factoryBanks: null, pilotSq: false, devConf: S, powerConf: S, audioKhz: 18, audioConf: A, ppm: undefined,
+    extra: { sensitivityAdjustSteps: { steps: 5, stepDb: 10 } }, extraConf: { sensitivityAdjustSteps: S },
+    sources: SRC2.s5000, caveat: '50 mW, 24 MHz switching bandwidth, 16 frequencies. The receiver is the existing EM 3732-II preset; the SK 5212-II and SKM 5200 successors are covered by the SKM 5200-II preset.' }),
+  // ---- Older IEM: SR 3254 / SR 3256 with EK 3253; SR 300 / 350 IEM G2 with EK 300 IEM G2 --------------------------------
+  senTx({ id: 'sennheiser-sr3254', model: 'SR 3254', kind: 'IEM transmitter', options: [mwId(50, 'std-50mw', '50 mW (delivery setting)'), mwId(100, 'max-100mw', '100 mW (maximum)')], defaultPowerId: 'std-50mw', ranges: G2_RANGES, windowMHz: 36, stepKhz: 5, freqs: undefined, factoryBanks: 1, chPerBank: 16, userBanks: 1, devConf: S, powerConf: S, audioKhz: 15, audioConf: A, ppm: 10,
+    extra: { mpxPilotKhz: 19, pilotDeviationKhz: 5 }, extraConf: { mpxPilotKhz: S, pilotDeviationKhz: S },
+    sources: SRC2.sr3254, caveat: 'Maximum 100 mW, 50 mW +-2 dB on delivery. The SR 3256 is the twin-channel version.' }),
+  senTx({ id: 'sennheiser-sr3256', model: 'SR 3256', kind: 'IEM transmitter (twin)', options: [mwId(50, 'std-50mw', '50 mW (delivery setting)'), mwId(100, 'max-100mw', '100 mW (maximum)')], defaultPowerId: 'std-50mw', ranges: G2_RANGES, windowMHz: 36, stepKhz: 5, freqs: undefined, factoryBanks: 1, chPerBank: 16, userBanks: 1, devConf: S, powerConf: S, audioKhz: 15, audioConf: A, ppm: 10,
+    extra: { mpxPilotKhz: 19, pilotDeviationKhz: 5 }, extraConf: { mpxPilotKhz: S, pilotDeviationKhz: S },
+    sources: SRC2.sr3254, caveat: 'Twin-channel version of the SR 3254, same figures. Maximum 100 mW, 50 mW +-2 dB on delivery.' }),
+  senRx({ id: 'sennheiser-ek3253', model: 'EK 3253', kind: 'bodypack receiver', iem: true, uv: 1.5, uvConf: S, ranges: G2_RANGES, windowMHz: 36, stepKhz: 5, freqs: undefined, factoryBanks: 1, chPerBank: 16, userBanks: 1, diversity: 'none', diversityConf: A,
+    squelchOptions: { min: 0, max: 25, steps: 4, unit: 'dBuV' }, squelchConf: I, pilotSq: false,
+    sources: SRC2.sr3254, caveat: 'Typical 1.5 uV (-103.5 dBm) for 52 dBA S/N used as the planner value; diversity not stated (assumed non-diversity); rejection figures not read.' }),
+  senTx({ id: 'sennheiser-sr300iemg2', model: 'SR 300 IEM G2', kind: 'IEM transmitter', options: [mwId(20, 'std-20mw', '20 mW')], ranges: G2_IEM_RANGES, windowMHz: 36, freqs: 1440, factoryBanks: 8, chPerBank: 12, userBanks: 1, devConf: S, powerConf: S, audioKhz: 15, audioConf: A, ppm: undefined,
+    extra: { mpxPilotKhz: 19, pilotDeviationKhz: 4 }, extraConf: { mpxPilotKhz: S, pilotDeviationKhz: S },
+    sources: SRC2.iemg2, caveat: '20 mW. G2 pilot deviation is +-4 kHz (+-5 kHz on the G3 and later).' }),
+  senTx({ id: 'sennheiser-sr350iemg2', model: 'SR 350 IEM G2', kind: 'IEM transmitter (twin)', options: [mwId(100, 'high-100mw', '100 mW'), mwId(15, 'low-15mw', '15 mW')], defaultPowerId: 'high-100mw', ranges: G2_IEM_RANGES, windowMHz: 36, freqs: 1440, factoryBanks: 8, chPerBank: 12, userBanks: 1, devConf: S, powerConf: S, audioKhz: 15, audioConf: A, ppm: undefined,
+    extra: { mpxPilotKhz: 19, pilotDeviationKhz: 4 }, extraConf: { mpxPilotKhz: S, pilotDeviationKhz: S },
+    sources: SRC2.iemg2, caveat: '100 mW switchable to 15 mW. G2 pilot deviation is +-4 kHz.' }),
+  senRx({ id: 'sennheiser-ek300iemg2', model: 'EK 300 IEM G2', kind: 'bodypack receiver', iem: true, uv: 2.5, ranges: G2_IEM_RANGES, windowMHz: 36, freqs: 1440, factoryBanks: 8, chPerBank: 12, userBanks: 1, acr: 70, im: 70, blk: 80, diversity: 'none',
+    squelchOptions: { values: [5, 15, 25], names: ['Low', 'Middle', 'High'] },
+    sources: SRC2.iemg2, caveat: 'Under 2.5 uV (-99.0 dBm) for 52 dBA S/N; non-diversity.' }),
+  // ---- Shure PSM 900 and PSM 1000 -----------------------------------------------------------------------------------
+  psmTx({ id: 'shure-p9t', model: 'PSM 900 P9T', ranges: PSM900_RANGES, windowMHz: 36, perBank: 20, sources: SRC2.psm900,
+    caveat: '10 / 50 / 100 mW depending on region and band (two data sheet editions differ, inferred); tuning window 36-40 MHz (lower bound used); step size not published (25 kHz assumed). Companded, +-34 kHz at 1 kHz.' }),
+  senRx({ id: 'shure-p9ra', mfr: 'Shure', model: 'PSM 900 P9RA', kind: 'bodypack receiver', iem: true, uv: 2.2, criterion: '20 dB SINAD', cnr: 10.2, ranges: PSM900_RANGES, windowMHz: 36, windowConf: I, stepKhz: 25, stepConf: A, freqs: undefined, factoryBanks: null, pilotSq: false,
+    acr: 70, im: 70, blk: 80, diversity: 'none', diversityConf: A, squelchOptions: null, squelchDbm: -99.6, dev: 34, peak: 34, noAntenna: true,
+    extra: { sinadDb: 20, squelchSinadDb: 22, squelchSinadToleranceDb: 3, volumeLimiterSteps: { min: 3, max: 9 }, imageRejectionDb: 90, activeRfGainDb: 31, compander: 'Audio Reference Companding', compatibleFrequenciesPerBand: 20 },
+    extraConf: { sinadDb: S, squelchSinadDb: S, squelchSinadToleranceDb: S, volumeLimiterSteps: S, imageRejectionDb: S, activeRfGainDb: S, compander: S, compatibleFrequenciesPerBand: S }, uvConf: S, devConf: S,
+    sources: SRC2.psm900, caveat: `${PSM_SINAD_NOTE} Squelch default 22 dB SINAD mapped to -99.6 dBm (assumed). Diversity not stated (assumed none).` }),
+  psmTx({ id: 'shure-p10t', model: 'PSM 1000 P10T', ranges: PSM1000_RANGES, windowMHz: 72, perBank: 39, sources: SRC2.psm1000,
+    caveat: '10 / 50 / 100 mW depending on region and band; tuning window 72-80 MHz (lower bound used); step size not published (25 kHz assumed). Shure lists the P10T as discontinued. Companded, +-34 kHz at 1 kHz.' }),
+  senRx({ id: 'shure-p10r', mfr: 'Shure', model: 'PSM 1000 P10R+', kind: 'bodypack receiver', iem: true, uv: 2.2, criterion: '20 dB SINAD', cnr: 10.2, ranges: PSM1000_RANGES, windowMHz: 72, windowConf: I, stepKhz: 25, stepConf: A, freqs: undefined, factoryBanks: null, pilotSq: false,
+    acr: 70, im: 70, blk: 80, diversity: 'none', diversityConf: A, squelchOptions: null, squelchDbm: -99.6, dev: 34, peak: 34, noAntenna: true,
+    extra: { sinadDb: 20, squelchSinadDb: 22, squelchSinadToleranceDb: 3, volumeLimiterSteps: { min: 3, max: 9 }, imageRejectionDb: 90, activeRfGainDb: 31, compander: 'Audio Reference Companding', compatibleFrequenciesPerBand: 39 },
+    extraConf: { sinadDb: S, squelchSinadDb: S, squelchSinadToleranceDb: S, volumeLimiterSteps: S, imageRejectionDb: S, activeRfGainDb: S, compander: S, compatibleFrequenciesPerBand: S }, uvConf: S, devConf: S,
+    sources: SRC2.psm1000, caveat: `${PSM_SINAD_NOTE} Squelch default 22 dB SINAD mapped to -99.6 dBm (assumed). Diversity not stated (assumed none). The limiter and processing detail were not found.` }),
 ];
 
 const FM_PRESET_LIST = [
@@ -233,6 +362,7 @@ const FM_PRESET_LIST = [
       agcRangeDb: 65, p1dBDbm: -18, iip3Dbm: -8, maxInputDbm: -10, overloadHysteresisDb: 3, hotMarginDb: 10,
       squelch: { thresholdDbm: -92, hysteresisDb: 3 },
       diversityMode: 'true',
+      typicalSensitivityUv: 1.5, typicalSensitivityDbm: -103.5,   // 1.5 uV typ. for 52 dBA S/N (EM 3732-II data sheet), -107 + 20 log10(1.5)
       deviationKhz: 40,
       tuningStepKhz: 5,
       tuningWindows: [
@@ -246,11 +376,11 @@ const FM_PRESET_LIST = [
     confidence: {
       sensitivityDbm: A, thresholdSensitivityDbm: A, channelBwKhz: A, requiredCnrDb: I, noiseFigureDb: A,
       agcRangeDb: A, p1dBDbm: A, iip3Dbm: A, maxInputDbm: A, overloadHysteresisDb: A, hotMarginDb: A,
-      squelch: A, diversityMode: A, deviationKhz: I, tuningStepKhz: S, tuningWindows: S,
+      typicalSensitivityUv: S, typicalSensitivityDbm: I, squelch: A, diversityMode: A, deviationKhz: I, tuningStepKhz: S, tuningWindows: S,
       adjacentChannelRejectionDb: S, intermodRejectionMinDb: S, blockingRejectionMinDb: S,
     },
     sources: ['Sennheiser SKM 5200 and EM 3732 manuals (original generation)', 'live-production.tv product listing'],
-    caveat: 'Sensitivity is not published: derived here as kTB(200 kHz) + NF 9 dB + 13 dB CNR (FM threshold plus margin), all assumed. The 80 dB intermod and blocking rejection figures are recorded but not mapped to an IIP3.',
+    caveat: 'The planner sensitivity stays a derived class value (kTB(200 kHz) + NF 9 dB + 13 dB CNR, assumed); the data sheet typical of 1.5 uV (-103.5 dBm) for 52 dBA S/N is stored as typicalSensitivityDbm. The 80 dB intermod and blocking figures are recorded but not mapped to an IIP3.',
   },
   // ---- Shure UR2 handheld transmitter ------------------------------------------------------------------------------
   {
@@ -341,6 +471,7 @@ const FM_PRESET_LIST = [
     caveat: 'The 30 dB SINAD figure is used as the planner sensitivity; band names and edges (H4, J5, L3, R9) are assumed, only the 518-865 MHz span and 60 MHz window are sourced. Noise figure, noise squelch threshold and the diversity mapping are assumed. Keep transmitters at least 6 m away (overload guidance, assumed).',
   },
   ...SENNHEISER_G3_2000,
+  ...SENNHEISER_MORE,
 ];
 
 // ---- Registry ------------------------------------------------------------------------------------------------------
@@ -427,7 +558,10 @@ export function applyFmPreset(link, presetId, opts = {}) {
     delete out.rx.requiredSnrDb;
     out.rx.squelch = { enabled: true, thresholdDbm: p.params.squelch.thresholdDbm, hysteresisDb: p.params.squelch.hysteresisDb };
     out.rx.overload = {};
-    if (out.rx.diversity) { out.rx.diversity.enabled = true; out.rx.diversity.mode = p.params.diversityMode; }
+    if (out.rx.diversity) {
+      if (p.params.diversityMode === 'none') out.rx.diversity.enabled = false;   // non-diversity receiver
+      else { out.rx.diversity.enabled = true; out.rx.diversity.mode = p.params.diversityMode; }
+    }
   }
   return out;
 }
