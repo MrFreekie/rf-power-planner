@@ -3,6 +3,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fohScene, fohReport, EXAMPLES } from '../js/examples.js';
 import { validateScene } from '../js/model/scene.js';
+import { overloadStep } from '../js/model/overload.js';
+import { RX_PRESETS } from '../js/model/rx-params.js';
 
 const near = (a, b, tol, msg) => assert.ok(Math.abs(a - b) <= tol, `${msg || ''} got ${a}, expected ${b} +/- ${tol}`);
 const f1 = (x) => x.toFixed(1);
@@ -28,10 +30,22 @@ test('raised antennas recover the crowd loss for the mic link (about 27 dB) and 
 
 test('remote antennas: free of the crowd, booster at the antenna end beats the booster after the cable by the cable loss, cable loss reported', () => {
   assert.equal(remote.mic.audienceLossDb, 0);
-  assert.ok(remote.mic.marginDb - rack.mic.marginDb > 3);
+  assert.ok(remote.mic.marginDb - rack.mic.marginDb > 1); // with the 12 dB pad the difference is small (1.3 dB): the pad, not the cable, sets the noise at the receiver input
   assert.ok(remote.mic.marginDb > rof.mic.marginDb);
   assert.ok(remote.iem.chainLossDb > 3 && remote.iem.chainLossDb < 8); // 45 m of LMR-400 at 614 MHz
   assert.ok(remote.mic.marginDb - low.mic.marginDb > 60);
+});
+
+test('remote chains end with a pad: the receiver input is ok (not hot), 12 dB clear of hot by P1dB, and the unpadded chain would have been hot', () => {
+  const cfg = RX_PRESETS['mic-receiver-typical'];
+  for (const o of [{}, { remote: 'booster-at-rack' }, { remote: 'rof' }]) {
+    const s = fohScene('remote', o), r = fohReport(s), ov = overloadStep(null, r.mic.inputPowerDbm, { ...cfg, ...(s.links[0].rx.overload || {}) });
+    assert.equal(ov.level, 'ok', JSON.stringify(o)); assert.ok(ov.headroomDb > 10, JSON.stringify(o));
+    const bare = structuredClone(s); bare.links[0].chain = bare.links[0].chain.filter((c) => c.kind !== 'attenuator');
+    const ovb = overloadStep(null, fohReport(bare).mic.inputPowerDbm, { ...cfg, ...(bare.links[0].rx.overload || {}) });
+    assert.equal(ovb.level, 'hot', JSON.stringify(o) + ' unpadded'); assert.ok(ovb.headroomDb < 4);
+  }
+  near(fohReport(fohScene('remote')).mic.inputPowerDbm, -31.0, 0.05);
 });
 
 test('all variants validate and the three notes quote the model', () => {
@@ -39,6 +53,6 @@ test('all variants validate and the three notes quote the model', () => {
   const seated = fohReport(fohScene('low', { kind: 'seated' })), d3 = fohReport(fohScene('low', { densityPerM2: 3 }));
   for (const v of [f1(low.mic.audienceLossDb), f1(low.mic.marginDb), f1(low.mic.inputPowerDbm), f1(low.iem.marginDb), f1(d3.mic.marginDb), f1(seated.mic.marginDb), f1(seated.iem.marginDb)]) assert.ok(note('foh-mic-iem-audience').includes(v), v);
   for (const v of [f1(raised.mic.inputPowerDbm), f1(low.mic.marginDb), f1(raised.mic.marginDb), f1(raised.mic.marginDb - low.mic.marginDb), f1(raised.iem.marginDb), f1(raised.iem.marginDb - low.iem.marginDb), f1(raised.iem.audienceLossDb)]) assert.ok(note('foh-raised-antennas').includes(v), v);
-  for (const v of [f1(remote.mic.marginDb), f1(remote.iem.marginDb), f1(remote.iem.chainLossDb), f1(remote.mic.marginDb - rack.mic.marginDb), f1(rack.mic.marginDb), f1(rof.mic.marginDb), f1(remote.mic.marginDb - low.mic.marginDb), f1(remote.iem.marginDb - low.iem.marginDb)]) assert.ok(note('foh-remote-antennas').includes(v), v);
+  for (const v of [f1(remote.mic.marginDb), f1(remote.iem.marginDb), f1(remote.iem.chainLossDb), f1(rack.mic.marginDb), f1(rof.mic.marginDb), f1(remote.mic.marginDb - low.mic.marginDb), f1(remote.iem.marginDb - low.iem.marginDb), f1(remote.mic.inputPowerDbm), f1(-18 - remote.mic.inputPowerDbm), f1(remote.mic.inputPowerDbm + 12), f1(fohReport(fohScene('remote', { remote: 'rof' })).mic.inputPowerDbm)]) assert.ok(note('foh-remote-antennas').includes(v), v);
   for (const id of ['foh-mic-iem-audience', 'foh-raised-antennas', 'foh-remote-antennas']) assert.ok(note(id).split('. ').length <= 4, id);
 });

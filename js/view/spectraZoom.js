@@ -10,12 +10,13 @@ export function createZoom({ doc, hostFactory, describe, table, draw, onClose })
   const title = el('h2', null, '', { id: 'spectrum-dialog-title' });
   const closeBtn = el('button', 'spectrum-dialog-close', 'Close', { type: 'button' });
   head.append(title, closeBtn);
+  const slot = el('div', 'spectrum-dialog-slot');
   const canvas = el('canvas', 'spectrum-dialog-canvas', null, { role: 'img', tabindex: '0' });
   const sum = el('p', 'spectrum-dialog-sum', '', { role: 'status', 'aria-live': 'off' });
   const details = el('details', 'spectrum-dialog-table'), summary = el('summary', null, 'Table of values');
   const tableWrap = el('div', 'spectrum-dialog-tablewrap');
   details.append(summary, tableWrap);
-  dlg.append(head, canvas, sum, details);
+  dlg.append(head, canvas, slot, sum, details);
   doc.body.append(dlg);
 
   let id = null, opener = null, host = null, hover = null, lastTable = '';
@@ -67,7 +68,7 @@ export function createZoom({ doc, hostFactory, describe, table, draw, onClose })
     const b = canvas.getBoundingClientRect();
     if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); hover = Math.min(b.width, Math.max(0, (hover ?? b.width / 2) + (e.key === 'ArrowRight' ? 16 : -16))); if (host) host.invalidate(); }
   });
-  return { open, close, update, isOpen: () => !!dlg.open, dialog: dlg, canvas, title, summary: sum, details, closeBtn, state, destroy() { if (dlg.open) dlg.close(); if (host) host.destroy(); dlg.remove(); } };
+  return { open, close, update, isOpen: () => !!dlg.open, dialog: dlg, canvas, slot, title, summary: sum, details, closeBtn, state, destroy() { if (dlg.open) dlg.close(); if (host) host.destroy(); dlg.remove(); } };
 }
 
 /** Decimate to at most `max` rows, keeping the first and last. */

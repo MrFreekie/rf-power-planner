@@ -238,7 +238,7 @@ export function p2pScene(id, { mastM, hill = true } = {}) {
  * Side-of-stage mix position (a 4 x 3 m area at x 0..4, y 0..3; the stage is towards +y): one IEM transmitter and a diversity pair of mic
  * receive antennas a few metres apart. sosScene(id) builds three scenes, all free-space so the coupling is Friis plus the antenna patterns:
  *   'too-close':   IEM paddle 0.5 m from the mic receive paddle, facing each other, same polarisation, a booster on the mic side, 20 dBm.
- *   'crossed-pol': 3.3 m apart, IEM vertical, mic antennas horizontal, both paddles aimed at the stage so each sits in the other's side
+ *   'crossed-pol': 3.3 m apart, IEM vertical, mic antennas slant 45 degrees, both paddles aimed at the stage so each sits in the other's side
  *                  lobe, a rack screen in between (wood-class, assumed), no booster, 17 dBm.
  *   'best':        IEM paddle on a stand at the stage-side edge aiming at the stage, mic paddles forward and high on a stand (remote, 15 m of
  *                  cable) with the IEM antenna behind them, a 604-608 MHz bandpass filter (40 dB rejection, assumed) on the mic path, 10 dBm.
@@ -252,10 +252,10 @@ export function sosScene(id) {
       rxA: { x: 2.0, y: 1.5, z: 1.5 }, rxB: { x: 2.0, y: 2.2, z: 1.5 }, rxAz: 270, rxPol: 'vertical',
       chain: () => [createChainItem('booster', { gainDb: 12, nfDb: 4 }), createChainItem('cable', { cableType: 'rg58', lengthM: 3 })], wall: false },
     'crossed-pol': { iemPos: { x: 3.5, y: 1.0, z: 1.5 }, iemAnt: paddle(0, 'vertical'), pw: 17,
-      rxA: { x: 0.2, y: 0.5, z: 1.5 }, rxB: { x: 0.2, y: 1.4, z: 1.5 }, rxAz: 0, rxPol: 'horizontal',
+      rxA: { x: 0.2, y: 0.5, z: 1.5 }, rxB: { x: 0.2, y: 1.4, z: 1.5 }, rxAz: 0, rxPol: 'slant45',
       chain: () => [createChainItem('cable', { cableType: 'rg58', lengthM: 3 })], wall: true },
     best: { iemPos: { x: 3.5, y: 2.8, z: 1.8 }, iemAnt: paddle(0, 'vertical'), pw: 10,
-      rxA: { x: -7.0, y: 0.8, z: 3.0 }, rxB: { x: -6.0, y: 0.8, z: 3.0 }, rxAz: 0, rxPol: 'horizontal',
+      rxA: { x: -7.0, y: 0.8, z: 3.0 }, rxB: { x: -6.0, y: 0.8, z: 3.0 }, rxAz: 0, rxPol: 'slant45',
       chain: () => [createChainItem('filter', { lossDb: 1.5, filterType: 'bandpass', passLoMHz: 604, passHiMHz: 608, rejectionDb: 40 }), createChainItem('cable', { cableType: 'lmr-240', lengthM: 15 })], wall: false },
   }[id];
   if (!cfg) return null;
@@ -340,9 +340,11 @@ export function fohScene(variant, { kind = 'standing', densityPerM2, remote = 'c
     l.rx.pos = { ...at }; l.rx.antenna = pad();
     l.rx.diversity.enabled = true; l.rx.diversity.antennaB.pos = { x: at.x + 0.6, y: at.y, z: at.z };
     const remoteChain = () => {
-      if (remote === 'rof') return [createChainItemFromPreset('rof-active-lna', { fibreKm: 0.05 })];
+      // a 12 dB pad at the receiver input: without it the booster and the active fibre leave the receiver within 1 to 3 dB of P1dB (hot)
+      const pad = () => createChainItem('attenuator', { lossDb: 12 });
+      if (remote === 'rof') return [createChainItemFromPreset('rof-active-lna', { fibreKm: 0.05 }), pad()];
       const boost = createChainItem('booster', { gainDb: 15, nfDb: 3 }), cab = createChainItem('cable', { cableType: 'lmr-400', lengthM: 45 });
-      return remote === 'booster-at-rack' ? [cab, boost] : [boost, cab];
+      return remote === 'booster-at-rack' ? [cab, boost, pad()] : [boost, cab, pad()];
     };
     l.chain = variant === 'remote' ? remoteChain() : [createChainItem('cable', { cableType: 'lmr-400', lengthM: 5 })];
     const iem = createDefaultLink('iem');
@@ -376,9 +378,12 @@ export function fohReport(scene) {
  *   rx 'back': paddle backstage 2.5 m BEHIND the wall (rear side of the wall, the wall is in the direct path), aimed at the performer.
  *   txBehind: the performer's transmitter is 1 m BEHIND the wall (through-wall case: the wall is in the direct path).
  * preset: noise preset ('off', 'class-b', 'class-a', 'noisy'); construction: solid-metal | solid-plastic | mesh-metal | mesh-plastic | mesh-carbon.
+ * sections: an array of constructions, for example ['solid-metal', 'mesh-metal', 'mesh-carbon']: one wall section and one mic link per entry, side by side
+ * 16 m apart on a wider stage, each link with its own receiver (use rx 'back' to compare through-wall loss). links[i] belongs to sections[i]; the
+ * sections all use `preset`, so each receiver also hears the other two walls (that cross-talk is part of the figures).
  * All wall figures are assumed (ledwall.js).
  */
-export function videoWallScene({ preset = 'class-a', construction = 'solid-metal', holeSizeMm, rx = 'foh', txBehind = false } = {}) {
+export function videoWallScene({ preset = 'class-a', construction = 'solid-metal', holeSizeMm, rx = 'foh', txBehind = false, sections } = {}) {
   const rxCfg = { foh: { pos: { x: 15, y: 30, z: 1.5 }, az: 180 }, near: { pos: { x: 15, y: 6, z: 1.5 }, az: 0 }, side: { pos: { x: 3, y: 14, z: 1.5 }, az: 116 }, back: { pos: { x: 15, y: 0.5, z: 1.5 }, az: 0 } }[rx];
   if (!rxCfg) return null;
   return make('mic', (s, l) => {
@@ -393,15 +398,30 @@ export function videoWallScene({ preset = 'class-a', construction = 'solid-metal
     l.rx.antenna = { type: 'paddle', gainDbi: 7, orientation: { az: rx === 'near' ? 0 : rxCfg.az, el: 0 }, polarisation: 'vertical' };
     l.rx.diversity.enabled = false;
     l.chain = [createChainItem('cable', { cableType: 'lmr-400', lengthM: 5 })];
+    if (Array.isArray(sections) && sections.length > 1) {
+      const wall0 = s.reflectors[0];
+      s.stage = { width: 30 + 16 * (sections.length - 1), depth: 40 };
+      sections.forEach((c, i) => {
+        const dx = 16 * i;
+        const shift = (q) => { q.x += dx; };
+        if (i === 0) { wall0.construction = c; wall0.material = c.endsWith('plastic') ? 'drywall' : 'metal'; wall0.name = `LED video wall (${c})`; return; }
+        const w = structuredClone(wall0); w.id = newId('refl'); w.construction = c; w.material = c.endsWith('plastic') ? 'drywall' : 'metal'; w.name = `LED video wall (${c})`;
+        shift(w.p1); shift(w.p2); s.reflectors.push(w);
+        const k = structuredClone(l); k.id = newId('link'); k.tx.id = newId('tx'); k.rx.id = newId('rx'); k.name = `Mic behind ${c}`;
+        shift(k.tx.pos); shift(k.rx.pos); if (k.rx.diversity && k.rx.diversity.antennaB && k.rx.diversity.antennaB.pos) shift(k.rx.diversity.antennaB.pos);
+        s.links.push(k);
+      });
+      l.name = `Mic behind ${sections[0]}`;
+    }
   });
 }
 
-/** videoWallReport(scene) -> { rxPowerDbm, marginDb, noiseDbm, riseDb, marginChangeDb, wallLossDb (direct path), floorDbm, distanceToWallM, reflectionDb } */
-export function videoWallReport(scene) {
-  const l = scene.links[0], r = solveLink(scene, l);
+/** videoWallReport(scene, linkIndex = 0) -> { rxPowerDbm, marginDb, noiseDbm, riseDb, marginChangeDb, wallLossDb (direct path), floorDbm, distanceToWallM, reflectionDb } */
+export function videoWallReport(scene, i = 0) {
+  const l = scene.links[i], r = solveLink(scene, l);
   const w = r.wallNoise;
   const wall = r.paths.find((p) => p.kind === 'wall');
-  return { rxPowerDbm: r.rxPowerDbm, marginDb: r.marginDb, noiseDbm: w ? w.dbm : -Infinity, riseDb: w ? w.riseDb : 0, marginChangeDb: w ? w.marginChangeDb : 0, floorDbm: r.cascade.noiseFloorDbm, wallLossDb: r.paths[0].wallLossDb || 0, distanceToWallM: w ? w.walls[0].distanceM : null, reflectionDb: wall ? wall.gainDb - r.paths[0].gainDb : null };
+  return { rxPowerDbm: r.rxPowerDbm, marginDb: r.marginDb, noiseDbm: w ? w.dbm : -Infinity, riseDb: w ? w.riseDb : 0, marginChangeDb: w ? w.marginChangeDb : 0, floorDbm: r.cascade.noiseFloorDbm, wallLossDb: r.paths[0].wallLossDb || 0, distanceToWallM: w ? w.walls[Math.min(i, w.walls.length - 1)].distanceM : null, reflectionDb: wall ? wall.gainDb - r.paths[0].gainDb : null };
 }
 
 /**
@@ -532,6 +552,109 @@ export function iem8Scene(variant, { omniDistanceM = 2.5, omniAt = 'front', tx8I
       };
     }
   });
+}
+
+/**
+ * Review-batch examples (chain parts, polarisation, antenna contact, noise, coverage, fifth-order plans, p2p ground reflection).
+ * reviewScene(id, opts) builds the scenes; every figure quoted in a note is recomputed in tests/review-examples.test.mjs. Part losses,
+ * isolations and the absorption of a wet body are assumed round numbers for teaching (chain-presets.js and library.js carry the S/I/U flags).
+ *   'splitter-two-way-receiver'  opts.part = 'passive' (default) | 'active' | 'none'
+ *   'coupler-monitor-tap'        opts.part = 'coupler' (default) | 'none'
+ *   'lna-no-filter' / 'filter-before-booster'   the same scene as sosScene('crossed-pol'), a 20 dB LNA with or without the bandpass filter ahead of it
+ *   'bias-tee-booster-up-the-mast'  opts.block = true puts a DC block between the cable and the bias tee (the 'bias-tee-into-dcblock' example)
+ *   'body-contact-sweaty-bodypack'  opts.contact / opts.dampness override 'skin' / 'wet'
+ *   'tilted-whip-vs-vertical'       opts.tiltDeg (default 60)
+ *   'circular-polarisation-wanted-mic'  opts.rx = 'circular' (default, helical-cp) | 'vertical'
+ *   'ground-plane-quarterwave'      opts.groundPlane = 'none' (default) | 'body' | 'rack' | 'large'
+ *   'coverage-modes-compare'        two antennas 1.5 m apart and a front zone; opts.mode sets scene.coverage.mode (default 'power')
+ *   'external-noise-urban-vs-quiet' opts.noise = 'urban' (default) | 'quiet' | 0
+ *   'audio-bandwidth-iem-vs-mic'    a mic link with a user audio bandwidth (opts.audioBandwidthHz, default 9000; null = none set)
+ *   'imd-iem-8-with-fifth-order'    opts.channels = how many of the eight IEM8 channels (default 5)
+ *   'pad-on-iem-transmitter'        bandScene('iem-tx-wrong-band', { pad: true }): the 6 dB pad in front of a badly matched transmit antenna
+ *   'p2p-ground-reflection'         p2pScene('delay') moved to 40 m (opts.distanceM), paddles horizontal, with the flat-earth ground reflection on (opts.groundReflection = false for the direct ray only)
+ */
+export function reviewScene(id, opts = {}) {
+  const hall = (s, l, f = 606.1) => {
+    s.stage = { width: 30, depth: 20 }; s.environment.floor = 'wood'; l.freqMHz = f;
+    l.tx.pos = { x: 3, y: 10, z: 1.5 }; l.rx.pos = { x: 13, y: 10, z: 1.2 }; l.rx.diversity.antennaB.pos = { x: 13, y: 9.4, z: 1.2 };
+    l.tx.antenna = omni(); l.rx.antenna = omni();
+  };
+  const rg58 = (m) => createChainItem('cable', { cableType: 'rg58', lengthM: m });
+  switch (id) {
+    case 'splitter-two-way-receiver': return make('mic', (s, l) => {
+      hall(s, l); l.name = 'Mic to two receivers';
+      const part = opts.part || 'passive';
+      l.chain = part === 'none' ? [rg58(5)] : [createChainItemFromPreset(part === 'active' ? 'active-splitter-4' : 'splitter-2'), rg58(5)];
+    });
+    case 'coupler-monitor-tap': return make('iem', (s, l) => {
+      hall(s, l, 606.1); l.name = 'IEM with monitor tap'; l.tx.powerDbm = 17;
+      l.chain = opts.part === 'none' ? [rg58(3)] : [createChainItemFromPreset('coupler-20'), rg58(3)];
+    });
+    case 'lna-no-filter': case 'filter-before-booster': {
+      const s = sosScene('crossed-pol');
+      const lna = () => createChainItem('booster', { gainDb: 20, nfDb: 1, iip3Dbm: 14 });
+      const filt = () => createChainItem('filter', { lossDb: 1.5, filterType: 'bandpass', passLoMHz: 604, passHiMHz: 608, rejectionDb: 40 });
+      const chain = id === 'lna-no-filter' ? [lna(), rg58(3)] : [filt(), lna(), rg58(3)];
+      s.links[0].chain = chain; s.imd.rxChain = structuredClone(chain);
+      return s;
+    }
+    case 'bias-tee-booster-up-the-mast': return make('mic', (s, l) => {
+      hall(s, l); l.name = 'Mic, booster up the mast';
+      l.chain = [createChainItemFromPreset('booster-12'), createChainItem('cable', { cableType: 'lmr-400', lengthM: 45 }), ...(opts.block ? [createChainItemFromPreset('dcblock')] : []), createChainItemFromPreset('biastee')];
+    });
+    case 'body-contact-sweaty-bodypack': return make('mic', (s, l) => {
+      hall(s, l); s.environment.model = 'free-space'; l.name = 'Sweaty bodypack';
+      l.tx.antenna = { type: 'body', gainDbi: -3, orientation: { az: 0, el: 90 }, polarisation: 'vertical', contact: opts.contact || 'skin', dampness: opts.dampness || 'wet' };
+      l.chain = [rg58(5)];
+    });
+    case 'tilted-whip-vs-vertical': return make('mic', (s, l) => {
+      hall(s, l); s.environment.model = 'free-space'; l.name = 'Tilted bodypack whip';
+      l.tx.antenna = { ...omni(), tiltDeg: opts.tiltDeg === undefined ? 60 : opts.tiltDeg }; l.chain = [rg58(5)];
+    });
+    case 'circular-polarisation-wanted-mic': return make('mic', (s, l) => {
+      hall(s, l); s.environment.model = 'free-space'; l.name = 'Mic, whip lying down';
+      l.tx.antenna = { ...omni(), tiltDeg: 90 };
+      l.rx.antenna = opts.rx === 'vertical' ? omni() : { type: 'helical-cp', gainDbi: 8, orientation: { az: 180, el: 0 }, polarisation: 'rhcp' };
+      l.chain = [rg58(5)];
+    });
+    case 'ground-plane-quarterwave': return make('mic', (s, l) => {
+      hall(s, l); s.environment.model = 'free-space'; l.name = 'Quarter-wave receive whip';
+      l.rx.antenna = { type: 'quarterwave', gainDbi: 1, orientation: { az: 0, el: 90 }, polarisation: 'vertical', groundPlane: opts.groundPlane || 'none' };
+      l.chain = [rg58(5)];
+    });
+    case 'external-noise-urban-vs-quiet': return make('mic', (s, l) => {
+      hall(s, l); l.name = 'Mic in a noisy city'; l.rx.pos = { x: 28, y: 10, z: 1.2 }; l.rx.diversity.antennaB.pos = { x: 28, y: 9.4, z: 1.2 };
+      l.tx.powerDbm = 10; l.chain = [createChainItem('booster', { gainDb: 20, nfDb: 1 }), rg58(20)];
+      s.environment.externalNoise = opts.noise === undefined ? 'urban' : opts.noise;
+    });
+    case 'audio-bandwidth-iem-vs-mic': return make('mic', (s, l) => {
+      hall(s, l); l.name = 'Narrow-band mic'; l.chain = [rg58(5)];
+      if (opts.audioBandwidthHz !== null) l.tx.audioBandwidthHz = opts.audioBandwidthHz === undefined ? 9000 : opts.audioBandwidthHz;
+    });
+    case 'p2p-ground-reflection': {
+      const s = p2pScene('delay'), l = s.links[0], d = opts.distanceM || 40; // short enough (40 m) to sit inside the lobe structure of 3 m masts at 606 MHz
+      l.rx.pos = { ...l.rx.pos, x: l.tx.pos.x + d }; l.rx.diversity.antennaB.pos = { ...l.rx.diversity.antennaB.pos, x: l.tx.pos.x + d };
+      l.tx.antenna.polarisation = 'horizontal'; l.rx.antenna.polarisation = 'horizontal'; // paddles lying flat: the ground reflection is strongest for horizontal polarisation
+      if (opts.groundReflection !== false) { l.p2p.groundReflection = true; s.environment.model = 'two-ray'; }
+      return s;
+    }
+    case 'coverage-modes-compare': return make('iem', (s, l) => {
+      s.stage = { width: 16, depth: 10 }; s.coverage = { mode: opts.mode || 'power' };
+      l.tx.pos = { x: 7, y: 2, z: 2.5 }; l.rx.pos = { x: 8, y: 6, z: 1.5 };
+      l.tx.antenna = { type: 'omni', gainDbi: 0, orientation: { az: 0, el: 90 } };
+      l.chain = [rg58(10)];
+      l.branches = [{}, createBranch({ name: 'Antenna 2', pos: { x: 8.5, y: 2, z: 2.5 }, antenna: { type: 'omni', gainDbi: 0, orientation: { az: 0, el: 90 } }, chain: [rg58(10)] })];
+      s.zones = [createZone({ id: newId('zone'), name: 'Front of stage', polygon: [{ x: 3, y: 4 }, { x: 13, y: 4 }, { x: 13, y: 8 }, { x: 3, y: 8 }], zMin: 0, zMax: 2, requiredMarginDb: 10 })];
+    });
+    case 'imd-iem-8-with-fifth-order': {
+      const n = opts.channels || 5, sc = iem8Scene('A');
+      sc.imd.transmitters = sc.imd.transmitters.slice(0, n);
+      sc.imd.topology.groups[0].members = sc.imd.transmitters.map((t) => t.id);
+      return sc;
+    }
+    case 'pad-on-iem-transmitter': return bandScene('iem-tx-wrong-band', { pad: true });
+    default: return null;
+  }
 }
 
 export const EXAMPLES = [
@@ -810,7 +933,7 @@ export const EXAMPLES = [
   {
     id: 'imd-iem-8-combined',
     title: 'Eight IEMs: all through one isolated 8-way combiner (A)',
-    note: 'Eight coordinated IEM transmitters (third-order clean plan, 606.1 to 623.7 MHz, 25 mW each) feed one isolated 8-way combiner (4.5 dB through, 45 dB port isolation, assumed) and one directional antenna. every channel loses the same 4.5 dB and reaches the bodypack at about -37.3 dBm; the worst pair of transmitters is 45.0 dB apart, so the strongest intermod product made in an output stage (2f1-f2) is only -102.3 dBm at the bodypack, -64.9 dBc; Pros: one antenna, balanced levels, isolation from the combiner. Cons: 4.5 dB lost on every channel, one point of failure, a bigger unit that is harder to expand; Compare with the 7 plus 1 and 4 plus 4 examples (same hall, same frequencies). Figures are illustrative planning numbers.',
+    note: 'Eight coordinated IEM transmitters (606.1 to 623.7 MHz, 25 mW each, no third-order product in any channel) feed one isolated 8-way combiner (4.5 dB through, 45 dB port isolation, assumed) and one directional antenna. Every channel loses the same 4.5 dB and reaches the bodypack at about -37.3 dBm; the worst pair of transmitters is 45.0 dB apart, so the strongest product made in an output stage (2f1-f2) is only -102.3 dBm at the bodypack, -64.9 dBc. The plan is not free: 158 fifth-order products still land in channels and lift the noise floor by 12.6 dB. Pros: one antenna, balanced levels; cons: 4.5 dB lost per channel, one point of failure; compare the 7 plus 1 and 4 plus 4 examples (figures illustrative).',
     build: () => ({ scene: iem8Scene('A') }),
   },
   {
@@ -905,14 +1028,14 @@ export const EXAMPLES = [
   },
   {
     id: 'sos-iem-crossed-pol',
-    title: 'Side of stage: 3.3 m apart, crossed polarisation, rack in between',
-    note: 'The IEM antenna is vertical and the mic antennas horizontal (15 dB cross-polar floor, assumed), 3.3 m apart, both aimed at the stage so each sits in the other side lobe, with a rack screen (2.5 dB, assumed) between. Coupling is 74.3 dB, the IEM reaches the receiver at -58.6 dBm with 40.6 dB of headroom, desense is 0 and the wanted margin stays 37.7 dB. The cost is one polarisation choice; a vertical IEM against a vertical mic antenna would give back 15 dB of coupling.',
+    title: 'Side of stage: 3.3 m apart, slant mic antennas, rack in between',
+    note: 'The IEM antenna is vertical and the mic antennas slant 45 degrees, so the wanted mic loses 3 dB of polarisation (never a null) and the IEM is only 3 dB cross-polar; they are 3.3 m apart, both paddles aimed at the stage so each sits in the other side lobe, with a rack screen (2.5 dB, assumed) between. Coupling is 59.4 dB, the IEM reaches the receiver at -43.7 dBm with 25.7 dB of headroom, and desense is 0. The wanted mic keeps 50.1 dB of margin, which already includes that 3 dB. A horizontal mic antenna would isolate 14.9 dB more but cost the wanted mic 15.0 dB, so distance and the antenna patterns do the work here.',
     build: () => ({ scene: sosScene('crossed-pol') }),
   },
   {
     id: 'sos-iem-best-practice',
     title: 'Side of stage: best practice (filter, low power, remote antennas)',
-    note: 'The IEM runs 10 mW (10 dBm) from a stand at the stage-side edge aimed at the stage, and the IEM link still has 40.8 dB of margin. The mic antennas are 10.8 m away, high and behind its beam, crossed in polarisation, with a 604 to 608 MHz bandpass filter (40 dB rejection, assumed) and 15 m of cable. Coupling is 72.0 dB but only -106.6 dBm reaches the receiver (88.6 dB of headroom, no desense) and the wanted mic keeps 32.1 dB. Distance and the filter do most of the work; power only costs the IEM margin you need.',
+    note: 'The IEM runs 10 mW (10 dBm) from a stand at the stage-side edge aimed at the stage, and the IEM link still has 40.8 dB of margin. The mic antennas are 10.8 m away, high and behind its beam, slant 45 degrees so the wanted mic loses only 3 dB, with a 604 to 608 MHz bandpass filter (40 dB rejection, assumed) and 15 m of cable. Coupling is 66.6 dB but only -101.1 dBm reaches the receiver input (83.1 dB of headroom, no desense) and the wanted mic keeps 44.1 dB, a margin that already includes the polarisation loss. Distance and the filter do most of the work; power only costs the IEM margin you need.',
     build: () => ({ scene: sosScene('best') }),
   },
   {
@@ -930,7 +1053,7 @@ export const EXAMPLES = [
   {
     id: 'foh-remote-antennas',
     title: 'FOH: antennas at the stage side, 45 m of cable back to FOH',
-    note: 'The antennas move to the stage side at 3.0 m, 9 m from the performer and outside the crowd, with 45 m of LMR-400 back to FOH. With a 15 dB booster at the antenna end the mic margin is 69.8 dB and the IEM link, which pays 4.9 dB of cable and has no booster (power limit), has 52.1 dB. The same booster after the cable costs 4.1 dB (65.7 dB), and the active RF over fibre preset (assumed figures) gives 61.6 dB. Against the low antennas that recovers 67.8 dB on the mic and 41.5 dB on the IEM.',
+    note: 'The antennas move to the stage side at 3.0 m, 9 m from the performer and outside the crowd, with 45 m of LMR-400 back to FOH. A 15 dB booster at the antenna end and a 12 dB pad at the receiver input give a mic margin of 63.2 dB and an input of -31.0 dBm, 13.0 dB under P1dB (level ok); without the pad the input would be -19.0 dBm, 1.0 dB under P1dB and hot. The IEM link pays 4.9 dB of cable and has no booster (power limit), so it keeps 52.1 dB; the same booster after the cable gives 61.9 dB, and the active RF over fibre preset (assumed figures, same pad) gives 58.9 dB at -33.1 dBm. Against the low antennas that recovers 61.2 dB on the mic and 41.5 dB on the IEM.',
     build: () => ({ scene: fohScene('remote') }),
   },
   {
@@ -947,15 +1070,15 @@ export const EXAMPLES = [
   },
   {
     id: 'video-wall-fixes',
-    title: 'Video wall: the fixes (distance, aim, cabling)',
-    note: 'Start from the failing noisy wall at FOH (margin -5.0 dB). Moving the receiver to the stage side, aimed at the performer with the wall off its beam, gives 24.0 dB (28.9 dB better). Ferrite chokes and shielded data cable are modelled as dropping the wall to the class B level (15 dB, assumed): 19.8 dB at FOH (24.8 dB better). Both together give 48.9 dB, a gain of 53.9 dB.',
-    build: () => ({ scene: videoWallScene({ preset: 'noisy', rx: 'foh' }) }),
+    title: 'Video wall: the fixed scene (distance, aim, cabling)',
+    note: 'This is the fixed version of video-wall-noisy, whose FOH receiver has a margin of -5.0 dB: the receiver sits at the stage side aimed at the performer with the wall off its beam, and ferrite chokes and shielded data cable bring the wall down to class B (15 dB less, assumed). The noise in the receiver is -95.0 dBm, 17.5 dB of rise, and the mic margin is 48.9 dB, 53.9 dB better. Moving the receiver alone gives 24.0 dB (28.9 dB better) and the class B wall alone 19.8 dB at FOH (24.8 dB better).',
+    build: () => ({ scene: videoWallScene({ preset: 'class-b', rx: 'side' }) }),
   },
   {
     id: 'video-wall-solid-vs-mesh',
     title: 'Video wall: solid metal, mesh and carbon fibre construction',
-    note: 'Same stage and class A noise, a receiver 2.5 m behind the wall: crossing loss is 40.0 dB for solid metal, 27.9 dB for 10 mm metal mesh and 28.9 dB for carbon mesh, and the noise reaching it is -94.2, -72.2 and -75.2 dBm (rear loss 25, 3 and 6 dB), leaving margins of 19.4, -2.6 and 0.4 dB. Seen from FOH the metal and metal mesh both reflect at -3.5 dB and carbon at -9.5 dB. Holes of 100 mm (a coarse curtain) shield only 7.9 dB at 606 MHz, so a mesh wall is no free pass at UHF. All construction figures are assumed.',
-    build: () => ({ scene: videoWallScene({ preset: 'class-a', construction: 'mesh-metal', rx: 'back' }) }),
+    note: 'Three wall sections side by side on one stage (solid metal, 10 mm metal mesh and carbon mesh, class A noise), each with a receiver 2.5 m behind it: the crossing loss is 40.0, 27.9 and 28.9 dB, and the noise reaching each receiver is -91.0, -72.2 and -75.1 dBm (the solid one includes the neighbouring walls leaking in), leaving margins of 16.2, -2.6 and 0.4 dB. Seen from FOH the metal and metal mesh both reflect at -3.5 dB and carbon at -9.5 dB. Holes of 100 mm (a coarse curtain) shield only 7.9 dB at 606 MHz, so a mesh wall is no free pass at UHF. All construction figures are assumed.',
+    build: () => ({ scene: videoWallScene({ preset: 'class-a', rx: 'back', sections: ['solid-metal', 'mesh-metal', 'mesh-carbon'] }) }),
   },
   {
     id: 'even-wideband-booster',
@@ -1183,7 +1306,7 @@ export const EXAMPLES = [
   },
   {
     id: 'audience-vs-stage',
-    title: 'Audience level receiver vs raised stage',
+    title: 'Receiver on the floor, mic on a raised stage with a riser',
     note: 'The receiver antenna is on the floor in front of the audience and the mic is on a 1.5 m stage. The raised stage changes the geometry: the level falls from -36.6 dBm for a ground-level stage to -38.5 dBm. A 1.4 m tall, 0.6 m deep wooden riser in front of the mic then blocks part of the direct ray and costs another 3.6 dB (-42.1 dBm); a metal one would cost 5.8 dB.',
     build: () => ({
       scene: make('mic', (s, l) => {

@@ -86,6 +86,7 @@ export const GLOSSARY = Object.freeze({
   compander: { full: 'Compander', meaning: 'Compressor before the radio link and expander after it. Quiet sounds are lifted above the channel noise, then pushed back down, which cuts the noise. A mismatched pair gives level errors, and the noise can be heard to breathe with the signal.', wrap: false },
   squelch: { full: 'Squelch', meaning: 'A gate that mutes the audio when the radio signal is too weak, so you hear silence instead of noise.', wrap: false },
   diversity: { full: 'Antenna diversity', meaning: 'Using two receive antennas and choosing or combining the better, since fades rarely hit both at once.', wrap: false },
+  'antenna symbol': { full: 'Antenna symbols', meaning: 'Each antenna type has its own shape: dipole (two rods), whip (rod on a ground plate), paddle and panel (flat plate), patch, Yagi and log-periodic (boom with elements), helical (coil), cardioid (D shape), body-worn (diamond). The arrow at the front is the boresight, element lines show the polarisation, and a circular arrow with R or L marks circular polarisation.', wrap: false },
   Fresnel: { full: 'Fresnel zone', meaning: 'The ellipsoid of space around the direct path that should be clear of obstacles for full signal strength.', wrap: false },
   margin: { full: 'Link margin', meaning: 'How many dB the signal is above what the receiver needs. Below 0 the link drops out.', wrap: false },
   multipath: { full: 'Multipath', meaning: 'The same signal arriving by several paths (direct, floor, walls) that add up or cancel.', wrap: false },

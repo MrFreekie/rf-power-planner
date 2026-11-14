@@ -1,4 +1,6 @@
 // App glue: store -> toolbar, results readout, canvas views.
+import { TONE_MPX_EXAMPLES } from './examples.js';
+import { tone as toneState } from './ui/toneState.js';
 import { createStore } from './store.js';
 import { createDefaultScene, createDefaultLink, deserialize, serialize } from './model/scene.js';
 import { solveLink } from './model/rf.js';
@@ -28,6 +30,7 @@ import { mountGlossary } from './ui/glossary.js';
 import { mountPanels } from './ui/panels.js';
 import { activeLink as pickActiveLink } from './view/util.js';
 import { budgetExtras } from './ui/budgetExtras.js';
+import { fresnelView, fresnelFor } from './view/fresnelDraw.js';
 import { pathRows } from './ui/fields.js';
 
 const $ = (id) => document.getElementById(id);
@@ -145,9 +148,11 @@ for (const ex of EXAMPLES) {
   opt.textContent = ex.title;
   $('examples').append(opt);
 }
+const TONE_EXAMPLE_KEYS = { 'tone-pilot-products': 'products', 'tone-pilot-beat': 'beat', 'tone-sweep-pilot': 'sweep', 'tone-key-harmonics': 'tone-key', 'tone-overdeviation': 'overdev' };
 function applyExample(id) {
   const ex = loadExample(store, id, { onStop: renderWalk });
   if (!ex) return false;
+  if (TONE_EXAMPLE_KEYS[id]) { const { tonePct, pilotPct, overloadDb } = TONE_MPX_EXAMPLES[TONE_EXAMPLE_KEYS[id]].settings; toneState.set({ tonePct, pilotPct, overloadDb }); } else toneState.reset(); // the tone sliders follow the example
   history.clear();
   $('example-title').textContent = ex.title + '.';
   $('example-text').textContent = ex.note;
@@ -355,9 +360,9 @@ function renderWarnings(list) {
   ul.hidden = items.length === 0;
 }
 
-function renderExtras(r) {
+function renderExtras(r, scene = null, link = null) {
   const dl = $('readout-extra');
-  const rows = budgetExtras(r);
+  const rows = budgetExtras(r, fresnelView.on && scene && link ? fresnelFor(scene, link) : null);
   const sig = JSON.stringify(rows);
   if (dl.dataset.sig === sig) return;
   dl.dataset.sig = sig;
@@ -384,6 +389,8 @@ function renderPaths(r, scene) {
   }));
 }
 
+for (const cb of document.querySelectorAll('.fresnel-toggle')) cb.addEventListener('change', () => fresnelView.set(cb.checked));
+fresnelView.subscribe((on) => { for (const cb of document.querySelectorAll('.fresnel-toggle')) cb.checked = on; renderResults(store.getScene()); });
 function renderResults(scene) {
   const link = pickActiveLink(scene, store.getSelection());
   const status = $('r-status');
@@ -399,7 +406,7 @@ function renderResults(scene) {
     status.textContent = r.status.toUpperCase();
     status.dataset.status = r.status;
     renderWarnings(r.warnings);
-    renderExtras(r);
+    renderExtras(r, scene, link);
     renderPaths(r, scene);
     showError(loadError);
   } catch (err) {

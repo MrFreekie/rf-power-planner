@@ -9,9 +9,20 @@ export function vswrText(m) {
   return `VSWR ${v}:1, return loss ${fin(m.returnLossDb) ? m.returnLossDb.toFixed(1) : '-'} dB, mismatch ${fin(m.mismatchDb) ? m.mismatchDb.toFixed(1) : '-'} dB${m.inBand === false ? ' (out of band)' : ''}`;
 }
 
-export function budgetExtras(r) {
+/** Rows for the Fresnel zone overlay: status in words, the worst category and up to two warnings (fr = fresnelClearance result). */
+export function fresnelRows(fr) {
+  if (!fr) return [];
+  const word = { clear: 'CLEAR', marginal: 'MARGINAL', blocked: 'BLOCKED' }[fr.status] || String(fr.status);
+  const pct = fin(fr.minFraction) ? `${Math.round(fr.minFraction * 100)} % of the first zone clear` : 'no obstacles near the path';
+  const rows = [{ label: 'Fresnel zone', value: `${word}: ${pct}${fr.worst ? `, worst ${fr.worst.category}${fr.worst.name ? ` (${fr.worst.name})` : ''}` : ''}${fr.meets60 ? ' (60 % rule met)' : ' (60 % rule not met)'}`, severity: fr.status === 'clear' ? 'ok' : fr.status === 'marginal' ? 'info' : 'warning' }];
+  for (const w of (fr.warnings || []).slice(0, 2)) rows.push({ label: 'Fresnel note', value: w, severity: fr.status === 'blocked' ? 'warning' : 'info' });
+  return rows;
+}
+
+export function budgetExtras(r, fr = null) {
   const rows = [];
   if (!r) return rows;
+  const extra = fresnelRows(fr);
   const p = r.polarisation;
   if (p && fin(p.lossDb)) rows.push({ label: 'Polarisation', value: `${p.lossDb.toFixed(1)} dB (${POL_NAME[p.txPolarisation] || p.txPolarisation || 'tx'})${p.severity === 'warning' ? ' WARNING' : p.severity === 'info' ? ' note' : ''}`, severity: p.severity || 'ok' });
   const am = r.antennaMismatch;
@@ -31,5 +42,6 @@ export function budgetExtras(r) {
     const rise = fin(wn.riseDb) ? wn.riseDb : 0, ch = fin(wn.marginChangeDb) ? wn.marginChangeDb : 0;
     rows.push({ label: 'Video wall noise', value: `${wn.dbm.toFixed(1)} dBm in ${fin(wn.bandwidthKHz) ? Math.round(wn.bandwidthKHz) : '-'} kHz, noise floor +${rise.toFixed(1)} dB, margin ${ch >= 0 ? '+' : ''}${ch.toFixed(1)} dB${rise >= 3 ? ' WARNING' : ''}`, severity: rise >= 3 ? 'warning' : rise >= 0.5 ? 'info' : 'ok' });
   }
+  rows.push(...extra);
   return rows;
 }

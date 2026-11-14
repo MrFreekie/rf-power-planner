@@ -115,7 +115,7 @@ export function mountModLab({ container, store, openButton }) {
     c.addEventListener('change', () => { P.sweep = c.checked; changed(); }); sweepCheck = c;
     w.append(c, el('span', null, label)); return w;
   }
-  const msgSel = () => select('Message', M.MESSAGE_KINDS.map((k) => [k, M.MESSAGE_LABELS[k]]), P, 'msg');
+  const msgSel = () => select('Message', [...M.MESSAGE_KINDS, ...M.MESSAGE_SOURCE_KINDS.filter((k) => !['tone', 'sweep', 'two-tone', 'voice'].includes(k))].map((k) => [k, M.MESSAGE_LABELS[k]]), P, 'msg');
 
   function buildControls() {
     ctlRow.textContent = ''; for (const k of Object.keys(inputs)) delete inputs[k]; sweepCheck = null;
@@ -820,6 +820,7 @@ export function mountModLab({ container, store, openButton }) {
   function openLab() {
     if (open) return; open = true; lastFocus = doc.activeElement;
     container.hidden = false; openButton?.setAttribute('aria-expanded', 'true'); doc.body.classList.add('modlab-open');
+    const as = store.getScene().audioSource; if (as) { P.msg = M.messageKindFor(as); buildControls(); } // the global audio source (item 31) is the lab's message
     syncPlay(); host.invalidateAll(); kick(); closeBtn.focus();
   }
   function closeLab() {

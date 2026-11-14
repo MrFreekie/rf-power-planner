@@ -15,6 +15,7 @@
 // t = seconds on a monotonic clock; time ago = history.now() - t. rfDbm is the receiver input level.
 import { AUDIO_FLOOR_DB, createAudioSource, createStereoSource, gate, withGain } from './model/audio.js';
 import { monoBlendAudio } from './model/mpx.js';
+import { normalizeAudioSource } from './model/audio-source.js';
 
 export const MAX_SECONDS = 120;
 export const FAST_MS = 50;
@@ -36,25 +37,25 @@ export function createHistory({
   let stop = null;
   let lastChange = -Infinity;
 
-  function entryFor(link) {
+  function entryFor(link, scene) {
     const a = link.audio || {};
-    const key = `${link.id}|${a.source || 'speech'}`;
+    const kind = (scene && normalizeAudioSource(scene.audioSource)) || a.source || 'speech'; // the global source (item 31) wins over the per-link one
+    const key = `${link.id}|${kind}`;
     let e = sources.get(link.id);
     if (!e || e.key !== key) {
       let seed = 0;
       for (const ch of link.id) seed = (seed * 31 + ch.charCodeAt(0)) % 997;
-      const kind = a.source || 'speech';
       e = { key, src: createAudioSource({ kind, seed }), stereo: createStereoSource({ kind, seed }) };
       sources.set(link.id, e);
     }
     return e;
   }
 
-  function record(link, state, t = now()) {
+  function record(link, state, t = now(), scene = null) {
     let buf = buffers.get(link.id);
     if (!buf) { buf = []; buffers.set(link.id, buf); }
     const gainDb = (link.audio && Number.isFinite(link.audio.gainDb)) ? link.audio.gainDb : 0;
-    const ent = entryFor(link);
+    const ent = entryFor(link, scene);
     const m = state.mpx || null;
     const rx = state.rx || null;
     const tel = state.telemetry || null;
@@ -136,7 +137,7 @@ export function createHistory({
       for (const link of scene.links) {
         ids.add(link.id);
         const st = tracker.get(link.id);
-        if (st) record(link, st, t);
+        if (st) record(link, st, t, scene);
       }
       for (const id of [...buffers.keys()]) if (!ids.has(id)) { buffers.delete(id); sources.delete(id); }
     },

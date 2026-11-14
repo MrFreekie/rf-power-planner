@@ -24,6 +24,7 @@ import { floorHeightAt, platformBoxes } from '../model/floor.js';
 import { registerSnapshot, makeSnapshotCanvas } from './snapshots.js';
 import { announce } from './a11y.js';
 
+import { drawFresnelSide, fresnelView } from './fresnelDraw.js';
 export function createSideView(canvas, store) {
   const vp = createViewport({ pxPerM: 40, origin: { x: 60, y: 200 } });
   let handles = [], hoverKey = null, userView = false, sig = '', dragCounter = 0, lastDesc = '';
@@ -131,6 +132,7 @@ export function createSideView(canvas, store) {
 
     // ripples (wavefronts) under the walls, rays and icons
     rip.drawSide(ctx, th, vp, scene, link, { u, D, sTx, sRx }, w, h);
+    drawFresnelSide(ctx, th, vp, scene, link, { iem, D }, w);
 
     // reflectors crossing the slice
     for (const r of scene.reflectors || []) {
@@ -212,7 +214,7 @@ export function createSideView(canvas, store) {
       {
         const eff = effectiveAntennaB(link), o = eff.orientation;
         const dS = Math.cos(o.el * DEG) * (Math.sin(o.az * DEG) * u.x + Math.cos(o.az * DEG) * u.y), dZ = Math.sin(o.el * DEG);
-        icons.drawAntenna(ctx, vp, sOf(inf.B.pos), -bAbs.z, { view: 'side', ink: th.ink, fill: th.paper, type: eff.type, angleDeg: Math.atan2(dS, dZ) / DEG });
+        icons.drawAntenna(ctx, vp, sOf(inf.B.pos), -bAbs.z, { view: 'side', ink: th.ink, fill: th.paper, type: eff.type, pol: (link.rx.diversity?.antennaB?.antenna?.polarisation ?? link.rx.antenna.polarisation), rollDeg: (link.rx.diversity?.antennaB?.antenna?.rollDeg ?? link.rx.antenna.rollDeg), groundPlane: (link.rx.diversity?.antennaB?.antenna?.groundPlane ?? link.rx.antenna.groundPlane), angleDeg: Math.atan2(dS, dZ) / DEG });
       }
       haloText(ctx, th, 'B', bp.x + 10, bp.y - 8, { px: 12, weight: '600' });
       if (inf.active === 'B') drawActiveRing(ctx, th, bp.x, bp.y, 12);
@@ -263,7 +265,7 @@ export function createSideView(canvas, store) {
       else icons.drawBodypack(ctx, vp, s, -(z + fl), { view: 'side', ink, fill });
     } else {
       icons.drawStand(ctx, vp, s, -fl, { view: 'side', ink, fill, heightM: z });
-      icons.drawAntenna(ctx, vp, s, -(z + fl), { view: 'side', ink, fill, type: e.antenna.type, angleDeg: angle });
+      icons.drawAntenna(ctx, vp, s, -(z + fl), { view: 'side', ink, fill, type: e.antenna.type, pol: e.antenna.polarisation, rollDeg: e.antenna.rollDeg, groundPlane: e.antenna.groundPlane, angleDeg: angle });
     }
     // height dimension line beside the item
     const dx = p.x + (leftEnd ? -26 : 26), f0 = vp.worldToScreen(s, -fl).y;
@@ -350,5 +352,6 @@ export function createSideView(canvas, store) {
   const unsubSq = squelch.subscribe(() => host.invalidate());
   const unsubRx = rxState.subscribe(() => host.invalidate());
   const unsub = store.subscribe(() => host.invalidate());
-  return { viewport: vp, fit, invalidate: host.invalidate, destroy() { unregSnap(); detachRip(); detach(); unsub?.(); unsubSq?.(); unsubRx?.(); host.destroy(); } };
+  const unsubFresnel = fresnelView.subscribe(() => host.invalidate());
+  return { viewport: vp, fit, invalidate: host.invalidate, destroy() { unsubFresnel(); unregSnap(); detachRip(); detach(); unsub?.(); unsubSq?.(); unsubRx?.(); host.destroy(); } };
 }

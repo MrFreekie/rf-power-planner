@@ -1,5 +1,6 @@
 // Scene mutations. Every action takes the store first and goes through store.update,
 // so undo/redo and subscribers behave uniformly. Pure of the DOM.
+import { AUDIO_SOURCE_IDS, TONE_HZ_LIMITS } from './model/audio-source.js';
 import { buildExample } from './examples.js';
 import { IMD_PRESETS, COMBINER_PRESETS } from './model/imd-params.js';
 import { startWalk, stopWalk } from './walk.js';
@@ -725,4 +726,18 @@ export function setSquelchThreshold(store, linkId, dbm, opts = {}) {
     l.rx.squelch.thresholdDbm = v; ok = true;
   }, opts.coalesce ? { coalesce: opts.coalesce } : {});
   return ok;
+}
+
+// ---- global audio source (item 31) ----------------------------------------------------------------------------
+/** Global programme source for every link's audio views and meters. '' or null removes the field (per-link default: mic voice, IEM music). */
+export function setAudioSource(store, id, o = {}) {
+  if (id === '' || id === null) return store.update((d) => { delete d.audioSource; }, o.coalesce ? { coalesce: o.coalesce } : {});
+  if (!AUDIO_SOURCE_IDS.includes(id)) return false;
+  return store.update((d) => { d.audioSource = id; }, o.coalesce ? { coalesce: o.coalesce } : {});
+}
+/** Tone frequency in Hz for the tone and two-tone sources (20..20000, clamped). Non-numbers are ignored. */
+export function setAudioToneHz(store, hz, o = {}) {
+  if (!Number.isFinite(+hz) || hz === '' || hz === null) return false;
+  const v = Math.min(TONE_HZ_LIMITS[1], Math.max(TONE_HZ_LIMITS[0], +hz));
+  return store.update((d) => { d.audioToneHz = v; }, { coalesce: o.coalesce || 'audioToneHz' });
 }

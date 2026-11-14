@@ -108,11 +108,11 @@
 
 <main id="workspace">
   <section class="pane" aria-label="Plan view">
-    <h2>Plan <button type="button" id="btn-plan-fit" class="pane-fit" title="Fit every item in the plan view (key 0)">Fit all</button></h2>
+    <h2>Plan <label class="pane-opt" title="Show the first Fresnel zone and the 60 percent zone of the selected link"><input type="checkbox" class="fresnel-toggle"> Fresnel</label> <button type="button" id="btn-plan-fit" class="pane-fit" title="Fit every item in the plan view (key 0)">Fit all</button></h2>
     <canvas id="plan-canvas" tabindex="0" aria-label="Plan view of the stage"></canvas>
   </section>
   <section class="pane" aria-label="Side view">
-    <h2>Side</h2>
+    <h2>Side <label class="pane-opt" title="Show the first Fresnel zone and the 60 percent zone of the selected link"><input type="checkbox" class="fresnel-toggle"> Fresnel</label></h2>
     <canvas id="side-canvas" tabindex="0" aria-label="Side view of the Tx to Rx line"></canvas>
   </section>
   <div id="leftpanel" data-panel="left">

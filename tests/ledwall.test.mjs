@@ -104,8 +104,10 @@ test('the four video wall examples quote the model', () => {
   for (const v of [f1(b.noiseDbm), f1(b.riseDb), f1(off.marginDb), f1(b.marginDb), f1(bs.riseDb), f1(bs.marginDb), f1(-b.reflectionDb)]) assert.ok(note('video-wall-class-b').includes(v), v);
   const n = R({ preset: 'noisy', rx: 'foh' }), a = R({ preset: 'class-a', rx: 'foh' }), nn = R({ preset: 'noisy', rx: 'near' }), ns = R({ preset: 'noisy', rx: 'side' });
   for (const v of [f1(n.noiseDbm), f1(n.riseDb), f1(n.marginDb), f1(a.marginDb), f1(nn.marginDb), f1(ns.marginDb)]) assert.ok(note('video-wall-noisy').includes(v), v);
-  for (const v of [f1(n.marginDb), f1(ns.marginDb), f1(ns.marginDb - n.marginDb), f1(b.marginDb), f1(b.marginDb - n.marginDb), f1(bs.marginDb), f1(bs.marginDb - n.marginDb)]) assert.ok(note('video-wall-fixes').includes(v), v);
-  const m = ['solid-metal', 'mesh-metal', 'mesh-carbon'].map((c) => R({ preset: 'class-a', construction: c, rx: 'back' })), fm = ['solid-metal', 'mesh-metal', 'mesh-carbon'].map((c) => R({ preset: 'class-a', construction: c, rx: 'foh' }));
+  for (const v of [f1(n.marginDb), f1(ns.marginDb), f1(ns.marginDb - n.marginDb), f1(b.marginDb), f1(b.marginDb - n.marginDb), f1(bs.marginDb), f1(bs.marginDb - n.marginDb), f1(bs.noiseDbm), f1(bs.riseDb)]) assert.ok(note('video-wall-fixes').includes(v), v);
+  assert.notEqual(JSON.stringify(EXAMPLES.find((e) => e.id === 'video-wall-fixes').build().scene.links[0].rx.pos), JSON.stringify(EXAMPLES.find((e) => e.id === 'video-wall-noisy').build().scene.links[0].rx.pos)); // the fixes example is not the noisy scene
+  const ms = videoWallScene({ preset: 'class-a', rx: 'back', sections: ['solid-metal', 'mesh-metal', 'mesh-carbon'] }), m = [0, 1, 2].map((i) => videoWallReport(ms, i)), fm = ['solid-metal', 'mesh-metal', 'mesh-carbon'].map((c) => R({ preset: 'class-a', construction: c, rx: 'foh' }));
   for (const v of [...m.map((x) => f1(x.wallLossDb)), ...m.map((x) => f1(x.noiseDbm)), ...m.map((x) => f1(x.marginDb)), f1(-fm[0].reflectionDb), f1(-fm[2].reflectionDb), f1(meshShieldingDb(100, 606.1))]) assert.ok(note('video-wall-solid-vs-mesh').includes(v), v);
+  assert.deepEqual(ms.reflectors.map((w) => w.construction), ['solid-metal', 'mesh-metal', 'mesh-carbon']); assert.equal(ms.links.length, 3);
   for (const id of ['video-wall-class-b', 'video-wall-noisy', 'video-wall-fixes', 'video-wall-solid-vs-mesh']) { assert.ok(note(id).split('. ').length <= 4, id); assert.equal(validateScene(EXAMPLES.find((e) => e.id === id).build().scene).ok, true); }
 });

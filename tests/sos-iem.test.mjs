@@ -26,12 +26,12 @@ test('too close: receiver input far above P1dB and max input, overload, desense 
 
 test('crossed polarisation, off-axis and rack: tens of dB more isolation, receiver ok, no desense', () => {
   const a = R['crossed-pol'].antennas[0], b = R['too-close'].antennas[0];
-  assert.ok(a.couplingDb - b.couplingDb > 55);
+  assert.ok(a.couplingDb - b.couplingDb > 45);
   assert.equal(a.level, 'ok'); assert.equal(a.desenseDb, 0);
-  assert.ok(a.headroomDb > 30);
-  // removing the cross-polar mismatch would cost 15 dB of isolation (15 dB floor is the model default)
-  const s = sosScene('crossed-pol'); s.links[0].rx.antenna.polarisation = 'vertical';
-  near(R['crossed-pol'].antennas[0].couplingDb - sosReport(s).antennas[0].couplingDb, 15, 0.5);
+  assert.ok(a.headroomDb > 20);
+  // the wanted-mic antenna is slant 45 (3 dB to the vertical transmitter); a horizontal one would add about 15 dB of isolation
+  const s = sosScene('crossed-pol'); s.links[0].rx.antenna.polarisation = 'horizontal';
+  near(sosReport(s).antennas[0].couplingDb - R['crossed-pol'].antennas[0].couplingDb, 14.9, 0.5);
 });
 
 test('best practice: lowest power, filter rejects the IEM channel by 40 dB, IEM link still has margin, wanted margin intact', () => {

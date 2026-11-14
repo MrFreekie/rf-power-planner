@@ -26,6 +26,7 @@ import { dispX, dispY, describePos } from '../ui/coords.js';
 import { drawVenue } from './venueDraw.js';
 import { planExtent, farBounds } from './planExtent.js';
 import { drawWallNoise } from './wallNoiseDraw.js';
+import { drawFresnelPlan, fresnelView } from './fresnelDraw.js';
 import { drawAreas } from './areasDraw.js';
 import { updateAudience, updateOverheadPanel, addAudience } from '../actionsAreas.js';
 
@@ -47,6 +48,7 @@ export function createPlanView(canvas, store) {
   initA11y(store);
   const rip = getRipples(store);
   const host = createCanvasHost(canvas, draw, (w, h) => { if (!userView) fit(w, h); });
+  const unsubFresnel = fresnelView.subscribe(() => host.invalidate());
   const detachRip = rip.attach('plan', canvas, () => host.invalidate());
   // report snapshot: fit the stage into w x h and draw synchronously, without touching the live view
   const unregSnap = registerSnapshot('plan', (w, h) => {
@@ -123,6 +125,7 @@ export function createPlanView(canvas, store) {
     }
 
     if (link0) drawWallNoise(ctx, th, vp, scene, link0, solveCached(scene, link0), w, h);
+    if (link0) drawFresnelPlan(ctx, th, vp, scene, link0, w);
 
     // ripples (wavefronts) under the walls and icons
     rip.drawPlan(ctx, th, vp, scene, w, h, link0);
@@ -250,7 +253,7 @@ export function createPlanView(canvas, store) {
     ctx.fillStyle = inkAlpha(th, 0.07); ctx.fill();
     ctx.setLineDash([4, 3]); ctx.strokeStyle = th.inkSoft; ctx.lineWidth = 0.9; ctx.stroke(); ctx.setLineDash([]);
     icons.drawStand(ctx, vp, inf.B.pos.x, inf.B.pos.y, { view: 'plan', ink: th.ink, fill: th.paper });
-    icons.drawAntenna(ctx, vp, inf.B.pos.x, inf.B.pos.y, { view: 'plan', ink: th.ink, fill: th.paper, type: eff.type, angleDeg: 180 - az });
+    icons.drawAntenna(ctx, vp, inf.B.pos.x, inf.B.pos.y, { view: 'plan', ink: th.ink, fill: th.paper, type: eff.type, pol: (link.rx.diversity?.antennaB?.antenna?.polarisation ?? link.rx.antenna.polarisation), rollDeg: (link.rx.diversity?.antennaB?.antenna?.rollDeg ?? link.rx.antenna.rollDeg), groundPlane: (link.rx.diversity?.antennaB?.antenna?.groundPlane ?? link.rx.antenna.groundPlane), angleDeg: 180 - az });
     // rotation handle at the lobe tip
     const tip = { x: p.x + Math.sin(az * DEG) * (R + 24), y: p.y + Math.cos(az * DEG) * (R + 24) }; // a little further out than A's handle so they do not overlap
     handles.push({ kind: 'rxBRot', itemId: link.rx.id, linkId: link.id, sx: tip.x, sy: tip.y, r: 10, pri: 1 });
@@ -284,7 +287,7 @@ export function createPlanView(canvas, store) {
         else icons.drawBodypack(ctx, vp, e.pos.x, e.pos.y, { view: 'plan', ink, fill });
       } else {
         icons.drawStand(ctx, vp, e.pos.x, e.pos.y, { view: 'plan', ink, fill });
-        icons.drawAntenna(ctx, vp, e.pos.x, e.pos.y, { view: 'plan', ink, fill, type: ant.type, angleDeg: 180 - az });
+        icons.drawAntenna(ctx, vp, e.pos.x, e.pos.y, { view: 'plan', ink, fill, type: ant.type, pol: ant.polarisation, rollDeg: ant.rollDeg, groundPlane: ant.groundPlane, angleDeg: 180 - az });
       }
       if (selected) ringAt(ctx, th, p.x, p.y, 17);
       if (w >= 520 || selected) haloText(ctx, th, e.name, p.x, p.y + Math.max(22, 0.35 * vp.pxPerM + 12), { align: 'center', color: selected ? th.ink : th.inkSoft, weight: selected ? '600' : '' });
@@ -499,6 +502,6 @@ export function createPlanView(canvas, store) {
 
   return {
     viewport: vp, fit, invalidate: host.invalidate,
-    destroy() { canvas.removeEventListener('dragover', onDragOver); canvas.removeEventListener('drop', onDrop); if (fitBtn) fitBtn.removeEventListener('click', onFitBtn); canvas.removeEventListener('pointermove', onCurMove); canvas.removeEventListener('pointerleave', onCurLeave); canvas.removeEventListener('pointercancel', onCurLeave); window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKey); unregSnap(); detachRip(); detach(); unsub?.(); unsubSq?.(); unsubRx?.(); unsubCov?.(); unsubImd?.(); unsubView?.(); host.destroy(); },
+    destroy() { unsubFresnel(); canvas.removeEventListener('dragover', onDragOver); canvas.removeEventListener('drop', onDrop); if (fitBtn) fitBtn.removeEventListener('click', onFitBtn); canvas.removeEventListener('pointermove', onCurMove); canvas.removeEventListener('pointerleave', onCurLeave); canvas.removeEventListener('pointercancel', onCurLeave); window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKey); unregSnap(); detachRip(); detach(); unsub?.(); unsubSq?.(); unsubRx?.(); unsubCov?.(); unsubImd?.(); unsubView?.(); host.destroy(); },
   };
 }

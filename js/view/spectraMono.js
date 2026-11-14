@@ -4,6 +4,7 @@
 import { setFont, haloText } from './util.js';
 import { SPEC_DB } from './mpx.js';
 import { dataConfig } from '../telemetryTracker.js';
+import { drawBasebandLines } from './toneLines.js';
 import { drawDistortionBadge, drawProductMarker } from './distortionDraw.js';
 import { resolveAudioBandwidthHz, audioBandLabel, monoCaption, besselJ } from '../model/spectrum-views.js';
 
@@ -74,7 +75,7 @@ export function monoNotes(m) {
 function nearestIdx(xs, v) { let k = -1, d = Infinity; for (let i = 0; i < xs.length; i++) { const e = Math.abs(xs[i] - v); if (e < d) { d = e; k = i; } } return k; }
 
 /** m = monoBasebandSpectrum result, inp = monoInputs result, hoverX = pointer x in canvas pixels or null. */
-export function drawMonoMpx(ctx, w, h, th, { m, inp, hoverX }) {
+export function drawMonoMpx(ctx, w, h, th, { m, inp, hoverX, toneProducts: tp = null }) {
   if (!m) return;
   const L = 34, R = 8, T = 22, B = 22, pw = w - L - R, ph = h - T - B, span = inp.fMaxKhz;
   const X = (k) => L + (k / span) * pw;
@@ -114,6 +115,7 @@ export function drawMonoMpx(ctx, w, h, th, { m, inp, hoverX }) {
   const dd = inp.distortion && inp.distortion.active ? inp.distortion : null;
   const prods = dd && Array.isArray(m.products) ? m.products : [];
   for (const pr of prods) { const x = X(pr.freqKhz); if (x >= L && x <= L + pw) drawProductMarker(ctx, th, x, Y(pr.levelDb), `IM${pr.order}`); }
+  if (tp) drawBasebandLines(ctx, th, { X, Y, L, T, pw, ph, span, floorDb: SPEC_DB.min }, tp);
   drawDistortionBadge(ctx, th, { L, T, pw, ph }, dd, prods.length ? '\u25B2 intermodulation products' : null);
   const ceil = m.bands && m.bands.programme ? m.bands.programme[1] : 15;
   if (m.bands && m.bands.gap) { // unused band between the audio ceiling and the control tone

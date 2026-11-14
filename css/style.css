@@ -825,3 +825,22 @@ body.vnalab-open { overflow: hidden; }
 .spectrum-table thead th { font-weight: 600; position: sticky; top: 0; background: var(--paper); }
 .spectrum-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
 @media print { .spectrum-dialog { display: none !important; } }
+
+/* ---- audio source bar and tone sliders ---- */
+.source-bar { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px 10px; min-width: 0; flex: 1 1 0; }
+.source-bar label { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
+.source-bar select { max-width: 11em; }
+.source-hz input { width: 6em; }
+.source-desc { font-size: 12px; color: var(--ink-soft); flex: 1 1 0; min-width: 4em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tone-pop { position: fixed; z-index: 60; background: var(--paper); border: 1px solid var(--ink); border-radius: var(--radius); padding: 8px 12px; width: min(420px, 90vw); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25); }
+.tone-pop[hidden] { display: none; }
+.tone-sliders { display: flex; flex-direction: column; gap: 4px; }
+.tone-field { display: grid; grid-template-columns: 8.5em 1fr 3em auto; align-items: center; gap: 8px; font-size: 12px; }
+.tone-field output { text-align: right; font-variant-numeric: tabular-nums; }
+.tone-unit { color: var(--ink-soft); font-size: 12px; }
+.spectrum-dialog-slot { padding: 6px 14px; border-top: 1px solid var(--line); }
+.spectrum-dialog-slot[hidden] { display: none; }
+@media (max-width: 900px) { .source-bar { flex-wrap: wrap; } }
+@media print { .source-bar { display: none !important; } }
+
+.pane-opt { font-size: 12px; font-weight: normal; margin-left: 10px; display: inline-flex; align-items: center; gap: 4px; text-transform: none; letter-spacing: 0; }

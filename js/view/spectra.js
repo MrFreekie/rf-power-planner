@@ -16,6 +16,10 @@ import { rxState } from '../rxTracker.js';
 import { distortMpxSpectrum, resolveAudioBandwidthHz } from '../model/spectrum-views.js';
 import { drawDistortionBadge, drawProductMarker, distortionAria } from './distortionDraw.js';
 import { createZoom, decimate } from './spectraZoom.js';
+import { toneSetup, toneProducts, drawBasebandLines, drawRfLines, lineRows } from './toneLines.js';
+import { resolveAudioSource, resolveToneHz, AUDIO_SOURCE_LABELS } from '../model/audio-source.js';
+import { tone as toneState } from '../ui/toneState.js';
+import { buildToneSliders, mountSourceBar } from '../ui/sourceBar.js';
 import { drawMonoMpx, isStereoMpx, monoInputs, monoSummary, monoNotes, rfSubcarriers } from './spectraMono.js';
 export { drawMonoMpx, isStereoMpx, monoInputs, monoSummary, monoNotes, rfSubcarriers };
 
@@ -126,15 +130,15 @@ export function rfInputs(scene, link, r, t, nBins = 240) {
 }
 
 /** Arguments for audioSpectrum. Stereo only for an IEM link with MPX stereo on and the receiver not in mono. */
-export function audioInputs(link, mpxState, t, nBins = AUDIO_BINS) {
+export function audioInputs(link, mpxState, t, nBins = AUDIO_BINS, src = null) {
   const iem = !!link && link.kind === 'iem';
   const stereoOn = iem && !!(link.mpx && link.mpx.enabled) && !(mpxState && mpxState.mode === 'mono');
   const abw = resolveAudioBandwidthHz({ link, kind: iem ? 'iem' : 'mic', stereo: stereoOn });
-  return { audioBandwidthHz: abw && Number.isFinite(abw.hz) ? abw.hz : undefined, kind: iem ? 'iem' : 'mic', stereo: stereoOn, nBins, fMaxHz: 20000, t, preEmphasisTauUs: 50, deEmphasised: true };
+  return { audioBandwidthHz: abw && Number.isFinite(abw.hz) ? abw.hz : undefined, kind: iem ? 'iem' : 'mic', stereo: stereoOn, nBins, fMaxHz: 20000, t, preEmphasisTauUs: 50, deEmphasised: true, ...(src && src.source ? { source: src.source, toneHz: src.toneHz } : {}) };
 }
 
 export const audioSummary = (a, inp) => (a
-  ? `Audio spectrum, simulated ${inp.kind === 'iem' ? `music${inp.stereo ? ' in stereo (left and right)' : ' (mono)'}` : 'voice'}, 20 hertz to 20 kilohertz on a logarithmic axis with octave band labels from 31.5 hertz to 16 kilohertz, after de-emphasis. Noise floor ${sgn(a.floorDb, 0)} dB. Illustrative, not a measurement.`
+  ? `Audio spectrum, simulated ${inp.source && AUDIO_SOURCE_LABELS[inp.source] ? AUDIO_SOURCE_LABELS[inp.source].toLowerCase() : inp.kind === 'iem' ? 'music' : 'voice'}${inp.kind === 'iem' ? (inp.stereo ? ' in stereo (left and right)' : ' (mono)') : ''}, 20 hertz to 20 kilohertz on a logarithmic axis with octave band labels from 31.5 hertz to 16 kilohertz, after de-emphasis. Noise floor ${sgn(a.floorDb, 0)} dB. Illustrative, not a measurement.`
   : 'Audio spectrum not available.');
 
 export function rfSummary(s, inp) {
@@ -228,7 +232,7 @@ export function drawAudio(ctx, w, h, th, a, inp, hoverX) {
   curve(ctx, f, xs, rs.db, { stroke: th.ink, fill: th.ink });
   if (a.levelsDbR) curve(ctx, f, xs, logResample(a.freqsHz, a.levelsDbR, Math.max(60, Math.round(pw))).db, { stroke: th.blue, fill: th.blue, alpha: 0.18 });
   if (fin(a.floorDb)) curve(ctx, f, [audioAxis.min, audioAxis.max], [a.floorDb, a.floorDb], { stroke: th.fail, dash: [5, 3] });
-  haloText(ctx, th, inp.kind === 'iem' ? (inp.stereo ? 'music, L and R' : 'music, mono') : 'voice', f.L + 4, f.T + 12, { px: 11, weight: '600', color: th.inkSoft });
+  haloText(ctx, th, (inp.source && AUDIO_SOURCE_LABELS[inp.source] ? AUDIO_SOURCE_LABELS[inp.source].toLowerCase() : inp.kind === 'iem' ? 'music' : 'voice') + (inp.kind === 'iem' ? (inp.stereo ? ', L and R' : ', mono') : ''), f.L + 4, f.T + 12, { px: 11, weight: '600', color: th.inkSoft });
   haloText(ctx, th, 'simulated', f.L + f.pw - 4, f.T + f.ph - 5, { align: 'right', px: 11, color: th.inkSoft });
   const dd = inp.distortion && inp.distortion.active ? inp.distortion : null;
   if (dd && Array.isArray(a.harmonics)) for (const hm of a.harmonics) { const x = f.X(audioAxis.toX(hm.freqHz)); if (x >= f.L && x <= f.L + f.pw) drawProductMarker(ctx, th, x, f.Y(hm.levelDb), `${hm.k}f`); }
@@ -268,6 +272,7 @@ export function drawRf(ctx, w, h, th, s, inp, hoverX) {
     haloText(ctx, th, rfCentreLabel(inp), cx + 4, f.T + 26, { px: 11, color: th.inkSoft });
   } }
   curve(ctx, f, xs, s.levelsDbm, { stroke: s.clipsAtFilter ? th.marginal : th.ink, fill: th.ink });
+  if (inp.toneProducts) drawRfLines(ctx, th, f, inp.toneProducts, inp.rxLevelDbm, yMin, xMin, xMax);
   // control subcarriers (tone key, data, pilot): FM sidebands at +- their frequency, marked and named; digital shows its block instead
   for (const sc of inp.subcarriers || []) for (const sign of [1, -1]) {
     const x = f.X(sign * sc.offsetKhz);
@@ -290,7 +295,7 @@ export function drawRf(ctx, w, h, th, s, inp, hoverX) {
 }
 
 /** MPX baseband spectrum: the drawing code moved unchanged from the MPX panel (js/view/mpx.js). */
-export function drawMpx(ctx, w, h, th, { state, link, hoverX, dist = null }) {
+export function drawMpx(ctx, w, h, th, { state, link, hoverX, dist = null, toneProducts: tp = null, programme = null }) {
   if (!state) return;
   const L = 34, R = 8, T = 22, B = 22;
   const pw = w - L - R, ph = h - T - B;
@@ -301,7 +306,7 @@ export function drawMpx(ctx, w, h, th, { state, link, hoverX, dist = null }) {
   const tel = link && link.telemetry && link.telemetry.enabled ? telemetry.get(link.id) : null;
   const dataKHz = tel ? dataConfig(link).subcarrierKHz : null;
   const maxKHz = dataKHz != null ? Math.max(60, dataKHz + 8) : 60;
-  let s = mpxSpectrum(state, { points: Math.max(120, Math.round(pw)), maxKHz, ...(dataKHz != null ? { dataKHz, dataLocked: !!(tel.data && tel.data.locked) } : {}) });
+  let s = mpxSpectrum(state, { points: Math.max(120, Math.round(pw)), maxKHz, ...(programme ? { programme } : {}), ...(dataKHz != null ? { dataKHz, dataLocked: !!(tel.data && tel.data.locked) } : {}) });
   const dd = dist && dist.active ? dist : null;
   let prods = [];
   if (dd) {
@@ -366,6 +371,7 @@ export function drawMpx(ctx, w, h, th, { state, link, hoverX, dist = null }) {
     haloText(ctx, th, `stray carrier${ifr.hasPilot ? ' + pilot' : ' (no pilot)'}  C/I ${cirDb >= 0 ? '+' : '−'}${Math.abs(cirDb).toFixed(1)} dB`, L + pw - 4, T + ph - 6, { align: 'right', px: 11, weight: '600', color: th.warnText });
   }
   for (const pr of prods) { const x = X(pr.freqKhz); if (x >= L && x <= L + pw) drawProductMarker(ctx, th, x, Y(pr.levelDb), `IM${pr.order}`); }
+  if (tp) drawBasebandLines(ctx, th, { X, Y, L, T, pw, ph, span: spanKHz, floorDb: SPEC_DB.min }, tp);
   drawDistortionBadge(ctx, th, { L, T, pw, ph }, dd, dd && prods.length ? '\u25B2 intermodulation products' : null);
   haloText(ctx, th, 'noise', X(Math.min(57, spanKHz - 3)), Y(s.noiseDb[s.noiseDb.length - 1]) - 4, { align: 'center', px: 11, color: th.fail });
   if (hoverX != null && hoverX >= L && hoverX <= L + pw) {
@@ -387,6 +393,8 @@ export function spectrumTable(id, res, inp0) {
     const s = res.s, fc = (res.inp || inp0 || {}).carrierMHz;
     const rows = decimate(s.freqsMHz.length).map((i) => [`${((s.freqsMHz[i] - fc) * 1000).toFixed(0)} kHz`, n1(s.levelsDbm[i]) + ' dBm']);
     for (const c of (res.inp && res.inp.subcarriers) || []) rows.push([`${c.name} at +/- ${+c.offsetKhz.toFixed(1)} kHz`, n1(c.levelDbm) + ' dBm']);
+    const tt = res.inp && res.inp.toneProducts && res.inp.toneProducts.twoTone;
+    if (tt) for (const l of [...tt.lines].sort((a, b) => b.levelDb - a.levelDb).slice(0, 12)) rows.push([`FM line ${l.offsetKhz.toFixed(1)} kHz (n=${l.n}, m=${l.m})`, `${l.levelDb.toFixed(1)} dB re carrier`]);
     rows.push(['Noise in RBW', n1(s.noiseDbm) + ' dBm']);
     return { caption: `RF spectrum around ${fc} MHz: offset from the carrier and level`, cols: ['Offset', 'Level'], rows };
   }
@@ -402,6 +410,7 @@ export function spectrumTable(id, res, inp0) {
     else if (res.st) { try { const s = mpxSpectrum(res.st, { points: 120 }); f = s.freqKHz; l = s.levelDb; } catch { /* no table */ } }
     if (!f) return null;
     const rows = decimate(f.length).map((i) => [`${n1(f[i], 1)} kHz`, n1(l[i]) + ' dB']);
+    for (const [a, b, c] of lineRows(res.tp)) rows.push([`${a} ${b}`, c]);
     return { caption: 'MPX baseband spectrum: frequency and level', cols: ['Frequency', 'Level'], rows };
   }
   return null;
@@ -417,6 +426,7 @@ export function mountSpectra({ container, store, now = () => performance.now() }
   const tabs = el('div', 'spectra-tabs group', null, { role: 'tablist', 'aria-label': 'Spectrum views' });
   const pauseBtn = el('button', null, reduce ? 'Play' : 'Pause', { type: 'button', 'aria-pressed': String(reduce), title: 'Freeze or run the simulated signals' });
   head.append(h2, tabs, pauseBtn);
+  const sourceBar = mountSourceBar({ host: head, store, tone: toneState });
   const grid = el('div', 'spectra-grid');
   container.append(head, grid);
 
@@ -508,29 +518,35 @@ export function mountSpectra({ container, store, now = () => performance.now() }
   function compute(id, w = 300) {
     const { scene, link, r, mst } = ctxInfo();
     let res = null;
+    const stereo = !!link && isStereoMpx(link);
+    const src = link ? { source: resolveAudioSource(scene, link), toneHz: resolveToneHz(scene) } : null;
+    const tp = link ? toneProducts(toneSetup(scene, link, toneState.get(), t, stereo), linkDeviationKhz(link)) : null;
+    const programme = src ? { source: src.source, t, toneHz: src.toneHz } : null;
     let dist = null; // overload distortion of the selected link (receiver front end; no scene source for Tx limiter overdrive yet)
-    if (link && model && model.distortionFromLink) { try { const d = model.distortionFromLink({ overload: (rxState.get(link.id) || {}).overload }); if (d && d.active) dist = d; } catch (e) { console.warn(e); } }
+    if (link && model && model.distortionFromLink) { try { const d = model.distortionFromLink({ overload: (rxState.get(link.id) || {}).overload, audioSource: src && src.source }); if (d && d.active) dist = d; } catch (e) { console.warn(e); } }
     if (id === 'audio') {
-      if (link && model && model.audioSpectrum) { const inp = audioInputs(link, mst, t); if (dist) inp.distortion = dist; let a = null; try { a = model.audioSpectrum(inp); } catch (e) { console.warn(e); } res = { a, inp, dist }; }
+      if (link && model && model.audioSpectrum) { const inp = audioInputs(link, mst, t, undefined, src); if (dist) inp.distortion = dist; let a = null; try { a = model.audioSpectrum(inp); } catch (e) { console.warn(e); } res = { a, inp, dist }; }
     } else if (id === 'rf') {
       if (link && model && model.rfSpectrum) {
         const inp = rfInputs(scene, link, r, t, Math.max(120, Math.min(400, Math.round(w - 52))));
         if (inp && dist) inp.distortion = dist;
+        if (inp && tp) inp.toneProducts = tp;
         let s = null; if (inp) { try { s = model.rfSpectrum(inp); } catch (e) { console.warn(e); } }
         if (inp && s && inp.mode !== 'digital' && model.monoBasebandSpectrum) { // tone key, data subcarrier and pilot ride on the carrier
           try {
-            const mi = monoInputs(link, mst, r, t, 120); mi.stereo = isStereoMpx(link);
+            const mi = monoInputs(link, mst, r, t, 120); mi.stereo = isStereoMpx(link); if (src) { mi.source = src.source; mi.toneHz = src.toneHz; }
             inp.subcarriers = rfSubcarriers(model.monoBasebandSpectrum(mi), inp.devKhz, inp.rxLevelDbm);
           } catch (e) { console.warn(e); }
         }
         res = { s, inp, dist };
       }
-    } else if (link && isStereoMpx(link)) { if (mst) res = { st: mst, link, dist }; }
+    } else if (link && isStereoMpx(link)) { if (mst) res = { st: mst, link, dist, tp, programme }; }
     else if (link && model && model.monoBasebandSpectrum) {
       const inp = monoInputs(link, mst, r, t, Math.max(120, Math.min(400, Math.round(w - 42))));
       if (dist) inp.distortion = dist;
+      if (src) { inp.source = src.source; inp.toneHz = src.toneHz; }
       let m = null; try { m = model.monoBasebandSpectrum(inp); } catch (e) { console.warn(e); }
-      res = { m, inp, dist };
+      res = { m, inp, dist, tp };
     }
     cache[id] = res;
     return { res, link, mst };
@@ -546,9 +562,9 @@ export function mountSpectra({ container, store, now = () => performance.now() }
         if (!res) note(ctx, w, h, th, link ? 'RF spectrum model not loaded.' : 'No link selected.'); else drawRf(ctx, w, h, th, res.s, res.inp || { carrierMHz: 0 }, hv);
       } else {
         if (!link) note(ctx, w, h, th, 'No link selected.');
-        else if (isStereoMpx(link)) { if (!mst) note(ctx, w, h, th, 'Waiting for the MPX model.'); else drawMpx(ctx, w, h, th, { state: mst, link, hoverX: hv, dist: res && res.dist }); }
+        else if (isStereoMpx(link)) { if (!mst) note(ctx, w, h, th, 'Waiting for the MPX model.'); else drawMpx(ctx, w, h, th, { state: mst, link, hoverX: hv, dist: res && res.dist, toneProducts: res && res.tp, programme: res && res.programme }); }
         else if (!res || !res.m) note(ctx, w, h, th, 'MPX baseband model not loaded.');
-        else drawMonoMpx(ctx, w, h, th, { m: res.m, inp: res.inp, hoverX: hv });
+        else drawMonoMpx(ctx, w, h, th, { m: res.m, inp: res.inp, hoverX: hv, toneProducts: res.tp });
       }
       if (!big) panels[id].canvas.dataset.ms = (now() - t0).toFixed(2);
     };
@@ -595,6 +611,8 @@ export function mountSpectra({ container, store, now = () => performance.now() }
     table: (id) => { const { res } = compute(id, 300); return spectrumTable(id, res); },
     draw: (id, ctx, w, h, th, hv) => zoomDraws[id](ctx, w, h, th, hv),
   });
+  const zoomSliders = buildToneSliders(document, toneState, 'dlg');
+  zoom.slot.append(zoomSliders.root); zoom.slot.hidden = true;
   const zoomDraws = {};
   for (const sp of SPECTRA) zoomDraws[sp.id] = makeDraw(sp.id, true);
   const canZoom = (id) => !(id === 'mpx' && panels.mpx.canvas.hidden);
@@ -602,7 +620,7 @@ export function mountSpectra({ container, store, now = () => performance.now() }
   function invalidateAll() {
     for (const sp of SPECTRA) { const p = panels[sp.id]; if (p.host && !p.panel.hidden) p.host.invalidate(); }
     updateText();
-    if (zoom.isOpen()) { if (canZoom(zoom.state.id)) zoom.update(); else zoom.close(); }
+    if (zoom.isOpen()) { if (canZoom(zoom.state.id)) { const c = cache[zoom.state.id]; zoom.slot.hidden = !(zoom.state.id !== 'audio' && c && (c.tp || (c.inp && c.inp.toneProducts))); zoom.update(); } else zoom.close(); }
   }
 
   function tick(ts) {
@@ -634,6 +652,6 @@ export function mountSpectra({ container, store, now = () => performance.now() }
   if (running) loop = requestAnimationFrame(tick);
   return {
     setRunning, invalidate: invalidateAll, panels, zoom, openZoom,
-    destroy() { running = false; if (loop) cancelAnimationFrame(loop); document.removeEventListener('visibilitychange', onVis); if (ro) ro.disconnect(); unsub.forEach((u) => u && u()); zoom.destroy(); for (const sp of SPECTRA) panels[sp.id].host.destroy(); container.textContent = ''; },
+    destroy() { running = false; if (loop) cancelAnimationFrame(loop); document.removeEventListener('visibilitychange', onVis); if (ro) ro.disconnect(); unsub.forEach((u) => u && u()); zoom.destroy(); zoomSliders.destroy(); sourceBar.destroy(); for (const sp of SPECTRA) panels[sp.id].host.destroy(); container.textContent = ''; },
   };
 }
