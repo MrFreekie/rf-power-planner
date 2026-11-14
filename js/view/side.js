@@ -3,12 +3,15 @@
 // Shows floor, reflectors crossing the slice, direct / floor-bounce rays, and draggable height handles.
 import { createViewport } from './viewport.js';
 import { chordSpan } from './platformGeom.js';
+import { audienceHeadM } from '../model/audience.js';
 import {
   createCanvasHost, activeLink, findItem, selectableIds, solveCached, fmtLen, fmtDb, statusColor,
   drawGrid, drawScaleBar, haloText, strokeHatchRect, clamp, round2, DEG, readTheme,
 } from './util.js';
 import { attachInteraction } from './interact.js';
-import { tracePaths } from '../model/rf.js';
+import { tracePaths, antennaFrame } from '../model/rf.js';
+import { tiltFromPointer } from '../ui/antennaFields.js';
+import { setAntennaField } from '../actions.js';
 import { SURFACES } from '../model/library.js';
 import * as icons from './icons.js';
 import { squelch } from '../squelchTracker.js';
@@ -65,14 +68,17 @@ export function createSideView(canvas, store) {
   function layout(w, h, link, range) {
     const zt = zTop(link);
     const left = w < 520 ? 56 : 70, right = 24;
-    const px = Math.min(Math.max((w - left - right) / Math.max(range, 1), 4), 600);
+    const px = Math.min(Math.max((w - left - right) / Math.max(range, 1), 0.005), 600);
     const pxY = (h - 88) / (zt + 0.9);
-    vp.pxPerM = Math.min(px, Math.max(pxY, 4), 600);
+    vp.pxPerM = Math.min(px, Math.max(pxY, 0.005), 600);
     vp.origin.x = left;
     vp.origin.y = h / 2 - ((-zt + 0.9) / 2) * vp.pxPerM;
   }
   const flAt = (pos) => floorHeightAt(store.getScene(), pos.x, pos.y);
-  const zTop = (link) => Math.max(3.2, Math.ceil(Math.max(link.tx.pos.z + flAt(link.tx.pos), link.rx.pos.z + flAt(link.rx.pos)) + 0.3)) + 0.3;
+  const zTop = (link) => {
+    const c = store.getScene().ceiling, ch = c && c.enabled !== false && Number.isFinite(c.heightM) ? Math.min(c.heightM, 25) : 0; // a ceiling stays in view
+    return Math.max(3.2, ch + 0.4, Math.ceil(Math.max(link.tx.pos.z + flAt(link.tx.pos), link.rx.pos.z + flAt(link.rx.pos)) + 0.3)) + 0.3;
+  };
 
   function fit(w = host.width, h = host.height) {
     const link = activeLink(store.getScene(), store.getSelection());
@@ -142,14 +148,37 @@ export function createSideView(canvas, store) {
       handles.push({ kind: 'refBar', itemId: r.id, sx: a.x, sy: (a.y + b.y) / 2, r: 10, bar: [b.y, a.y] });
     }
 
+    // audience (dotted band up to head height), overhead panels (dashed bars at their height) and the ceiling line
+    for (const au of scene.audience || []) {
+      const sp = chordSpan({ x: au.x, y: au.y, width: au.width, depth: au.depth }, S, u); if (!sp) continue;
+      const head = audienceHeadM(au), a1 = vp.worldToScreen(sp[0], -head), b1 = vp.worldToScreen(sp[1], 0);
+      ctx.save(); ctx.fillStyle = `rgba(${th.inkRgb},0.07)`; ctx.fillRect(a1.x, a1.y, b1.x - a1.x, b1.y - a1.y);
+      ctx.fillStyle = th.inkSoft; for (let yy = a1.y + 4; yy < b1.y; yy += 7) for (let xx = a1.x + 4; xx < b1.x; xx += 7) ctx.fillRect(xx, yy, 1.5, 1.5);
+      ctx.setLineDash([2, 3]); ctx.strokeStyle = th.ink; ctx.lineWidth = 1.2; ctx.strokeRect(a1.x + 0.5, a1.y + 0.5, b1.x - a1.x - 1, b1.y - a1.y - 1); ctx.restore();
+      if (b1.x - a1.x > 60) haloText(ctx, th, `${au.name || 'Audience'} (head ${fmtLen(head, scene.units)})`, (a1.x + b1.x) / 2, a1.y - 4, { align: 'center', px: 11, color: th.inkSoft });
+    }
+    for (const op of scene.overheadPanels || []) {
+      const sp = chordSpan({ x: op.x, y: op.y, width: op.width, depth: op.depth }, S, u); if (!sp) continue;
+      const a1 = vp.worldToScreen(sp[0], -op.heightM), b1 = vp.worldToScreen(sp[1], -op.heightM);
+      ctx.save(); ctx.setLineDash([8, 4]); ctx.strokeStyle = th.ink; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(a1.x, a1.y); ctx.lineTo(b1.x, b1.y); ctx.stroke(); ctx.restore();
+      haloText(ctx, th, `${op.name || 'Panel'} ${fmtLen(op.heightM, scene.units)}`, (a1.x + b1.x) / 2, a1.y - 6, { align: 'center', px: 11, color: th.inkSoft });
+    }
+    if (scene.ceiling && scene.ceiling.enabled !== false) {
+      const cy = vp.worldToScreen(0, -scene.ceiling.heightM).y;
+      if (cy > 0 && cy < h) {
+        ctx.save(); ctx.setLineDash([12, 4, 2, 4]); ctx.strokeStyle = th.ink; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(w, cy); ctx.stroke(); ctx.restore();
+        haloText(ctx, th, `CEILING ${fmtLen(scene.ceiling.heightM, scene.units)} (${scene.ceiling.material})`, w - 8, cy - 5, { align: 'right', px: 11, color: th.inkSoft });
+      }
+    }
+
     // rays
     let paths = res?.paths;
     if (!paths) { try { paths = tracePaths(scene, link); } catch { paths = []; } }
     const col = statusColor(th, res?.status);
     const muted = gateOf(link.id) && !gateOf(link.id).open;
     const proj = (p) => vp.worldToScreen(sOf(p), -p.z);
-    const order = { 'floor-wall': 0, wall: 1, floor: 2, direct: 3 };
-    for (const p of [...paths].sort((a, b) => order[a.kind] - order[b.kind])) {
+    const order = { 'floor-ceiling': 0, 'floor-wall': 0, wall: 1, panel: 1, ceiling: 1, floor: 2, direct: 3 };
+    for (const p of [...paths].sort((a, b) => (order[a.kind] ?? 1) - (order[b.kind] ?? 1))) {
       ctx.save();
       ctx.lineWidth = p.kind === 'direct' ? 2.4 : 1.4;
       ctx.strokeStyle = p.kind === 'direct' ? col : th.ink;
@@ -160,7 +189,11 @@ export function createSideView(canvas, store) {
       const mid = proj(midPoint(p.points));
       const rel = p.relDb;
       if (p.kind === 'direct') haloText(ctx, th, `direct ${fmtLen(p.lengthM, scene.units)}`, mid.x, mid.y - 8, { align: 'center', weight: '600' });
-      else if (p.kind === 'floor') {
+      else if (p.kind === 'ceiling' || p.kind === 'panel' || p.kind === 'floor-ceiling') { // reflection point = points[1]
+        const bp = proj(p.points[1] || midPoint(p.points));
+        ctx.fillStyle = th.ink; ctx.beginPath(); ctx.arc(bp.x, bp.y, 3, 0, Math.PI * 2); ctx.fill();
+        haloText(ctx, th, `${p.kind === 'panel' ? 'panel' : p.kind === 'ceiling' ? 'ceiling' : 'floor+ceiling'}${rel != null ? ' ' + fmtDb(rel) : ''}`, bp.x, bp.y - 8, { align: 'center', color: th.inkSoft });
+      } else if (p.kind === 'floor') {
         const bounce = p.points.find((q, i) => i > 0 && i < p.points.length - 1) || midPoint(p.points);
         const bs = proj(bounce);
         ctx.fillStyle = th.ink; ctx.beginPath(); ctx.arc(bs.x, bs.y, 3, 0, Math.PI * 2); ctx.fill();
@@ -245,6 +278,22 @@ export function createSideView(canvas, store) {
     ctx.beginPath(); ctx.arc(p.x, p.y, 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
     if (selected) { ctx.save(); ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.arc(p.x, p.y, 14, 0, Math.PI * 2); ctx.stroke(); ctx.restore(); }
     handles.push({ kind: role, itemId: e.id, linkId: link.id, sx: p.x, sy: p.y, r: 16, wx: s, wy: -(z + fl), fl });
+    // tilt handle: an arrow along the antenna boresight (projected into this slice); drag the tip to pitch the antenna
+    const tilt = Number.isFinite(e.antenna.tiltDeg) ? e.antenna.tiltDeg : 0;
+    if (selected || tilt !== 0) {
+      const b = antennaFrame(e.antenna).b, bs = b[0] * u.x + b[1] * u.y, bz = b[2];
+      const m = Math.hypot(bs, bz) || 1, len = 38, tx = p.x + (bs / m) * len, ty = p.y - (bz / m) * len;
+      const hotT = hoverKey === 'tilt:' + e.id;
+      ctx.save();
+      ctx.strokeStyle = th.ink; ctx.lineWidth = selected ? 1.6 : 1; ctx.setLineDash(selected ? [] : [3, 3]);
+      ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(tx, ty); ctx.stroke(); ctx.setLineDash([]);
+      if (selected) {
+        ctx.fillStyle = hotT ? th.ink : th.paper; ctx.beginPath(); ctx.moveTo(tx, ty - 6); ctx.lineTo(tx + 6, ty); ctx.lineTo(tx, ty + 6); ctx.lineTo(tx - 6, ty); ctx.closePath(); ctx.fill(); ctx.stroke();
+      }
+      ctx.restore();
+      if (selected || tilt !== 0) haloText(ctx, th, `tilt ${tilt > 0 ? '+' : ''}${Math.round(tilt)}\u00b0`, tx + (bs >= 0 ? 10 : -10), ty - 8, { align: bs >= 0 ? 'left' : 'right', px: 12, color: th.inkSoft });
+      if (selected) handles.push({ kind: 'tilt', role, itemId: e.id, linkId: link.id, sx: tx, sy: ty, r: 11, wx: s, wy: -(z + fl), flipS: bs < 0, el });
+    }
   }
 
   // ---- interaction -----------------------------------------------------------------------
@@ -257,6 +306,14 @@ export function createSideView(canvas, store) {
     return best;
   }
   function dragMove(hd, ptr, target, state) {
+    if (hd.kind === 'tilt') {
+      const pitch = tiltFromPointer(ptr.x - hd.wx, -(ptr.y - hd.wy));
+      if (pitch === null) return;
+      const tilt = Math.round(clamp(pitch - (hd.el || 0), -90, 90));
+      setAntennaField(store, hd.linkId, hd.role, 'tiltDeg', tilt, { coalesce: state.key });
+      announce(`${hd.role === 'tx' ? 'Transmit' : 'Receive'} antenna tilt ${tilt} degrees`, { key: 'tilt', delay: 350 });
+      return;
+    }
     if (hd.kind !== 'tx' && hd.kind !== 'rx') return;
     const z = round2(clamp(-target.y - (hd.fl || 0), 0, 5));
     store.update((s) => { const l = s.links.find((q) => q.id === hd.linkId); if (l) l[hd.kind].pos.z = z; }, { coalesce: state.key });

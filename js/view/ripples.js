@@ -12,7 +12,7 @@
 // and spreading loss, reflections use image sources. What is not real: the speed of the rings, which is a slow
 // visual speed (the real wave is about 300 million m/s). Field mode draws the static coherent interference
 // pattern of the direct wave and its reflections (antenna pattern ignored).
-import { antennaGainDb, floorReflection, reflectorCoefficient } from '../model/rf.js';
+import { wavePolarisation, antennaGainDb, floorReflection, reflectorCoefficient } from '../model/rf.js';
 import { solveCached, statusColor, setFont, haloText, drawCost } from './util.js';
 import { gateOf } from './squelchUi.js';
 import { floorHeightAt } from '../model/floor.js';
@@ -83,7 +83,7 @@ export function createRipples({ store }) {
       const dx = w.p2.x - w.p1.x, dy = w.p2.y - w.p1.y, len = Math.hypot(dx, dy) || 1;
       const f = (scene.links[0] && scene.links[0].freqMHz) || 600;
       let g = { re: 0.5, im: 0 };
-      try { g = reflectorCoefficient(w.material, 30, env.polarisation || 'vertical', f); } catch { /* keep default */ }
+      try { g = reflectorCoefficient(w.material, 30, wavePolarisation(scene, scene.links[0]), f); } catch { /* keep default */ }
       reflInfo.push({ w, nx: -dy / len, ny: dx / len, mag: Math.hypot(g.re, g.im), ph: Math.atan2(g.im, g.re), loss: Number.isFinite(w.transmissionLossDb) ? w.transmissionLossDb : null });
     });
     const bearing = { az: 0, el: 0 };
@@ -326,7 +326,7 @@ export function createRipples({ store }) {
       if (env.model !== 'free-space') { // the floor image sits straight below the emitter: circular fringes in the plan
         let gm = 0.5, gph = Math.PI;
         try {
-          const gr = floorReflection(env.floor, env.polarisation || 'vertical', Math.atan2(e.z + link.rx.pos.z, Math.max(Math.hypot(link.rx.pos.x - e.x, link.rx.pos.y - e.y), 1e-6)) / DEG, link.freqMHz);
+          const gr = floorReflection(env.floor, wavePolarisation(scene, link), Math.atan2(e.z + link.rx.pos.z, Math.max(Math.hypot(link.rx.pos.x - e.x, link.rx.pos.y - e.y), 1e-6)) / DEG, link.freqMHz);
           gm = Math.hypot(gr.re, gr.im); gph = Math.atan2(gr.im, gr.re);
         } catch { /* default */ }
         put(e.x, e.y, -e.z, gm, gph);
@@ -364,7 +364,7 @@ export function createRipples({ store }) {
     // floor reflection at the grazing angle of the real Tx -> floor -> Rx path
     let gm = 0.5, gph = Math.PI;
     try {
-      const gr = floorReflection(env.floor, env.polarisation || 'vertical', Math.atan2((zt - hr) + (zr - hr), Math.max(horiz, 1e-6)) / DEG, link.freqMHz);
+      const gr = floorReflection(env.floor, wavePolarisation(scene, link), Math.atan2((zt - hr) + (zr - hr), Math.max(horiz, 1e-6)) / DEG, link.freqMHz);
       gm = Math.hypot(gr.re, gr.im); gph = Math.atan2(gr.im, gr.re);
     } catch { /* default */ }
     const lambda = M.wavelengthM(link.freqMHz);

@@ -51,7 +51,7 @@ export function pathRows(result, scene, lengthUnit = 'm') {
   if (!result) return [];
   return result.paths.map((p) => {
     const via = p.via ? (scene.reflectors || []).find((r) => r.id === p.via)?.name : '';
-    const kind = p.kind === 'floor-wall' ? 'floor + wall' : p.kind;
+    const kind = ({ 'floor-wall': 'floor + wall', 'floor-ceiling': 'floor + ceiling', panel: 'overhead panel' })[p.kind] || p.kind;
     return {
       kind: via ? `${kind} (${via})` : kind,
       length: formatNumber(lengthToUi(p.lengthM, lengthUnit), 2),

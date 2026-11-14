@@ -4,6 +4,7 @@ import { history } from '../history.js';
 import { squelch } from '../squelchTracker.js';
 import { formatPower } from '../model/units.js';
 import { rxState, rxConfig } from '../rxTracker.js';
+import { setSquelchThreshold, SQUELCH_RANGE_DBM } from '../actions.js';
 
 const LATCH_S = 2.5;
 
@@ -28,6 +29,51 @@ export function peakHold(peak, value, now, range) {
   return fallen <= v ? { v, t: now } : { v: fallen, t: peak.t };
 }
 
+// ---- vertical layout and the squelch marker mapping (pure) ------------------------------------------------------------------
+
+/** Vertical bar area inside a canvas of height h: room above for the label and value, below for the baseline. */
+export function barArea(h) { const top = 38, bottom = Math.max(top + 20, h - 6); return { top, bottom }; }
+
+/** y (px) of a level on a vertical meter: min at the bottom, max at the top. Pure. */
+export function yForDbm(dbm, range, top, bottom) { return bottom - frac(dbm, range) * (bottom - top); }
+
+/** Level (dBm) under a pointer at y, snapped to 1 dB and clamped to the squelch range. Pure. */
+export function dbmForY(y, range, top, bottom) {
+  const f = Math.min(1, Math.max(0, (bottom - y) / Math.max(1, bottom - top)));
+  const v = Math.round(range.min + f * (range.max - range.min));
+  return Math.min(SQUELCH_RANGE_DBM.max, Math.max(SQUELCH_RANGE_DBM.min, v));
+}
+
+/** Keyboard step for the squelch slider: arrows 1 dB (Shift 5 dB), Page keys 5 dB, Home and End the range ends. Returns the new dBm or null. Pure. */
+export function squelchKeyStep(v, key, shift = false) {
+  const cur = Number.isFinite(v) ? v : -90, big = shift ? 5 : 1;
+  const clampV = (x) => Math.min(SQUELCH_RANGE_DBM.max, Math.max(SQUELCH_RANGE_DBM.min, Math.round(x)));
+  switch (key) {
+    case 'ArrowUp': case 'ArrowRight': return clampV(cur + big);
+    case 'ArrowDown': case 'ArrowLeft': return clampV(cur - big);
+    case 'PageUp': return clampV(cur + 5);
+    case 'PageDown': return clampV(cur - 5);
+    case 'Home': return SQUELCH_RANGE_DBM.min;
+    case 'End': return SQUELCH_RANGE_DBM.max;
+    default: return null;
+  }
+}
+
+/** Which vertical bars to draw, left to right, from the latest history sample. Pure. */
+export function barList(last) {
+  const bars = [{ id: 'rf', label: 'RF' }, { id: 'audio', label: 'Audio' }];
+  if (last && Number.isFinite(last.bDbm)) bars.push({ id: 'a', label: 'A' }, { id: 'b', label: 'B' });
+  if (last && Number.isFinite(last.batteryPercent)) bars.push({ id: 'batt', label: 'Batt' });
+  return bars;
+}
+
+/** Column x positions: a left gutter for the RF scale, then equal columns. Pure. */
+export function barColumns(w, n, gutter = 30) {
+  const step = Math.floor((w - gutter - 4) / Math.max(1, n));
+  const colW = Math.max(14, Math.min(40, step - 6));
+  return Array.from({ length: n }, (_, i) => ({ x: gutter + i * step + Math.floor((step - colW) / 2), w: colW }));
+}
+
 export function mountMeters({ container, store }) {
   container.classList.add('meters');
   container.textContent = '';
@@ -38,17 +84,25 @@ export function mountMeters({ container, store }) {
   const chip = document.createElement('span');
   chip.className = 'chip';
   head.append(h2, chip);
+  const wrap = document.createElement('div');
+  wrap.className = 'meters-wrap';
   const canvas = document.createElement('canvas');
   canvas.className = 'meters-canvas';
   canvas.setAttribute('role', 'img');
   canvas.setAttribute('aria-label', 'RF level and audio level meters');
-  canvas.style.height = '124px';
+  // draggable squelch marker on the RF bar: a real slider element so keyboard and screen readers work
+  const sqH = document.createElement('div');
+  sqH.className = 'meters-sq'; sqH.tabIndex = 0; sqH.setAttribute('role', 'slider');
+  sqH.setAttribute('aria-orientation', 'vertical'); sqH.setAttribute('aria-label', 'Squelch threshold');
+  sqH.setAttribute('aria-valuemin', String(SQUELCH_RANGE_DBM.min)); sqH.setAttribute('aria-valuemax', String(SQUELCH_RANGE_DBM.max));
+  sqH.title = 'Squelch threshold: drag, or use the arrow keys (Shift for 5 dB)';
+  wrap.append(canvas, sqH);
   const ovLed = document.createElement('span');
   ovLed.className = 'chip chip-overload'; ovLed.textContent = 'RF OVERLOAD'; ovLed.hidden = true; ovLed.setAttribute('role', 'status');
   head.append(ovLed);
   const ovText = document.createElement('p');
   ovText.className = 'hint meters-ov';
-  container.append(head, canvas, ovText);
+  container.append(head, wrap, ovText);
   let latchUntil = 0, latchTimer = 0;
 
   let rf = null, au = null;
@@ -94,57 +148,114 @@ export function mountMeters({ container, store }) {
     ovText.textContent = `Front end ${o.level === 'ok' ? 'OK' : o.level === 'hot' ? 'HOT' : 'OVERLOAD'}: headroom ${sg(o.headroomDb)} dB, compression ${o.compressionDb.toFixed(1)} dB, IM3 distortion ${o.distortionPct < 0.1 ? '<0.1' : o.distortionPct.toFixed(1)} %`;
   }
 
+  let geom = null; // { top, bottom, cols } of the last draw, used to place the squelch marker
+  function placeSq() {
+    const on = !!link && link.rx.squelch?.enabled !== false && geom;
+    sqH.hidden = !on;
+    if (!on) return;
+    const thr = link.rx.squelch.thresholdDbm;
+    const col = geom.cols[0], y = yForDbm(thr, RF_RANGE, geom.top, geom.bottom);
+    sqH.style.left = `${col.x - 4}px`; sqH.style.width = `${col.w + 8}px`; sqH.style.top = `${Math.round(y) - 12}px`;
+    sqH.setAttribute('aria-valuenow', String(Math.round(thr)));
+    sqH.setAttribute('aria-valuetext', `${formatPower(thr, unit)}`);
+  }
+
   function draw(ctx, w, h, th) {
     if (!link) return;
     const open = last ? last.open : true;
-    const labelW = w < 360 ? 44 : 56, x0 = labelW + 4, x1 = w - 10;
-    const bar = (y, label, value, range, peak, color, text, tick, zones, ticks2) => {
-      const bh = 16;
-      haloText(ctx, th, label, 2, y + 13, { px: 12, weight: '600' });
-      ctx.fillStyle = th.paper2; ctx.fillRect(x0, y, x1 - x0, bh);
-      if (zones) for (const [a, b, c] of zones) {
-        const xa = x0 + frac(a, range) * (x1 - x0), xb = x0 + frac(b, range) * (x1 - x0);
-        ctx.fillStyle = c; ctx.globalAlpha = 0.28; ctx.fillRect(xa, y, xb - xa, bh); ctx.globalAlpha = 1;
-      }
-      ctx.fillStyle = color; ctx.fillRect(x0, y, frac(value, range) * (x1 - x0), bh);
-      ctx.strokeStyle = th.ink; ctx.lineWidth = 1; ctx.strokeRect(x0 + 0.5, y + 0.5, x1 - x0 - 1, bh - 1);
-      if (peak && Number.isFinite(peak.v)) {
-        const px = Math.round(x0 + frac(peak.v, range) * (x1 - x0)) + 0.5;
-        ctx.strokeStyle = th.ink; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(px, y - 2); ctx.lineTo(px, y + bh + 2); ctx.stroke();
-      }
-      if (tick != null && Number.isFinite(tick)) {
-        const tx = Math.round(x0 + frac(tick, range) * (x1 - x0)) + 0.5;
-        ctx.save(); ctx.strokeStyle = th.fail; ctx.lineWidth = 1.5; ctx.setLineDash([3, 2]);
-        ctx.beginPath(); ctx.moveTo(tx, y - 5); ctx.lineTo(tx, y + bh + 5); ctx.stroke(); ctx.restore();
-      }
-      if (ticks2) for (const [v, name] of ticks2) {
-        const tx = Math.round(x0 + frac(v, range) * (x1 - x0)) + 0.5;
-        ctx.strokeStyle = th.ink; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(tx, y + bh - 5); ctx.lineTo(tx, y + bh + 4); ctx.stroke();
-        setFont(ctx, th, 10); ctx.fillStyle = th.inkSoft; ctx.textAlign = 'center'; ctx.fillText(name, Math.min(tx, x1 - 8), y - 3);
-      }
-      setFont(ctx, th, 12);
-      ctx.fillStyle = th.ink; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-      ctx.fillText(text, x0, y + bh + 15);
-    };
-    const rfV = last ? last.rfDbm : NaN;
+    const { top, bottom } = barArea(h);
+    const bars = barList(last);
+    const cols = barColumns(w, bars.length);
+    geom = { top, bottom, cols };
+    const rfV = last ? last.rfDbm : NaN, aV = last ? last.audioDb : NaN;
     const thr = link.rx.squelch?.enabled === false ? null : link.rx.squelch?.thresholdDbm;
     const oc = rxConfig(link);
     const ovPoint = Math.min(oc.p1dBDbm, oc.maxInputDbm);
     const zones = [[oc.p1dBDbm - (oc.hotMarginDb ?? 10), ovPoint, th.marginal], [ovPoint, RF_RANGE.max, th.fail]];
-    const tk = [[oc.p1dBDbm, 'P1dB'], ...(oc.maxInputDbm !== oc.p1dBDbm ? [[oc.maxInputDbm, 'max']] : [])];
-    const ifr = link.interferer && link.interferer.enabled ? link.interferer : null;
-    const sq0 = ifr ? squelch.get(link.id) : null, ms = sq0 && sq0.capture ? sq0.capture : null;
-    if (ifr) tk.push([ifr.levelDbm, 'stray']);
-    bar(18, 'RF', rfV, RF_RANGE, rf, open ? th.pass : th.fail,
-      `${Number.isFinite(rfV) ? formatPower(rfV, unit) : '-'}${thr != null ? `   squelch ${formatPower(thr, unit)}` : ''}}`, thr, zones, tk);
-    const aV = last ? last.audioDb : NaN;
-    if (ifr) {
-      setFont(ctx, th, 11, '600'); ctx.fillStyle = th.warnText; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-      ctx.fillText(`stray ${formatPower(ifr.levelDbm, unit)}${ms && Number.isFinite(ms.cirDb) ? `, C/I ${ms.cirDb >= 0 ? '+' : '−'}${Math.abs(ms.cirDb).toFixed(1)} dB` : ''}`, x0, 62);
+    // RF scale in the gutter
+    setFont(ctx, th, 11); ctx.fillStyle = th.inkSoft; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    for (let v = RF_RANGE.min + 10; v <= RF_RANGE.max; v += 20) {
+      const y = Math.round(yForDbm(v, RF_RANGE, top, bottom)) + 0.5;
+      ctx.strokeStyle = th.grid; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(28, y); ctx.lineTo(w - 2, y); ctx.stroke();
+      ctx.fillText(String(v), 26, y);
     }
-    bar(70, 'Audio', aV, AUDIO_RANGE, au, th.ink,
-      last && !last.open ? 'muted' : `${Number.isFinite(aV) ? aV.toFixed(1) : '-'} dBFS`, null);
+    ctx.textBaseline = 'alphabetic';
+    const bar = (col, rng, value, peak, color, zs) => {
+      ctx.fillStyle = th.paper2; ctx.fillRect(col.x, top, col.w, bottom - top);
+      if (zs) for (const [lo, hi, c] of zs) {
+        const ya = yForDbm(hi, rng, top, bottom), yb = yForDbm(lo, rng, top, bottom);
+        ctx.fillStyle = c; ctx.globalAlpha = 0.28; ctx.fillRect(col.x, ya, col.w, yb - ya); ctx.globalAlpha = 1;
+      }
+      const yv = yForDbm(value, rng, top, bottom);
+      if (Number.isFinite(value)) { ctx.fillStyle = color; ctx.fillRect(col.x, yv, col.w, bottom - yv); }
+      ctx.strokeStyle = th.ink; ctx.lineWidth = 1; ctx.strokeRect(col.x + 0.5, top + 0.5, col.w - 1, bottom - top - 1);
+      if (peak && Number.isFinite(peak.v)) {
+        const py = Math.round(yForDbm(peak.v, rng, top, bottom)) + 0.5;
+        ctx.strokeStyle = th.ink; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(col.x - 2, py); ctx.lineTo(col.x + col.w + 2, py); ctx.stroke();
+      }
+    };
+    const text = (col, label, val) => {
+      const cx = col.x + col.w / 2;
+      setFont(ctx, th, 12, '600'); ctx.fillStyle = th.ink; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      ctx.fillText(label, cx, 14);
+      setFont(ctx, th, 12); ctx.fillStyle = th.inkSoft; ctx.fillText(val, cx, 30);
+    };
+    bars.forEach((b, i) => {
+      const col = cols[i];
+      if (b.id === 'rf') {
+        bar(col, RF_RANGE, rfV, rf, open ? th.pass : th.fail, zones);
+        text(col, 'RF', Number.isFinite(rfV) ? String(Math.round(rfV)) : '-');
+        if (thr != null && Number.isFinite(thr)) { // squelch tick (the draggable slider sits on top of it)
+          const y = Math.round(yForDbm(thr, RF_RANGE, top, bottom)) + 0.5;
+          ctx.save(); ctx.strokeStyle = th.fail; ctx.lineWidth = 2; ctx.setLineDash([4, 2]);
+          ctx.beginPath(); ctx.moveTo(col.x - 4, y); ctx.lineTo(col.x + col.w + 4, y); ctx.stroke(); ctx.restore();
+          ctx.fillStyle = th.fail; ctx.beginPath(); ctx.moveTo(col.x + col.w + 4, y); ctx.lineTo(col.x + col.w + 10, y - 4); ctx.lineTo(col.x + col.w + 10, y + 4); ctx.closePath(); ctx.fill();
+        }
+      } else if (b.id === 'audio') {
+        bar(col, AUDIO_RANGE, aV, au, th.ink);
+        text(col, 'Audio', last && !last.open ? 'mute' : Number.isFinite(aV) ? String(Math.round(aV)) : '-');
+      } else if (b.id === 'a' || b.id === 'b') {
+        const v = b.id === 'a' ? last.aDbm : last.bDbm, act = last.active === b.id.toUpperCase();
+        bar(col, RF_RANGE, v, null, th.blue);
+        if (act) { ctx.strokeStyle = th.ink; ctx.lineWidth = 3; ctx.strokeRect(col.x - 1, top - 1, col.w + 2, bottom - top + 2); }
+        text(col, act ? `${b.label}*` : b.label, Number.isFinite(v) ? String(Math.round(v)) : '-');
+      } else {
+        bar(col, { min: 0, max: 100 }, last.batteryPercent, null, last.batteryPercent < 15 ? th.fail : th.pass);
+        text(col, 'Batt', `${Math.round(last.batteryPercent)}%`);
+      }
+    });
+    const ifr = link.interferer && link.interferer.enabled ? link.interferer : null;
+    if (ifr && Number.isFinite(ifr.levelDbm)) { // stray carrier tick on the RF bar
+      const y = Math.round(yForDbm(ifr.levelDbm, RF_RANGE, top, bottom)) + 0.5;
+      ctx.save(); ctx.strokeStyle = th.warnText; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cols[0].x, y); ctx.lineTo(cols[0].x + cols[0].w, y); ctx.stroke(); ctx.restore();
+    }
+    const sum = `RF ${Number.isFinite(rfV) ? formatPower(rfV, unit) : 'no signal'}${thr != null ? `, squelch ${formatPower(thr, unit)}` : ', squelch off'}; audio ${open && Number.isFinite(aV) ? aV.toFixed(0) + ' dBFS' : 'muted'}${bars.some((x) => x.id === 'a') ? `; diversity A ${Math.round(last.aDbm)}, B ${Math.round(last.bDbm)}, antenna ${last.active} active` : ''}${bars.some((x) => x.id === 'batt') ? `; battery ${Math.round(last.batteryPercent)} percent` : ''}.`;
+    if (sum !== lastSum) { lastSum = sum; canvas.setAttribute('aria-label', 'Vertical meters. ' + sum); }
+    placeSq();
   }
+  let lastSum = '';
+
+  // squelch marker: pointer drag (one undo step per drag) and keyboard
+  let dragKey = null;
+  const sqY = (e) => { const r = canvas.getBoundingClientRect(); return e.clientY - r.top; };
+  sqH.addEventListener('pointerdown', (e) => {
+    if (!link || !geom) return;
+    if (sqH.setPointerCapture) sqH.setPointerCapture(e.pointerId);
+    dragKey = `squelch-drag-${Date.now()}`; e.preventDefault(); sqH.focus();
+  });
+  sqH.addEventListener('pointermove', (e) => {
+    if (!dragKey || !link || !geom) return;
+    setSquelchThreshold(store, link.id, dbmForY(sqY(e), RF_RANGE, geom.top, geom.bottom), { coalesce: dragKey });
+  });
+  const endDrag = () => { dragKey = null; };
+  sqH.addEventListener('pointerup', endDrag); sqH.addEventListener('pointercancel', endDrag);
+  sqH.addEventListener('keydown', (e) => {
+    if (!link) return;
+    const v = squelchKeyStep(link.rx.squelch?.thresholdDbm, e.key, e.shiftKey);
+    if (v === null) return;
+    e.preventDefault();
+    setSquelchThreshold(store, link.id, v, { coalesce: `squelch-key-${link.id}` });
+  });
 
   const host = createCanvasHost(canvas, draw);
 

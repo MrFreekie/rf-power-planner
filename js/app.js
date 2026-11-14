@@ -25,6 +25,9 @@ import { mountScenes } from './ui/scenes.js';
 import { mountCompare } from './ui/compare.js';
 import { mountCoordination } from './ui/coordination.js';
 import { mountGlossary } from './ui/glossary.js';
+import { mountPanels } from './ui/panels.js';
+import { activeLink as pickActiveLink } from './view/util.js';
+import { budgetExtras } from './ui/budgetExtras.js';
 
 const $ = (id) => document.getElementById(id);
 // The storage key keeps its original, pre-rename name on purpose: changing it would orphan scenes people already saved.
@@ -61,7 +64,8 @@ imd.install(store, squelch);
 mpx.install(squelch); // MPX state + pilot squelch ride on the squelch tracker
 squelch.attach(store); // before views mount so they can read the state
 history.attach(store, squelch);
-const activeLink = () => store.getScene().links[0];
+// the link the user is working on: the selected item's link, else the first link
+const activeLink = () => pickActiveLink(store.getScene(), store.getSelection());
 
 // ---- toolbar -------------------------------------------------------------
 
@@ -81,6 +85,7 @@ function setKind(kind) {
 
 $('btn-mic').addEventListener('click', () => setKind('mic'));
 $('btn-iem').addEventListener('click', () => setKind('iem'));
+$('btn-p2p').addEventListener('click', () => setKind('p2p'));
 $('btn-two-ray').addEventListener('click', () => store.update((d) => { d.environment.model = 'two-ray'; }));
 $('btn-free-space').addEventListener('click', () => store.update((d) => { d.environment.model = 'free-space'; }));
 $('floor').addEventListener('change', (e) => store.update((d) => { d.environment.floor = e.target.value; }));
@@ -297,10 +302,11 @@ document.addEventListener('keydown', (e) => {
 // ---- render --------------------------------------------------------------
 
 function renderToolbar(scene) {
-  const link = scene.links[0];
+  const link = pickActiveLink(scene, store.getSelection());
   const press = (id, on) => $(id).setAttribute('aria-pressed', String(on));
   press('btn-mic', link.kind === 'mic');
   press('btn-iem', link.kind === 'iem');
+  press('btn-p2p', link.kind === 'p2p');
   press('btn-two-ray', scene.environment.model === 'two-ray');
   press('btn-free-space', scene.environment.model === 'free-space');
   for (const b of document.querySelectorAll('[data-power]')) b.setAttribute('aria-pressed', String(b.dataset.power === scene.units.power));
@@ -337,8 +343,22 @@ function renderWarnings(list) {
   ul.hidden = items.length === 0;
 }
 
+function renderExtras(r) {
+  const dl = $('readout-extra');
+  const rows = budgetExtras(r);
+  const sig = JSON.stringify(rows);
+  if (dl.dataset.sig === sig) return;
+  dl.dataset.sig = sig;
+  dl.replaceChildren(...rows.map((x) => {
+    const d = document.createElement('div'), dt = document.createElement('dt'), dd = document.createElement('dd');
+    dt.textContent = x.label; dd.textContent = x.value; dd.dataset.severity = x.severity;
+    d.append(dt, dd); return d;
+  }));
+  dl.hidden = rows.length === 0;
+}
+
 function renderResults(scene) {
-  const link = scene.links[0];
+  const link = pickActiveLink(scene, store.getSelection());
   const status = $('r-status');
   try {
     const r = solveLink(scene, link);
@@ -352,11 +372,13 @@ function renderResults(scene) {
     status.textContent = r.status.toUpperCase();
     status.dataset.status = r.status;
     renderWarnings(r.warnings);
+    renderExtras(r);
     showError(loadError);
   } catch (err) {
     for (const id of ['r-distance', 'r-rx', 'r-input', 'r-margin', 'r-nf', 'r-floor', 'r-status']) $(id).textContent = '-';
     status.dataset.status = '';
     renderWarnings([]);
+    renderExtras(null);
     showError(`Could not solve link: ${err.message}`);
   }
 }
@@ -368,7 +390,7 @@ function render(scene) {
 
 let lastSaved = null;
 store.subscribe((scene, info) => {
-  if (info.type === 'selection') return; // views handle selection themselves
+  if (info.type === 'selection') { render(scene); return; } // views redraw themselves; the readout and toolbar follow the selected link
   if (info.type === 'scene') loadError = '';
   render(scene);
   const text = serialize(scene);
@@ -425,6 +447,9 @@ for (const [name, fn] of [
   try { fn(); } catch (err) { console.error(name, err); }
 }
 if (staleCleared) showStatus('Your previously saved scene could not be read, so it was discarded and the default scene is shown.', 8000);
+
+// collapsible panels (left budgets, right inspector, bottom bar) and the focus-plot toggle
+try { mountPanels(); } catch (err) { console.error('panels', err); }
 
 // venue underlay button and dialog (optional: a failure must not break the planner)
 try {

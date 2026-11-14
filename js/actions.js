@@ -7,7 +7,7 @@ import { effectiveAntennaB } from './model/diversity.js';
 import { createDefaultScene, createDefaultLink, createChainItem, createReflector, createBranch, createZone, createPlatform, STAGE_LIMITS, PLATFORM_LIMITS, PLATFORM_MATERIALS, createImdTransmitter, defaultImdTransmitters, newId, SCENE_LIMITS } from './model/scene.js';
 import { applyFmPreset } from './model/fm-presets.js';
 import { validateVenue } from './model/venue-underlay.js';
-import { SURFACES } from './model/library.js';
+import { SURFACES, ANTENNAS, GROUND_PLANE_GAIN_DBI, allowedPolarisations, defaultPolarisation, ANTENNA_CONTACT_LOSS_DB, ANTENNA_DAMPNESS_LOSS_DB } from './model/library.js';
 
 const UNSAFE = new Set(['__proto__', 'prototype', 'constructor']);
 
@@ -141,7 +141,7 @@ const stash = new WeakMap();
 
 /** Switch a link between 'mic' and 'iem', keeping its id and frequency and restoring earlier edits of the other kind. */
 export function setLinkKind(store, linkId, kind) {
-  if (kind !== 'mic' && kind !== 'iem') return false;
+  if (kind !== 'mic' && kind !== 'iem' && kind !== 'p2p') return false;
   return store.update((d) => {
     const i = d.links.findIndex((l) => l.id === linkId);
     if (i < 0 || d.links[i].kind === kind) return;
@@ -481,6 +481,78 @@ export function setAntennaBOrientation(store, linkId, orientation, o = {}) {
   }, opts(o));
 }
 
+// ---- antenna orientation details: tilt, roll, polarisation, ground plane, contact, dampness --------------------------
+
+export const ANTENNA_FIELDS = Object.freeze(['tiltDeg', 'rollDeg', 'polarisation', 'groundPlane', 'contact', 'dampness']);
+
+/** The antenna object a target names: 'tx' | 'rx' | 'antennaB' (its own antenna, only when set) | { branch: id }. Null when absent. */
+export function antennaOf(link, target) {
+  if (!link) return null;
+  if (target === 'tx') return link.tx && link.tx.antenna;
+  if (target === 'rx') return link.rx && link.rx.antenna;
+  if (target === 'antennaB') return (link.rx && link.rx.diversity && link.rx.diversity.antennaB && link.rx.diversity.antennaB.antenna) || null;
+  if (target && target.branch && Array.isArray(link.branches)) {
+    const i = link.branches.findIndex((b) => b.id === target.branch);
+    if (i < 0) return null;
+    return i === 0 ? link.tx.antenna : link.branches[i].antenna; // branch 0 mirrors tx
+  }
+  return null;
+}
+
+/**
+ * setAntennaField(store, linkId, target, field, value, { coalesce }): write one optional antenna field, or delete it when the value
+ * is the default (tilt or roll 0 / null, polarisation / groundPlane null or '', contact 'free', dampness 'dry'). Invalid values are
+ * ignored. Tilt is clamped to -90..90, roll to -180..180. Setting groundPlane also sets gainDbi from GROUND_PLANE_GAIN_DBI; clearing it
+ * restores the library gain. groundPlane applies to quarter-wave antennas only. Returns true when the scene changed.
+ */
+export function setAntennaField(store, linkId, target, field, value, o = {}) {
+  if (!ANTENNA_FIELDS.includes(field)) return false;
+  let changed = false;
+  store.update((d) => {
+    const a = antennaOf(findLink(d, linkId), target);
+    if (!a) return;
+    const none = value === null || value === undefined || value === '';
+    if (field === 'tiltDeg' || field === 'rollDeg') {
+      const lim = field === 'tiltDeg' ? 90 : 180;
+      if (none || value === 0) { if (field in a) { delete a[field]; changed = true; } return; }
+      if (!Number.isFinite(value)) return;
+      a[field] = Math.max(-lim, Math.min(lim, value)); changed = true; return;
+    }
+    if (field === 'groundPlane') {
+      if (a.type !== 'quarterwave') return;
+      if (none) { delete a.groundPlane; if (ANTENNAS.quarterwave) a.gainDbi = ANTENNAS.quarterwave.gainDbi; changed = true; return; }
+      if (!Object.prototype.hasOwnProperty.call(GROUND_PLANE_GAIN_DBI, value)) return;
+      a.groundPlane = value; a.gainDbi = GROUND_PLANE_GAIN_DBI[value]; changed = true; return;
+    }
+    if (field === 'polarisation') { // always explicit: null or '' means the default for this antenna type; a value illegal for the type is ignored
+      if (none) { a.polarisation = defaultPolarisation(a.type); changed = true; return; }
+      if (!allowedPolarisations(a.type).includes(value)) return;
+      a.polarisation = value; changed = true; return;
+    }
+    const ok = Object.prototype.hasOwnProperty.call(field === 'contact' ? ANTENNA_CONTACT_LOSS_DB : ANTENNA_DAMPNESS_LOSS_DB, value);
+    const dflt = none || (field === 'contact' && value === 'free') || (field === 'dampness' && value === 'dry');
+    if (dflt) { if (field in a) { delete a[field]; changed = true; } return; }
+    if (!ok) return;
+    a[field] = value; changed = true;
+  }, opts(o));
+  return changed;
+}
+
+/** setAntennaType(store, linkId, target, type): change the model, take its library gain and drop a ground plane that no longer applies. */
+export function setAntennaType(store, linkId, target, type) {
+  if (!ANTENNAS[type]) return false;
+  let changed = false;
+  store.update((d) => {
+    const a = antennaOf(findLink(d, linkId), target);
+    if (!a) return;
+    a.type = type; a.gainDbi = ANTENNAS[type].gainDbi;
+    if (type !== 'quarterwave') delete a.groundPlane;
+    if (!allowedPolarisations(type).includes(a.polarisation)) a.polarisation = defaultPolarisation(type); // linear <-> circular
+    changed = true;
+  });
+  return changed;
+}
+
 // ---- stage size, deck height and raised platforms ---------------------------------------------------------------
 // pos.z of every item is the height above the LOCAL floor (the deck, or the top of the platform it stands on).
 
@@ -636,4 +708,21 @@ export function setVenueLayerHidden(store, name, hidden) {
   const cur = v && v.layers.find((L) => L.name === name);
   if (!cur || cur.hidden === !!hidden) return false;
   return store.update((d) => { d.venue = { layers: v.layers.map((L) => (L.name === name ? { ...L, hidden: !!hidden } : L)) }; });
+}
+
+/**
+ * Set a link's squelch threshold in dBm (snapped to 1 dB, clamped to -120..0). Ignored while the squelch is off or for a bad number.
+ * Pass { coalesce } while dragging so the whole drag is one undo step.
+ */
+export const SQUELCH_RANGE_DBM = Object.freeze({ min: -120, max: 0 });
+export function setSquelchThreshold(store, linkId, dbm, opts = {}) {
+  if (!Number.isFinite(dbm)) return false;
+  const v = Math.min(SQUELCH_RANGE_DBM.max, Math.max(SQUELCH_RANGE_DBM.min, Math.round(dbm)));
+  let ok = false;
+  store.update((d) => {
+    const l = d.links.find((x) => x.id === linkId);
+    if (!l || !l.rx || !l.rx.squelch || l.rx.squelch.enabled === false) return;
+    l.rx.squelch.thresholdDbm = v; ok = true;
+  }, opts.coalesce ? { coalesce: opts.coalesce } : {});
+  return ok;
 }

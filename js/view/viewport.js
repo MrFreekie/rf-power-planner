@@ -2,7 +2,7 @@
 // World x grows right, world y grows DOWN on screen (plan: y = toward audience).
 // The side view uses the same class with world = (s, -z) so that z is up on screen.
 
-export const MIN_PX_PER_M = 4;
+export const MIN_PX_PER_M = 0.005; // down to about 10 km across a phone screen (point-to-point links)
 export const MAX_PX_PER_M = 600;
 
 /** Nice grid step in metres (1, 2, 5 x 10^n) whose on-screen size is at least targetPx. */

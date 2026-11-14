@@ -2,9 +2,13 @@
 //   EXAMPLES: [{ id, title, note, build() -> { scene, walk?: { to, speedMps, pingPong }, select? } }]
 //   getExample(id), buildExample(id) -> { id, title, note, scene, walk, selectId }
 import { applyFmPreset } from './model/fm-presets.js';
-import { createDefaultScene, createDefaultLink, createChainItem, createReflector, createBranch, createZone, createDefaultImd, createImdTransmitter, createPlatform, newId, syncScene } from './model/scene.js';
+import { solveLink, chainLossDb } from './model/rf.js';
+import { overloadStep } from './model/overload.js';
+import { RX_PRESETS } from './model/rx-params.js';
+import { imdSummary } from './model/imd.js';
+import { createDefaultScene, createDefaultLink, createChainItem, createReflector, createBranch, createZone, createDefaultImd, createImdTransmitter, createPlatform, createAudience, createCeiling, createChainItemFromPreset, newId, syncScene, migrateAntennaPolarisation } from './model/scene.js';
 
-const omni = (el = 90) => ({ type: 'omni', gainDbi: 0, orientation: { az: 0, el } });
+const omni = (el = 90, polarisation = 'vertical') => ({ type: 'omni', gainDbi: 0, orientation: { az: 0, el }, polarisation });
 
 /** Base scene with a single link of the given kind; `fn(scene, link)` customises it. */
 function make(kind, fn) {
@@ -13,16 +17,16 @@ function make(kind, fn) {
   scene.links = [createDefaultLink(kind)];
   fn(scene, scene.links[0]);
   if (scene.stage.heightM === undefined) scene.stage.heightM = 0;
+  migrateAntennaPolarisation(scene); // every link antenna carries an explicit polarisation
   return syncScene(scene);
 }
 
-/** Two-ray geometry used by several examples: omni antennas over a hard floor, horizontal polarisation. */
+/** Two-ray geometry used by several examples: omni antennas over a hard floor, horizontal polarisation (set per antenna). */
 function twoRay(scene, link) {
   scene.environment.floor = 'concrete';
-  scene.environment.polarisation = 'horizontal';
   link.name = 'Mic 1';
-  link.tx.antenna = omni();
-  link.rx.antenna = omni();
+  link.tx.antenna = omni(90, 'horizontal'); // horizontal polarisation: TE reflections, the fades differ from vertical
+  link.rx.antenna = omni(90, 'horizontal');
   link.rx.pos = { x: 11, y: 6.5, z: 1.0 };
   link.tx.pos = { x: 8, y: 6.5, z: 1.75 };
   link.rx.squelch = { enabled: true, thresholdDbm: -42, hysteresisDb: 2 };
@@ -33,7 +37,6 @@ function twoRay(scene, link) {
 /** Same stage, same 10 m link, same omni antennas and 5 m of RG58 on the receive side: only the carrier frequency differs. */
 function sameStage(scene, link, freqMHz) {
   scene.environment.floor = 'wood';
-  scene.environment.polarisation = 'vertical';
   link.freqMHz = freqMHz;
   link.tx.antenna = omni();
   link.rx.antenna = omni();
@@ -74,7 +77,335 @@ function iemHall(s, l, m) {
   m.transmitters.forEach((t, i) => { t.pos = { x: 3 + i * 0.2, y: 10, z: 1.5 }; });
 }
 
-const OMNI_IMD = () => ({ type: 'omni', gainDbi: 0, orientation: { az: 0, el: 90 } });
+/**
+ * Antenna band mismatch examples (group i). bandScene(id, opts) builds the six scenes; every design band and loss is an ASSUMED round
+ * number for teaching (antenna-band.js), not product data. The notes quote figures recomputed in tests/antenna-band.test.mjs.
+ *   'whip-wrong-band':    mic at 830 MHz, receive whip cut for 470-520 (opts.right = true: a whip cut for 790-865 instead)
+ *   'uhf-vs-2g4':         600 MHz mic with a 2.4 GHz receive antenna (opts.reverse: a 2.4 GHz link with a UHF 600-700 antenna)
+ *   'iem-tx-wrong-band':  606.1 MHz IEM Tx into an antenna cut for 863-865: reflected power; opts.isolator = 0.5 dB / 20 dB isolator, opts.pad = 6 dB pad
+ *   'wideband-vs-whips':  830 MHz mic, wideband receive antenna (470-960) against a whip cut for 470-520
+ *   'whip-trim':          606 MHz mic, whip cut for 570-608 (opts.trimmed = true: cut for 596-616)
+ *   'filter-wrong-band':  IEM at 606.1 MHz through a bandpass filter for 863-865 in the transmit chain (opts.right = a 590-640 filter)
+ */
+export const BAND_EXAMPLE_FREQ_MHZ = { 'whip-wrong-band': 830, 'uhf-vs-2g4': 600, 'iem-tx-wrong-band': 606.1, 'wideband-vs-whips': 830, 'whip-trim': 606, 'filter-wrong-band': 606.1 };
+export function bandScene(id, { right = false, reverse = false, isolator = false, pad = false, trimmed = false } = {}) {
+  const hall = (s, l, f) => {
+    s.stage = { width: 30, depth: 20 };
+    s.environment.floor = 'wood';
+    l.freqMHz = f;
+    l.tx.pos = { x: 3, y: 10, z: 1.5 };
+    l.rx.pos = { x: 13, y: 10, z: 1.2 };
+    l.rx.diversity.antennaB.pos = { x: 13, y: 9.4, z: 1.2 };
+  };
+  const whip = (band) => ({ type: 'omni', gainDbi: 0, orientation: { az: 0, el: 90 }, designBand: band });
+  switch (id) {
+    case 'whip-wrong-band': return make('mic', (s, l) => { hall(s, l, 830); l.tx.antenna = omni(); l.rx.antenna = whip(right ? 'uhf-800' : 'uhf-470-520'); l.chain = [createChainItem('cable', { cableType: 'rg58', lengthM: 5 })]; });
+    case 'uhf-vs-2g4': return make('mic', (s, l) => {
+      hall(s, l, reverse ? 2440 : 600); l.tx.antenna = omni();
+      l.rx.antenna = whip(reverse ? 'uhf-600-700' : 'ism-2400');
+      l.chain = [createChainItem('cable', { cableType: 'rg58', lengthM: 2 })];
+    });
+    case 'iem-tx-wrong-band': return make('iem', (s, l) => {
+      hall(s, l, 606.1); l.tx.powerDbm = 20; // 100 mW
+      l.tx.antenna = whip('srd-863-865'); l.rx.antenna = { type: 'body', gainDbi: -3, orientation: { az: 0, el: 90 } };
+      l.chain = [];
+      if (isolator) l.chain.push(createChainItem('attenuator', { lossDb: 0.5, reverseIsolationDb: 20 }));
+      if (pad) l.chain.push(createChainItem('attenuator', { lossDb: 6 }));
+    });
+    case 'wideband-vs-whips': return make('mic', (s, l) => { hall(s, l, 830); l.tx.antenna = omni(); l.rx.antenna = whip('tv-wide'); l.chain = [createChainItem('cable', { cableType: 'rg58', lengthM: 5 })]; });
+    case 'whip-trim': return make('mic', (s, l) => { hall(s, l, 606); l.tx.antenna = omni(); l.rx.antenna = whip(trimmed ? { loMHz: 596, hiMHz: 616, label: 'trimmed whip 596-616 MHz (assumed)' } : 'uhf-570-608'); l.chain = [createChainItem('cable', { cableType: 'rg58', lengthM: 5 })]; });
+    case 'filter-wrong-band': return make('iem', (s, l) => {
+      hall(s, l, 606.1); l.tx.powerDbm = 20; l.tx.antenna = omni(); l.rx.antenna = { type: 'body', gainDbi: -3, orientation: { az: 0, el: 90 } };
+      l.chain = [createChainItem('filter', right ? { lossDb: 1.5, filterType: 'bandpass', passLoMHz: 590, passHiMHz: 640, rejectionDb: 40 } : { lossDb: 1.5, filterType: 'bandpass', passLoMHz: 863, passHiMHz: 865, rejectionDb: 40 })];
+    });
+    default: return null;
+  }
+}
+
+/**
+ * Audience example (group e): a handheld microphone on stage, the receive antenna across a standing crowd at the back of a 20 x 40 m
+ * room. opts.rxZ = receive antenna height (1.5 m default = head height, below the 1.7 m heads: the ray runs through the crowd;
+ * 2.5 m = raised, mostly above it); opts.densityPerM2 (default 2, ASSUMED absorption model of audience.js); opts.kind 'standing'|'seated'.
+ */
+export function audienceScene({ rxZ = 1.5, densityPerM2 = 2, kind = 'standing', withAudience = true } = {}) {
+  return make('mic', (s, l) => {
+    s.stage = { width: 20, depth: 40 };
+    s.environment.floor = 'wood';
+    l.freqMHz = 606;
+    l.tx.antenna = omni(); l.rx.antenna = omni();
+    l.tx.pos = { x: 10, y: 5, z: 1.5 };
+    l.rx.pos = { x: 10, y: 35, z: rxZ };
+    l.rx.diversity.antennaB.pos = { x: 10.6, y: 35, z: rxZ };
+    l.chain = [createChainItem('cable', { cableType: 'rg58', lengthM: 5 })];
+    if (withAudience) s.audience = [createAudience({ name: 'Standing area', x: 4, y: 10, width: 12, depth: 20, kind, densityPerM2 })];
+  });
+}
+
+/**
+ * Ceiling examples (group f): the same 606 MHz handheld link under three kinds of roof. ceilingScene(id, { withCeiling = true }).
+ *   'tent': a metal-roofed shed / tent frame, roof 5 m, link 15 m, antennas at head height.
+ *   'arena': an arena roof at 15 m (metal), receive antenna flown at 12 m over the audience, transmitter on stage at 1.6 m, 30 m.
+ *   'club': a low plasterboard club ceiling at 2.8 m, 12 m link.
+ */
+export function ceilingScene(id, { withCeiling = true } = {}) {
+  const cfg = {
+    tent: { h: 5, mat: 'metal', d: 15, txz: 1.6, rxz: 1.2, w: 24 },
+    arena: { h: 15, mat: 'metal', d: 30, txz: 1.6, rxz: 12, w: 40 },
+    club: { h: 2.8, mat: 'plasterboard', d: 12, txz: 1.6, rxz: 1.2, w: 20 },
+  }[id];
+  if (!cfg) return null;
+  return make('mic', (s, l) => {
+    s.stage = { width: cfg.w, depth: 20 };
+    s.environment.floor = 'concrete';
+    l.freqMHz = 606;
+    l.tx.antenna = omni(); l.rx.antenna = omni();
+    l.tx.pos = { x: 2, y: 10, z: cfg.txz };
+    l.rx.pos = { x: 2 + cfg.d, y: 10, z: cfg.rxz };
+    l.rx.diversity.antennaB.pos = { x: 2 + cfg.d, y: 9.4, z: cfg.rxz };
+    l.chain = [createChainItem('cable', { cableType: 'rg58', lengthM: 5 })];
+    if (withCeiling) s.ceiling = createCeiling({ heightM: cfg.h, material: cfg.mat });
+  });
+}
+
+/**
+ * RF over fibre examples (group g). rofScene(variant, { fibreKm }): a 606 MHz microphone received through a 300 m run from the antenna
+ * head to the receiver rack: 'coax' = RG213 coax (assumed loss from the cable table), 'passive' = chain preset rof-passive-1km at
+ * fibreKm, 'active' = rof-active-lna at fibreKm. All RoF figures are ASSUMED placeholders (UNVERIFIED presets).
+ * rofBranchScene({ fibreKmB }): an IEM with two antenna branches, fibre 0.1 km and fibreKmB (0.6 default): delay mismatch warning.
+ */
+export function rofScene(variant, { fibreKm = 0.3 } = {}) {
+  return make('mic', (s, l) => {
+    s.stage = { width: 60, depth: 20 };
+    s.environment.floor = 'concrete';
+    l.freqMHz = 606;
+    l.tx.antenna = omni(); l.rx.antenna = omni();
+    l.tx.pos = { x: 55, y: 10, z: 1.5 };
+    l.rx.pos = { x: 45, y: 10, z: 3 };
+    l.rx.diversity.antennaB.pos = { x: 45, y: 9.4, z: 3 };
+    l.chain = variant === 'coax' ? [createChainItem('cable', { cableType: 'rg213', lengthM: fibreKm * 1000 })]
+      : [createChainItemFromPreset(variant === 'active' ? 'rof-active-lna' : 'rof-passive-1km', { fibreKm })];
+  });
+}
+export function rofBranchScene({ fibreKmB = 0.6 } = {}) {
+  return make('iem', (s, l) => {
+    s.stage = { width: 40, depth: 20 };
+    l.freqMHz = 606.1;
+    l.tx.pos = { x: 2, y: 10, z: 2.5 };
+    l.rx.pos = { x: 25, y: 10, z: 1.2 };
+    l.tx.pos = { x: 2, y: 4, z: 2.5 };
+    l.chain = [createChainItemFromPreset('rof-passive-1km', { fibreKm: 0.1 })]; // branch 1 mirrors the link transmitter and chain
+    l.branches = [
+      createBranch({ name: 'Antenna 1', pos: { x: 2, y: 4, z: 2.5 }, chain: [createChainItemFromPreset('rof-passive-1km', { fibreKm: 0.1 })] }),
+      createBranch({ name: 'Antenna 2', pos: { x: 2, y: 16, z: 2.5 }, chain: [createChainItemFromPreset('rof-passive-1km', { fibreKm: fibreKmB })] }),
+    ];
+  });
+}
+
+/**
+ * Point-to-point link examples (group h). p2pScene(id, opts); all positions in metres on a flat datum, antennas aimed at each other.
+ *   'snake':   a wireless snake send across a field: 1.2 km, yagis on 6 m masts, 606 MHz (opts.mastM changes both heights).
+ *   'delay':   FOH to a stage-left delay speaker: 150 m, paddles at 3 m.
+ *   'truck':   broadcast truck to a remote camera: 8 km, yagis at 12 m and 6 m, with a hill (opts.hill = false removes it).
+ *   'bodypack': two bodypacks as a wireless line feed: 60 m, whips (body type) at 1.5 m, nobody wearing them (no body loss).
+ */
+export function p2pScene(id, { mastM, hill = true } = {}) {
+  const cfg = {
+    snake: { f: 606, d: 1200, ht: 6, hr: 6, ant: 'yagi', pw: 20, obstacle: null },
+    delay: { f: 606, d: 150, ht: 3, hr: 3, ant: 'paddle', pw: 17, obstacle: null },
+    truck: { f: 606, d: 8000, ht: 12, hr: 6, ant: 'yagi', pw: 30, obstacle: hill ? { distanceM: 3000, heightM: 30 } : null },
+    bodypack: { f: 606, d: 60, ht: 1.5, hr: 1.5, ant: 'body', pw: 10, obstacle: null },
+  }[id];
+  if (!cfg) return null;
+  return make('p2p', (s, l) => {
+    s.stage = { width: 500, depth: 500 };
+    s.environment.model = 'free-space';
+    s.environment.floor = 'grass';
+    l.freqMHz = cfg.f;
+    const ht = mastM !== undefined ? mastM : cfg.ht, hr = mastM !== undefined ? mastM : cfg.hr;
+    l.tx.pos = { x: 100, y: 100, z: ht }; l.rx.pos = { x: 100 + cfg.d, y: 100, z: hr };
+    l.rx.diversity.antennaB.pos = { x: 100 + cfg.d, y: 99.4, z: hr };
+    l.tx.powerDbm = cfg.pw;
+    const ant = (az) => ({ type: cfg.ant, gainDbi: ANTENNAS_GAIN[cfg.ant], orientation: cfg.ant === 'body' ? { az: 0, el: 90 } : { az, el: 0 }, polarisation: 'vertical' });
+    l.tx.antenna = ant(90); l.rx.antenna = ant(270);
+    l.rx.bodyLossDb = 0;
+    l.chain = [createChainItem('cable', { cableType: 'rg58', lengthM: 10 })];
+    if (cfg.obstacle) l.p2p = { kFactor: 4 / 3, obstacle: cfg.obstacle, fadeMarginDb: 10 };
+    else l.p2p = { kFactor: 4 / 3, fadeMarginDb: 10 };
+  });
+}
+/**
+ * Side-of-stage mix position (a 4 x 3 m area at x 0..4, y 0..3; the stage is towards +y): one IEM transmitter and a diversity pair of mic
+ * receive antennas a few metres apart. sosScene(id) builds three scenes, all free-space so the coupling is Friis plus the antenna patterns:
+ *   'too-close':   IEM paddle 0.5 m from the mic receive paddle, facing each other, same polarisation, a booster on the mic side, 20 dBm.
+ *   'crossed-pol': 3.3 m apart, IEM vertical, mic antennas horizontal, both paddles aimed at the stage so each sits in the other's side
+ *                  lobe, a rack screen in between (wood-class, assumed), no booster, 17 dBm.
+ *   'best':        IEM paddle on a stand at the stage-side edge aiming at the stage, mic paddles forward and high on a stand (remote, 15 m of
+ *                  cable) with the IEM antenna behind them, a 604-608 MHz bandpass filter (40 dB rejection, assumed) on the mic path, 10 dBm.
+ * The wanted mic (606.1 MHz, 14 dBm, on stage) and the IEM link (614.0 MHz) are links[0] and links[1]; scene.imd holds the IEM and the mic as
+ * the two tones for the products. Receiver figures are the illustrative 'mic-receiver-typical' preset (P1dB -18, max input -10, IIP3 -8 dBm).
+ */
+export function sosScene(id) {
+  const paddle = (az, polarisation) => ({ type: 'paddle', gainDbi: 7, orientation: { az, el: 0 }, polarisation });
+  const cfg = {
+    'too-close': { iemPos: { x: 1.5, y: 1.5, z: 1.5 }, iemAnt: paddle(90, 'vertical'), pw: 20,
+      rxA: { x: 2.0, y: 1.5, z: 1.5 }, rxB: { x: 2.0, y: 2.2, z: 1.5 }, rxAz: 270, rxPol: 'vertical',
+      chain: () => [createChainItem('booster', { gainDb: 12, nfDb: 4 }), createChainItem('cable', { cableType: 'rg58', lengthM: 3 })], wall: false },
+    'crossed-pol': { iemPos: { x: 3.5, y: 1.0, z: 1.5 }, iemAnt: paddle(0, 'vertical'), pw: 17,
+      rxA: { x: 0.2, y: 0.5, z: 1.5 }, rxB: { x: 0.2, y: 1.4, z: 1.5 }, rxAz: 0, rxPol: 'horizontal',
+      chain: () => [createChainItem('cable', { cableType: 'rg58', lengthM: 3 })], wall: true },
+    best: { iemPos: { x: 3.5, y: 2.8, z: 1.8 }, iemAnt: paddle(0, 'vertical'), pw: 10,
+      rxA: { x: -7.0, y: 0.8, z: 3.0 }, rxB: { x: -6.0, y: 0.8, z: 3.0 }, rxAz: 0, rxPol: 'horizontal',
+      chain: () => [createChainItem('filter', { lossDb: 1.5, filterType: 'bandpass', passLoMHz: 604, passHiMHz: 608, rejectionDb: 40 }), createChainItem('cable', { cableType: 'lmr-240', lengthM: 15 })], wall: false },
+  }[id];
+  if (!cfg) return null;
+  return make('mic', (s, l) => {
+    s.stage = { width: 20, depth: 14 };
+    const P = (q) => ({ ...q, x: q.x + 8 }); // the mix position is at x 8..12 so the remote antennas stay on the plan
+    s.environment.model = 'free-space';
+    l.name = 'Wanted mic'; l.freqMHz = 606.1;
+    l.tx.pos = P({ x: 4, y: 10, z: 1.5 }); l.tx.powerDbm = 14;
+    const rxAnt = () => paddle(cfg.rxAz, cfg.rxPol);
+    l.rx.pos = P(cfg.rxA); l.rx.antenna = rxAnt();
+    l.rx.diversity.enabled = true; l.rx.diversity.antennaB.pos = P(cfg.rxB);
+    l.chain = cfg.chain();
+    const iem = createDefaultLink('iem');
+    iem.name = 'IEM'; iem.freqMHz = 614.0;
+    iem.tx.pos = P(cfg.iemPos); iem.tx.powerDbm = cfg.pw; iem.tx.antenna = structuredClone(cfg.iemAnt);
+    iem.rx.pos = P({ x: 7, y: 10, z: 1.5 });
+    s.links.push(iem);
+    if (cfg.wall) s.reflectors = [createReflector({ name: 'Rack screen', material: 'wood', p1: { x: 9.7, y: 0.2 }, p2: { x: 9.7, y: 1.7 }, zMin: 0, zMax: 2 })];
+    const m = createDefaultImd();
+    m.enabled = true; m.iip3Dbm = RX_PRESETS['mic-receiver-typical'].iip3Dbm;
+    m.rxAntennaPos = P(cfg.rxA); m.rxAntenna = rxAnt(); m.rxChain = structuredClone(l.chain);
+    m.transmitters = [
+      createImdTransmitter({ name: 'IEM transmitter', freqMHz: 614.0, powerDbm: cfg.pw, pos: P(cfg.iemPos), antenna: structuredClone(cfg.iemAnt) }),
+      createImdTransmitter({ name: 'Wanted mic', freqMHz: 606.1, powerDbm: 14, pos: P({ x: 4, y: 10, z: 1.5 }), antenna: omni(90) }),
+    ];
+    s.imd = m;
+  });
+}
+
+/**
+ * sosReport(scene) -> { iemFreqMHz, iemPowerDbm, antennas: [{ name, distanceM, couplingDb, atAntennaDbm, atRxInputDbm, headroomDb, level,
+ *   compressionDb, desenseDb, wantedMarginDb, marginAfterDesenseDb }], worstProductDbm, wantedToProductDb, iemMarginDb }
+ * couplingDb = IEM output power minus the power at the mic antenna terminals (Friis with both antenna patterns, polarisation, walls: 40 dB
+ * means 40 dB of isolation). atRxInputDbm is after the mic-side chain (booster, filter, cable). headroomDb is to min(P1dB, max input).
+ */
+export function sosReport(scene) {
+  const mic = scene.links[0], iem = scene.links[1];
+  const f = iem.freqMHz;
+  const cfgRx = { ...RX_PRESETS[mic.rx.rxPreset], ...(mic.rx.overload || {}), chain: mic.chain, freqMHz: f };
+  const ants = [{ name: 'Mic Rx antenna A', pos: mic.rx.pos, antenna: mic.rx.antenna }, { name: 'Mic Rx antenna B', pos: mic.rx.diversity.antennaB.pos, antenna: mic.rx.diversity.antennaB.antenna || mic.rx.antenna }];
+  const antennas = ants.map((a) => {
+    const probe = { id: 'sos-probe', kind: 'mic', freqMHz: f, tx: { pos: iem.tx.pos, powerDbm: iem.tx.powerDbm, antenna: iem.tx.antenna }, rx: { pos: a.pos, antenna: a.antenna, bodyLossDb: 0, sensitivityDbm: -120 }, chain: mic.chain };
+    const r = solveLink(scene, probe);
+    const atRxInputDbm = r.rxPowerDbm - chainLossDb(mic.chain, f);
+    const ov = overloadStep(null, atRxInputDbm, cfgRx);
+    const wp = { ...mic, rx: { ...mic.rx, pos: a.pos, antenna: a.antenna, diversity: { ...mic.rx.diversity, enabled: false } } };
+    const w = solveLink(scene, wp);
+    return { name: a.name, distanceM: r.distanceM, couplingDb: iem.tx.powerDbm - r.rxPowerDbm, atAntennaDbm: r.rxPowerDbm, atRxInputDbm, headroomDb: ov.headroomDb, level: ov.level, compressionDb: ov.compressionDb, desenseDb: ov.desenseDb, wantedMarginDb: w.marginDb, marginAfterDesenseDb: w.marginDb - ov.desenseDb };
+  });
+  const sum = imdSummary(scene);
+  const ir = solveLink(scene, iem);
+  return { iemFreqMHz: f, iemPowerDbm: iem.tx.powerDbm, antennas, worstProductDbm: sum.worstProduct ? sum.worstProduct.levelDbm : null, wantedToProductDb: sum.worstWantedToProductDb, iemMarginDb: ir.marginDb };
+}
+
+/**
+ * Front-of-house (FOH) mic and IEM antennas with an audience between FOH and the stage. fohScene(variant, { kind, densityPerM2, remote }):
+ *   'low':    antennas at table height (1.2 m) at FOH, directional (7 dBi paddles) aimed at the stage, 26 m from the performer, over a standing crowd.
+ *   'raised': the same antennas on stands or a truss at 3.0 m, aimed at the stage: the ray clears the heads for most of the crowd.
+ *   'remote': antennas at the stage side (3.0 m, 9 m from the performer, outside the crowd) with 45 m of LMR-400 back to FOH.
+ *             opts.remote: 'coax' (default: a 15 dB booster at the antenna end, ahead of the cable), 'booster-at-rack' (same booster after the
+ *             cable: the wrong place), 'rof' (the active RF over fibre preset, 0.05 km). The IEM transmit path never gets a booster (power limit).
+ * Crowd: scene.audience, 5..25 m x 8..26 m. Standing 3-5 persons per m2, seated 1-2 (opts.density default 4 standing / 1.5 seated); the
+ * absorption (0.5 dB per metre per person-per-m2 below head height, capped at 30 dB) is an ASSUMED planning figure. Links: links[0] mic (stage
+ * transmitter to FOH receiver, 606.1 MHz), links[1] IEM (FOH transmitter to the bodypack on stage, 614.0 MHz).
+ */
+export function fohScene(variant, { kind = 'standing', densityPerM2, remote = 'coax' } = {}) {
+  if (!['low', 'raised', 'remote'].includes(variant)) return null;
+  const density = densityPerM2 !== undefined ? densityPerM2 : kind === 'seated' ? 1.5 : 4;
+  return make('mic', (s, l) => {
+    s.stage = { width: 30, depth: 40 };
+    s.environment.floor = 'wood';
+    s.environment.bodyLossDb = 3; // performer body shadow on both links (assumed)
+    s.audience = [createAudience({ name: kind === 'seated' ? 'Seated crowd' : 'Standing crowd', x: 5, y: 8, width: 20, depth: 18, kind, densityPerM2: density })];
+    const z = variant === 'low' ? 1.2 : 3.0;
+    const stagePos = { x: 15, y: 4, z: 1.6 };
+    const at = variant === 'remote' ? { x: 6, y: 6, z: 3.0 } : { x: 15, y: 30, z };
+    const az = variant === 'remote' ? Math.round((Math.atan2(stagePos.x - at.x, stagePos.y - at.y) * 180) / Math.PI) : 180;
+    const pad = () => ({ type: 'paddle', gainDbi: 7, orientation: { az, el: 0 }, polarisation: 'vertical' });
+    l.name = 'Mic (stage to FOH)'; l.freqMHz = 606.1;
+    l.tx.pos = { ...stagePos }; l.tx.powerDbm = 14; l.tx.antenna = { type: 'quarterwave', gainDbi: 1, orientation: { az: 0, el: 90 }, polarisation: 'vertical' };
+    l.rx.pos = { ...at }; l.rx.antenna = pad();
+    l.rx.diversity.enabled = true; l.rx.diversity.antennaB.pos = { x: at.x + 0.6, y: at.y, z: at.z };
+    const remoteChain = () => {
+      if (remote === 'rof') return [createChainItemFromPreset('rof-active-lna', { fibreKm: 0.05 })];
+      const boost = createChainItem('booster', { gainDb: 15, nfDb: 3 }), cab = createChainItem('cable', { cableType: 'lmr-400', lengthM: 45 });
+      return remote === 'booster-at-rack' ? [cab, boost] : [boost, cab];
+    };
+    l.chain = variant === 'remote' ? remoteChain() : [createChainItem('cable', { cableType: 'lmr-400', lengthM: 5 })];
+    const iem = createDefaultLink('iem');
+    iem.name = 'IEM (FOH to stage)'; iem.freqMHz = 614.0;
+    iem.tx.pos = { ...at }; iem.tx.powerDbm = 17; iem.tx.antenna = pad();
+    iem.rx.pos = { x: 14, y: 4, z: 1.2 };
+    iem.chain = [createChainItem('cable', { cableType: 'lmr-400', lengthM: variant === 'remote' ? 45 : 5 })];
+    s.links.push(iem);
+  });
+}
+
+/**
+ * fohReport(scene) -> { mic, iem }, each { distanceM, rxPowerDbm (at the antenna terminals), inputPowerDbm (at the receiver input), marginDb,
+ * audienceLossDb (the 'Audience absorption' step, positive), chainLossDb (net cable and booster loss, negative = gain) }.
+ */
+export function fohReport(scene) {
+  const one = (l) => {
+    const r = solveLink(scene, l);
+    const a = r.waterfall.find((w) => /^Audience absorption/.test(w.label));
+    return { distanceM: r.distanceM, rxPowerDbm: r.rxPowerDbm, inputPowerDbm: r.inputPowerDbm, marginDb: r.marginDb, audienceLossDb: a ? -a.deltaDb : 0, chainLossDb: chainLossDb(l.chain, l.freqMHz) };
+  };
+  return { mic: one(scene.links[0]), iem: one(scene.links[1]) };
+}
+
+/**
+ * Video (LED) wall examples (item 25 / 25a). videoWallScene({ preset, construction, holeSizeMm, rx, txBehind }) builds one stage: a 14 m x 5 m wall
+ * (reflector, material by construction, facing the audience) at y = 3 behind the band, the performer's mic 5 m in front of it, 606.1 MHz, one link.
+ *   rx 'foh':  paddle (7 dBi) at FOH, 27 m from the wall, aimed at the stage (so it looks at the wall's front: the worst case for noise).
+ *   rx 'near': paddle 3 m in front of the wall at the stage front, aimed at the performer.
+ *   rx 'side': paddle stage left, 7 m from the wall, aimed at the performer, the wall at its side.
+ *   rx 'back': paddle backstage 2.5 m BEHIND the wall (rear side of the wall, the wall is in the direct path), aimed at the performer.
+ *   txBehind: the performer's transmitter is 1 m BEHIND the wall (through-wall case: the wall is in the direct path).
+ * preset: noise preset ('off', 'class-b', 'class-a', 'noisy'); construction: solid-metal | solid-plastic | mesh-metal | mesh-plastic | mesh-carbon.
+ * All wall figures are assumed (ledwall.js).
+ */
+export function videoWallScene({ preset = 'class-a', construction = 'solid-metal', holeSizeMm, rx = 'foh', txBehind = false } = {}) {
+  const rxCfg = { foh: { pos: { x: 15, y: 30, z: 1.5 }, az: 180 }, near: { pos: { x: 15, y: 6, z: 1.5 }, az: 0 }, side: { pos: { x: 3, y: 14, z: 1.5 }, az: 116 }, back: { pos: { x: 15, y: 0.5, z: 1.5 }, az: 0 } }[rx];
+  if (!rxCfg) return null;
+  return make('mic', (s, l) => {
+    s.stage = { width: 30, depth: 40 };
+    s.environment.floor = 'wood';
+    s.reflectors = [createReflector({ name: 'LED video wall', material: construction.endsWith('plastic') ? 'drywall' : 'metal', construction, ...(holeSizeMm !== undefined ? { holeSizeMm } : {}), thicknessM: 0.1,
+      p1: { x: 8, y: 3 }, p2: { x: 22, y: 3 }, zMin: 0.5, zMax: 5.5, noise: { preset } })];
+    l.name = 'Mic'; l.freqMHz = 606.1;
+    l.tx.pos = txBehind ? { x: 15, y: 2, z: 1.6 } : { x: 15, y: 8, z: 1.6 }; l.tx.powerDbm = 14;
+    l.tx.antenna = { type: 'quarterwave', gainDbi: 1, orientation: { az: 0, el: 90 }, polarisation: 'vertical' };
+    l.rx.pos = { ...rxCfg.pos };
+    l.rx.antenna = { type: 'paddle', gainDbi: 7, orientation: { az: rx === 'near' ? 0 : rxCfg.az, el: 0 }, polarisation: 'vertical' };
+    l.rx.diversity.enabled = false;
+    l.chain = [createChainItem('cable', { cableType: 'lmr-400', lengthM: 5 })];
+  });
+}
+
+/** videoWallReport(scene) -> { rxPowerDbm, marginDb, noiseDbm, riseDb, marginChangeDb, wallLossDb (direct path), floorDbm, distanceToWallM, reflectionDb } */
+export function videoWallReport(scene) {
+  const l = scene.links[0], r = solveLink(scene, l);
+  const w = r.wallNoise;
+  const wall = r.paths.find((p) => p.kind === 'wall');
+  return { rxPowerDbm: r.rxPowerDbm, marginDb: r.marginDb, noiseDbm: w ? w.dbm : -Infinity, riseDb: w ? w.riseDb : 0, marginChangeDb: w ? w.marginChangeDb : 0, floorDbm: r.cascade.noiseFloorDbm, wallLossDb: r.paths[0].wallLossDb || 0, distanceToWallM: w ? w.walls[0].distanceM : null, reflectionDb: wall ? wall.gainDb - r.paths[0].gainDb : null };
+}
+
+const ANTENNAS_GAIN = { yagi: 10, paddle: 7, body: -3 };
+
+const OMNI_IMD = () => ({ type: 'omni', gainDbi: 0, orientation: { az: 0, el: 90 }, polarisation: 'vertical' });
 
 /** Intermodulation example: the link under test sits on `wantedMHz`, transmitters are [name, MHz, dBm, x, y, z]. */
 function imdScene(kind, wantedMHz, txs, imdExtra, fn) {
@@ -88,6 +419,52 @@ function imdScene(kind, wantedMHz, txs, imdExtra, fn) {
     Object.assign(m, imdExtra);
     s.imd = m;
     if (fn) fn(s, l, m);
+  });
+}
+
+/** Eight coordinated IEM frequencies (MHz), third-order clean (checkIntermod) with a 400 kHz guard, spread over 606 to 630 MHz (illustrative band). */
+export const IEM8_PLAN_MHZ = [606.1, 606.5, 607.3, 608.9, 610.9, 614.1, 618.1, 623.7];
+const IEM8_DIRECTIONAL = () => ({ type: 'paddle', gainDbi: 7, orientation: { az: 90, el: 0 } });
+const IEM8_POWER_DBM = 14; // 25 mW per transmitter
+
+/**
+ * iem8Scene(variant, opts): the eight-IEM combining comparison on one geometry (same hall, antenna position, bodypack).
+ *   'A': all eight through one isolated 8-way combiner (4.5 dB through, 45 dB port isolation, ASSUMED) to one directional antenna.
+ *   'B': seven through a 7-in-8-way combiner (4 dB, 45 dB) to the same directional antenna, transmitter 8 straight to an omni antenna
+ *        opts.omniDistanceM (default 2.5 m) from it, in front of the antenna (omniAt 'front', in the main lobe) or beside it ('side', in a pattern null), no isolator unless opts.tx8Isolator (35 dB reverse isolation, 1 dB through).
+ *   'C': two 4-way combiners (3 dB, 40 dB) joined by a passive 2-way hybrid (3.5 dB, 25 dB), one antenna. opts.split puts the closely
+ *        spaced neighbours in different groups (1,3,5,7 / 2,4,6,8) instead of the clustered grouping (1-4 / 5-8); opts.noIsolators drops the
+ *        20 dB reverse isolation of each transmitter's own isolator. Isolated groups: isolation = 2 x isolatorDb (two isolators in series).
+ * Losses and isolations are illustrative planning numbers (assumed), not product data.
+ */
+export function iem8Scene(variant, { omniDistanceM = 2.5, omniAt = 'front', tx8Isolator = false, split = false, noIsolators = false } = {}) {
+  return imdScene('iem', IEM8_PLAN_MHZ[0], IEM8_PLAN_MHZ.map((f, i) => [`IEM ${i + 1}`, f, IEM8_POWER_DBM, 3, 10, 1.5]), { preset: 'iem-combiner-isolated', iip3Dbm: 10 }, (s, l, m) => {
+    iemHall(s, l, m);
+    m.transmitters.forEach((t) => { t.pos = { x: 3, y: 10, z: 1.5 }; t.antenna = IEM8_DIRECTIONAL(); });
+    const ids = m.transmitters.map((t) => t.id);
+    if (variant === 'A') {
+      m.combiner = { type: 'isolated', isolationDb: 45, lossDb: 4.5 };
+      m.topology = { groups: [{ id: 'g1', name: '8-way combiner', members: ids, lossDb: 4.5, isolationDb: 45, isolatorDb: 22.5 }] };
+    } else if (variant === 'B') {
+      m.combiner = { type: 'none', isolationDb: 0, lossDb: 0 };
+      const t8 = m.transmitters[7];
+      t8.pos = omniAt === 'side' ? { x: 3, y: 10 + omniDistanceM, z: 1.5 } : { x: 3 + omniDistanceM, y: 10, z: 1.5 }; // 'front' = along the boresight (in the main lobe)
+      t8.antenna = OMNI_IMD();
+      m.topology = { groups: [{ id: 'g1', name: '7-way combiner', members: ids.slice(0, 7), lossDb: 4, isolationDb: 45, isolatorDb: 22.5 }] };
+      if (tx8Isolator) m.topology.groups.push({ id: 'g2', name: 'Isolator on IEM 8', members: [ids[7]], lossDb: 1, isolationDb: 0, isolatorDb: 35 });
+    } else {
+      m.combiner = { type: 'none', isolationDb: 0, lossDb: 0 };
+      const iso = noIsolators ? 0 : 20;
+      const pick = (idx) => idx.map((i) => ids[i]);
+      const a = split ? [0, 2, 4, 6] : [0, 1, 2, 3], b = split ? [1, 3, 5, 7] : [4, 5, 6, 7];
+      m.topology = {
+        groups: [
+          { id: 'g1', name: '4-way combiner 1', members: pick(a), lossDb: 3, isolationDb: 40, isolatorDb: iso },
+          { id: 'g2', name: '4-way combiner 2', members: pick(b), lossDb: 3, isolationDb: 40, isolatorDb: iso },
+        ],
+        root: { lossDb: 3.5, isolationDb: 25 },
+      };
+    }
   });
 }
 
@@ -365,6 +742,180 @@ export const EXAMPLES = [
     }),
   },
   {
+    id: 'imd-iem-8-combined',
+    title: 'Eight IEMs: all through one isolated 8-way combiner (A)',
+    note: 'Eight coordinated IEM transmitters (third-order clean plan, 606.1 to 623.7 MHz, 25 mW each) feed one isolated 8-way combiner (4.5 dB through, 45 dB port isolation, assumed) and one directional antenna. every channel loses the same 4.5 dB and reaches the bodypack at about -37.3 dBm; the worst pair of transmitters is 45.0 dB apart, so the strongest intermod product made in an output stage (2f1-f2) is only -102.3 dBm at the bodypack, -64.9 dBc; Pros: one antenna, balanced levels, isolation from the combiner. Cons: 4.5 dB lost on every channel, one point of failure, a bigger unit that is harder to expand; Compare with the 7 plus 1 and 4 plus 4 examples (same hall, same frequencies). Figures are illustrative planning numbers.',
+    build: () => ({ scene: iem8Scene('A') }),
+  },
+  {
+    id: 'imd-iem-7-plus-1-omni',
+    title: 'Seven IEMs on a directional antenna, one on an omni 2.5 m away (B)',
+    note: 'The same eight frequencies: seven go through a combiner (4 dB, 45 dB isolation) to the directional antenna, the eighth goes straight to an omni antenna 2.5 m in front of it, inside the main lobe. the omni transmitter has no isolator: the field of the other seven reaches its output stage only 33.1 dB down, where it mixes; the worst product is 2f8-f1 at -91.6 dBm at the bodypack (-53.1 dBc), 10.7 dB worse than the single combiner; it lands outside the IEM band but is still radiated; the odd channel is also weaker at the bodypack (-38.5 dBm against -36.8 dBm). Fixes, all in the model: move the omni to the side of the antenna, in a pattern null (45.0 dB, -101.8 dBm), put it 6 m away (-97.8 dBm), or add an isolator (35 dB) on the omni transmitter; Pros: directional gain for seven channels, lower combiner loss; Cons: an unprotected transmitter, different coverage per channel, harder to document. Illustrative figures.',
+    build: () => ({ scene: iem8Scene('B') }),
+  },
+  {
+    id: 'imd-iem-4plus4-combined',
+    title: 'Eight IEMs: two 4-way combiners and a passive 2-way to one antenna (C)',
+    note: 'The same eight frequencies in two 4-way isolated combiners (3 dB, 40 dB, each transmitter with its own 20 dB isolator) joined by a passive 2-way hybrid (3.5 dB, 25 dB, assumed) to the same directional antenna. every channel now loses 6.5 dB, 2.0 dB more than the 8-way, so the bodypack gets -39.3 dBm; inside a group the isolation is 40.0 dB; between groups the path is 3 + 25 + 3 + 20 = 51.0 dB because each transmitter is still protected by its own isolator, and the worst product is -99.3 dBm (-59.9 dBc), 3.0 dB worse than the 8-way; take the isolators away (a plain 4-way and hybrid) and the cross-group isolation falls to 31.0 dB and the worst product rises to -90.3 dBm. Pros: modular, cheaper units, a failed module takes out four channels, not eight; Cons: more loss, more connectors, the hybrid is the weak link. Illustrative figures.',
+    build: () => ({ scene: iem8Scene('C') }),
+  },
+  {
+    id: 'band-whip-wrong-band',
+    title: 'Antenna band: a whip cut for 470-520 MHz used at 830 MHz',
+    note: 'The receive whip is cut for UHF band A (470-520 MHz, assumed) but the link is at 830 MHz. Its VSWR is 59.3:1, a mismatch loss of 11.9 dB (about 3.9 times less range in free space), where a whip cut for 790-865 MHz loses 0.0 dB. The swap of antennas between bands is a classic field error. Design bands and the resonance model are assumed teaching figures.',
+    build: () => ({ scene: bandScene('whip-wrong-band') }),
+  },
+  {
+    id: 'band-uhf-vs-2g4',
+    title: 'Antenna band: a 2.4 GHz antenna on a 600 MHz link, and the reverse',
+    note: 'A 2.4 GHz antenna on a 600 MHz microphone link has a VSWR of 1235.3:1 and loses 24.9 dB (the model caps the loss at 30 dB). The reverse, a UHF 600-700 MHz antenna on a 2440 MHz link, loses 18.1 dB at 259.2:1. A mismatched antenna reflects the power rather than burning it, but the link margin falls by the same amount. Assumed teaching model.',
+    build: () => ({ scene: bandScene('uhf-vs-2g4') }),
+  },
+  {
+    id: 'band-iem-tx-wrong-antenna',
+    title: 'Antenna band: IEM transmitter into an antenna cut for 863-865 MHz',
+    note: 'The 100 mW IEM transmitter at 606.1 MHz drives an antenna cut for 863-865 MHz (assumed, a whip about 8 percent wide at best): VSWR 46.2:1, 10.8 dB mismatch loss, and 92 percent of the power (19.6 dBm) returns to the output stage, which can stress the PA or trigger foldback. A 6 dB pad cuts that to 1.6 dBm (1.6:1 at the PA, the reflection crosses the pad twice); an isolator (0.5 dB forward, 20 dB reverse, assumed) gives 1.2:1 at the PA and -0.9 dBm. The real fix is the right antenna. Illustrative figures.',
+    build: () => ({ scene: bandScene('iem-tx-wrong-band') }),
+  },
+  {
+    id: 'band-wideband-vs-whips',
+    title: 'Antenna band: one wideband antenna against narrow whips cut per band',
+    note: 'A wideband antenna (470-960 MHz, assumed log-periodic or paddle, flat about 1.3:1) loses 0.07 dB at 830 MHz, the same link with a whip cut for 470-520 MHz loses 11.9 dB. The whip cut for 790-865 MHz is as good (0.0 dB) but only in its own band, so a wideband antenna is the safe choice when several bands are in use. The price is lower gain and a less clean pattern, assumed.',
+    build: () => ({ scene: bandScene('wideband-vs-whips') }),
+  },
+  {
+    id: 'band-whip-trim',
+    title: 'Antenna band: trimming a whip, the VSWR dip and the 606 MHz channel',
+    note: 'A whip cut for 570-608 MHz (assumed) sits at the top edge of its band at 606 MHz: VSWR 1.69:1 and 0.30 dB of mismatch loss. Trimmed to resonate at 596-616 MHz the VSWR at 606 MHz is 1.0:1 and the loss 0.00 dB. A NanoVNA S11 sweep shows the dip move as the whip is cut (returnLossSweep in the model draws it). A hand or the body shifts the dip, assumed.',
+    build: () => ({ scene: bandScene('whip-trim') }),
+  },
+  {
+    id: 'band-filter-wrong-band',
+    title: 'Antenna band: a 863-865 MHz bandpass filter on a 606.1 MHz channel',
+    note: 'The transmit chain has a bandpass filter for 863-865 MHz (assumed 40 dB rejection) but the IEM runs at 606.1 MHz: the signal at the bodypack drops from -36.4 to -76.4 dBm and the margin from 53.6 to 13.6 dB. A filter must be chosen for the channel, like an antenna. The warning in the link says so.',
+    build: () => ({ scene: bandScene('filter-wrong-band') }),
+  },
+  {
+    id: 'audience-crowd',
+    title: 'Audience: a standing crowd between the stage and a low receive antenna',
+    note: 'A handheld microphone on stage and a receive antenna 1.5 m high at the back of the room, across 20 m of standing audience (2 persons per m2, heads at 1.7 m). The ray runs through the crowd below head height and loses 20.0 dB (assumed 0.5 dB per metre per person per m2), so the margin falls from 51.8 to 31.8 dB. Raising the antenna to 2.5 m puts the ray above the heads for all but 1.0 dB of its path, and at 4.7 persons per m2 the loss saturates at the 30 dB cap. Absorption figures are assumed and unverified.',
+    build: () => ({ scene: audienceScene() }),
+  },
+  {
+    id: 'ceiling-metal-roof',
+    title: 'Ceiling: a metal-roofed tent or shed over a 15 m link',
+    note: 'A metal roof 5 m up is a near-perfect reflector at 606 MHz. Its ray arrives only 0.9 dB below the direct ray and 1.6 m behind it, and with the floor ray the sum changes the received level by -1.6 dB (it can be a fade or a boost depending on the spot). Move the receiver a little to see the pattern change; wavelength is 0.5 m. Material and geometry are illustrative.',
+    build: () => ({ scene: ceilingScene('tent') }),
+  },
+  {
+    id: 'ceiling-arena-flown',
+    title: 'Ceiling: arena roof 15 m up, receive antenna flown at 12 m',
+    note: 'A flown antenna 3 m under a metal arena roof sits so close to its own reflection that the ceiling ray is only 0.6 dB below the direct one and 2.4 m longer. The coherent sum changes the received level by +4.5 dB at this spot (a different spot can fade). Flown antennas near roofs need height or pattern checks, not just distance. Illustrative figures.',
+    build: () => ({ scene: ceilingScene('arena') }),
+  },
+  {
+    id: 'ceiling-low-club',
+    title: 'Ceiling: a low plasterboard club ceiling over a 12 m link',
+    note: 'A plasterboard ceiling at 2.8 m reflects much less than metal: its ray is 9.1 dB below the direct ray and 0.3 m longer, a +1.9 dB change in the received level at this spot. Low ceilings add short-delay reflections that move the nulls closer together. Illustrative figures.',
+    build: () => ({ scene: ceilingScene('club') }),
+  },
+  {
+    id: 'rof-coax-vs-fibre',
+    title: 'RF over fibre: a 300 m antenna run in coax, passive fibre and active fibre',
+    note: 'The receive antenna head is 300 m from the rack. RG213 coax delivers -89.6 dBm to the receiver (margin 5.4 dB); a passive RF over fibre link (assumed -25 dB gain, 30 dB noise figure, 1.1 dB optical loss, so 2.2 dB more RF loss) gives -61.2 dBm with a system noise figure of 36.5 dB; one with built-in amplifiers gives -26.2 dBm at 12.4 dB. The fibre adds 1.47 microseconds of delay, irrelevant for audio. All fibre module figures are assumed placeholders: use a datasheet.',
+    build: () => ({ scene: rofScene('passive') }),
+  },
+  {
+    id: 'rof-branch-mismatch',
+    title: 'RF over fibre: two antenna branches with different fibre lengths',
+    note: 'An IEM transmitter feeds two antenna branches over passive RF over fibre, 0.1 km and 0.6 km (assumed modules). The delay spread is 2450 ns, so combined at RF the two do not add in phase (1 ns is 216 degrees at 600 MHz) and the link warns. Use equal fibre lengths on branches that are combined coherently. Figures are illustrative.',
+    build: () => ({ scene: rofBranchScene() }),
+  },
+  {
+    id: 'sos-iem-too-close',
+    title: 'Side of stage: IEM antenna 0.5 m from the mic receiver antenna',
+    note: 'A 100 mW IEM transmitter (20 dBm, 614.0 MHz) faces a mic receive paddle 0.5 m away with the same polarisation and a 12 dB booster behind it. Only 8.2 dB separates them, so +22.5 dBm reaches the receiver input against a -18 dBm P1dB and a -10 dBm maximum (assumed receiver figures): 40.5 dB over, desense capped at 40 dB, and the wanted mic margin falls from 41.1 dB to 1.1 dB. The IM3 product of the IEM and the mic is +27.8 dBm, so the booster makes it worse. Free-space figures; a real room adds or subtracts a few dB.',
+    build: () => ({ scene: sosScene('too-close') }),
+  },
+  {
+    id: 'sos-iem-crossed-pol',
+    title: 'Side of stage: 3.3 m apart, crossed polarisation, rack in between',
+    note: 'The IEM antenna is vertical and the mic antennas horizontal (15 dB cross-polar floor, assumed), 3.3 m apart, both aimed at the stage so each sits in the other side lobe, with a rack screen (2.5 dB, assumed) between. Coupling is 74.3 dB, the IEM reaches the receiver at -58.6 dBm with 40.6 dB of headroom, desense is 0 and the wanted margin stays 37.7 dB. The cost is one polarisation choice; a vertical IEM against a vertical mic antenna would give back 15 dB of coupling.',
+    build: () => ({ scene: sosScene('crossed-pol') }),
+  },
+  {
+    id: 'sos-iem-best-practice',
+    title: 'Side of stage: best practice (filter, low power, remote antennas)',
+    note: 'The IEM runs 10 mW (10 dBm) from a stand at the stage-side edge aimed at the stage, and the IEM link still has 40.8 dB of margin. The mic antennas are 10.8 m away, high and behind its beam, crossed in polarisation, with a 604 to 608 MHz bandpass filter (40 dB rejection, assumed) and 15 m of cable. Coupling is 72.0 dB but only -106.6 dBm reaches the receiver (88.6 dB of headroom, no desense) and the wanted mic keeps 32.1 dB. Distance and the filter do most of the work; power only costs the IEM margin you need.',
+    build: () => ({ scene: sosScene('best') }),
+  },
+  {
+    id: 'foh-mic-iem-audience',
+    title: 'FOH: low antennas behind a standing crowd',
+    note: 'Mic receive and IEM transmit paddles sit at table height (1.2 m) at FOH, 26 m from the performer, behind 18 m of standing crowd at 4 persons per m2 (assumed absorption 0.5 dB per metre per person per m2, capped at 30 dB). The crowd takes 30.0 dB and the performer body 3 dB, leaving the mic link 2.0 dB of margin (-93.0 dBm at the receiver input) and the IEM link 10.6 dB. At 3 per m2 the mic margin is 4.9 dB; a seated crowd at 1.5 per m2 leaves 22.7 dB for the mic and 27.1 dB for the IEM because the ray passes over seated heads.',
+    build: () => ({ scene: fohScene('low') }),
+  },
+  {
+    id: 'foh-raised-antennas',
+    title: 'FOH: antennas raised to 3 m on stands or a truss',
+    note: 'The same paddles aimed at the stage at 3.0 m clear the heads for most of the crowd: the mic ray no longer meets any absorption and the receiver input rises to -65.5 dBm. The mic margin recovers from 2.0 dB to 29.5 dB (27.5 dB) and the IEM margin from 10.6 dB to 38.0 dB (27.4 dB); the IEM still loses 6.5 dB because the bodypack is low on the performer. Height is the cheapest fix, so raise the antennas before adding gain.',
+    build: () => ({ scene: fohScene('raised') }),
+  },
+  {
+    id: 'foh-remote-antennas',
+    title: 'FOH: antennas at the stage side, 45 m of cable back to FOH',
+    note: 'The antennas move to the stage side at 3.0 m, 9 m from the performer and outside the crowd, with 45 m of LMR-400 back to FOH. With a 15 dB booster at the antenna end the mic margin is 69.8 dB and the IEM link, which pays 4.9 dB of cable and has no booster (power limit), has 52.1 dB. The same booster after the cable costs 4.1 dB (65.7 dB), and the active RF over fibre preset (assumed figures) gives 61.6 dB. Against the low antennas that recovers 67.8 dB on the mic and 41.5 dB on the IEM.',
+    build: () => ({ scene: fohScene('remote') }),
+  },
+  {
+    id: 'video-wall-class-b',
+    title: 'Video wall: EMC class B noise, FOH versus stage side',
+    note: 'A 14 m LED wall behind the band radiates at the class B limit (30 / 37 dBuV/m at 10 m, a ceiling, assumed). The FOH paddle 27 m away looks straight at it: -98.3 dBm in 200 kHz lifts the floor 14.3 dB and cuts the mic margin from 34.2 dB (wall off) to 19.8 dB. A stage-side receiver sees 17.5 dB of rise but is close to the mic, so it keeps 48.9 dB. The metal wall also returns a reflection only 3.5 dB below the direct ray, so expect multipath.',
+    build: () => ({ scene: videoWallScene({ preset: 'class-b', rx: 'foh' }) }),
+  },
+  {
+    id: 'video-wall-noisy',
+    title: 'Video wall: noisy budget panels',
+    note: 'Budget panels or poor cabling (class A plus 15 dB, assumed) put -73.3 dBm in the FOH receiver and raise the floor by 39.2 dB, so the mic margin falls to -5.0 dB and the link fails. A wall at the class A limit leaves 10.0 dB. With the receiver at the stage front, 3 m from the wall, the noisy wall still leaves only 8.2 dB, and 24.0 dB with the receiver at the stage side. A CE-marked wall can still be the loudest thing in the band.',
+    build: () => ({ scene: videoWallScene({ preset: 'noisy', rx: 'foh' }) }),
+  },
+  {
+    id: 'video-wall-fixes',
+    title: 'Video wall: the fixes (distance, aim, cabling)',
+    note: 'Start from the failing noisy wall at FOH (margin -5.0 dB). Moving the receiver to the stage side, aimed at the performer with the wall off its beam, gives 24.0 dB (28.9 dB better). Ferrite chokes and shielded data cable are modelled as dropping the wall to the class B level (15 dB, assumed): 19.8 dB at FOH (24.8 dB better). Both together give 48.9 dB, a gain of 53.9 dB.',
+    build: () => ({ scene: videoWallScene({ preset: 'noisy', rx: 'foh' }) }),
+  },
+  {
+    id: 'video-wall-solid-vs-mesh',
+    title: 'Video wall: solid metal, mesh and carbon fibre construction',
+    note: 'Same stage and class A noise, a receiver 2.5 m behind the wall: crossing loss is 40.0 dB for solid metal, 27.9 dB for 10 mm metal mesh and 28.9 dB for carbon mesh, and the noise reaching it is -94.2, -72.2 and -75.2 dBm (rear loss 25, 3 and 6 dB), leaving margins of 19.4, -2.6 and 0.4 dB. Seen from FOH the metal and metal mesh both reflect at -3.5 dB and carbon at -9.5 dB. Holes of 100 mm (a coarse curtain) shield only 7.9 dB at 606 MHz, so a mesh wall is no free pass at UHF. All construction figures are assumed.',
+    build: () => ({ scene: videoWallScene({ preset: 'class-a', construction: 'mesh-metal', rx: 'back' }) }),
+  },
+  {
+    id: 'p2p-wireless-snake',
+    title: 'Point to point: wireless snake send across a field',
+    note: 'A 20 dBm send at 606 MHz crosses 1.2 km between two yagis on 6 m masts (assumed gain). The received power is -60.3 dBm with 30.5 dB of margin, but only 49 percent of the first Fresnel zone is clear at 0.6 km, so the earth costs 0.6 dB. On 2 m masts the clearance falls to 16 percent and the loss to 4.1 dB.',
+    build: () => ({ scene: p2pScene('snake') }),
+  },
+  {
+    id: 'p2p-delay-speaker',
+    title: 'Point to point: FOH to a stage-left delay speaker',
+    note: 'A 17 dBm send at 606 MHz crosses 150 m between paddle antennas at 3 m. The received power is -50.6 dBm with 40.1 dB of margin and 70 percent of the first Fresnel zone is clear, so the 60 percent rule is met. Over a short path like this the ground reflection is left off; turn it on to see the ripple.',
+    build: () => ({ scene: p2pScene('delay') }),
+  },
+  {
+    id: 'p2p-truck-hill',
+    title: 'Point to point: broadcast truck to a remote camera position',
+    note: 'A 30 dBm send at 606 MHz covers 8 km between yagis at 12 m and 6 m with a 30 m hill 3 km from the truck. The hill is a single knife edge that costs 13.8 dB, leaving -80.0 dBm received and 10.8 dB of margin and the clearance is far below the 60 percent rule. Without the hill the earth alone costs 3.2 dB and the received power is -69.3 dBm.',
+    build: () => ({ scene: p2pScene('truck') }),
+  },
+  {
+    id: 'p2p-bodypack-line-feed',
+    title: 'Point to point: two bodypacks as a wireless line feed',
+    note: 'Two bodypacks with whips at 1.5 m carry a line feed over 60 m at 606 MHz with 10 dBm and nobody wearing them, so there is no body loss. The received power is -78.7 dBm with 12.1 dB of margin. The path is under 100 m and only 55 percent of the first Fresnel zone is clear, so the model warns; a mic link is the better tool here.',
+    build: () => ({ scene: p2pScene('bodypack') }),
+  },
+  {
     id: 'imd-pim',
     title: 'Rusty connector: PIM',
     note: 'Two 20 W transmitters sit side by side behind an isolated combiner and the receiver is linear, which holds active intermod at the wanted channel to about -114 dBm. The product made passively by the antenna-line connector is -118 dBm for a corroded connector and -153 dBm for a good one: 35 dB apart. At this power that product stays below the noise from the transmitters themselves (about -103 dBm), so the noise rise is the same for both; passive intermod only starts to matter at much higher power, where it grows three times faster than the carriers.',
@@ -501,7 +1052,6 @@ export const EXAMPLES = [
       scene: make('iem', (s, l) => {
         s.stage = { width: 12, depth: 8, heightM: 1.2 };
         s.environment.floor = 'wood';
-        s.environment.polarisation = 'vertical';
         l.tx.antenna = OMNI_IMD();
         l.tx.pos = { x: 1, y: 1, z: 2.5 };
         l.rx.antenna = { type: 'omni', gainDbi: -3, orientation: { az: 0, el: 90 } };
@@ -519,7 +1069,6 @@ export const EXAMPLES = [
       scene: make('mic', (s, l) => {
         s.stage = { width: 12, depth: 8, heightM: 1.5 };
         s.environment.floor = 'concrete';
-        s.environment.polarisation = 'vertical';
         l.tx.antenna = omni();
         l.rx.antenna = omni();
         l.tx.pos = { x: 6, y: 4, z: 1.5 };

@@ -7,6 +7,17 @@
 //                 pim: { preset: 'none'|'good'|'corroded', levelDbc }, channelBwKHz, iip3Dbm?, iip5Dbm?, noiseFigureDb? }
 // Every transmitter's own channel is a "wanted channel" of the demonstration.
 //
+// Combiner topology (optional, scene.imd.topology; absent = the single shared combiner above, results unchanged):
+//   topology = { groups: [{ id, name, members: [txId...], lossDb, isolationDb, isolatorDb?, underRoot? }], root?: { lossDb, isolationDb } }
+// A group is one combiner whose members share one antenna (give them the same pos/antenna). lossDb = through insertion loss,
+// isolationDb = port-to-port isolation between two members, isolatorDb = reverse isolation of each member's own isolator (0 when none).
+// root joins every group with underRoot !== false (a passive 2-way/hybrid: lossDb through, isolationDb port to port). A transmitter in
+// no group is "direct": its own antenna, no combiner loss. Pair coupling (what a pump transmitter b delivers to the output stage of a):
+//   same group:            group.isolationDb
+//   different groups, root: G_b.lossDb + root.isolationDb + G_a.lossDb + G_a.isolatorDb
+//   otherwise (antennas apart): through(b) + air(a, b) + through(a) + G_a.isolatorDb, air = couplingLossDb (Friis with both patterns),
+// through(x) = G.lossDb (+ root.lossDb when under the root), 0 for a direct transmitter.
+//
 // Known gaps (kept simple on purpose): an accidental mixer such as a rusty fence has no position in the scene (use the
 // 'rusty-contact' PIM figure as an equivalent junction at the antenna); FM products are drawn as lines although they are about
 // three times the channel width (productBandwidthFactor), so the picture understates their overlap with a neighbouring channel.
@@ -130,6 +141,53 @@ function conversionDb(scene, a) {
   return base;
 }
 
+// ---- combiner topology
+function topologyOf(scene) {
+  const topo = scene && scene.imd && scene.imd.topology;
+  const tx = txOf(scene);
+  const comb = combinerOf(scene);
+  if (!topo || !Array.isArray(topo.groups) || !topo.groups.length) {
+    // legacy: one shared combiner (or none)
+    return {
+      through: () => (comb.shared ? comb.lossDb : 0),
+      isoRev: () => 0,
+      feedOf: (t) => (comb.shared ? 'shared' : t.id),
+      pairCouplingDb: (a, b, scn) => (comb.shared ? comb.isolationDb : couplingLossDb(a, b, b.freqMHz, scn)),
+      groupOf: () => (comb.shared ? 'shared' : null),
+      root: null,
+    };
+  }
+  const num = (v, d = 0) => (Number.isFinite(v) ? v : d);
+  const root = topo.root && typeof topo.root === 'object' ? { lossDb: num(topo.root.lossDb), isolationDb: num(topo.root.isolationDb) } : null;
+  const groupOfId = new Map();
+  for (const g of topo.groups) if (g && Array.isArray(g.members)) for (const m of g.members) groupOfId.set(m, g);
+  const gOf = (t) => groupOfId.get(t.id) || null;
+  const under = (g) => !!root && g.underRoot !== false;
+  const through = (t) => { const g = gOf(t); return g ? num(g.lossDb) + (under(g) ? root.lossDb : 0) : 0; };
+  const isoRev = (t) => { const g = gOf(t); return g ? num(g.isolatorDb) : 0; };
+  const feedOf = (t) => { const g = gOf(t); return g ? (under(g) ? 'root' : `g:${g.id}`) : t.id; };
+  const pairCouplingDb = (a, b, scn) => {
+    const ga = gOf(a), gb = gOf(b);
+    if (ga && ga === gb) return num(ga.isolationDb);
+    if (ga && gb && under(ga) && under(gb)) return num(gb.lossDb) + root.isolationDb + num(ga.lossDb) + num(ga.isolatorDb);
+    return through(b) + couplingLossDb(a, b, b.freqMHz, scn) + through(a) + isoRev(a);
+  };
+  return { through, isoRev, feedOf, pairCouplingDb, groupOf: (t) => (gOf(t) ? gOf(t).id : null), root };
+}
+
+/** imdTopology(scene) -> { throughLossDb(txId), pairCouplingDb(txIdA, txIdB), groupOf(txId), hasTopology } for UI and examples. */
+export function imdTopology(scene) {
+  const T = topologyOf(scene);
+  const tx = txOf(scene);
+  const by = (id) => tx.find((t) => t.id === id);
+  return {
+    hasTopology: !!(scene.imd && scene.imd.topology && Array.isArray(scene.imd.topology.groups) && scene.imd.topology.groups.length),
+    throughLossDb: (id) => T.through(by(id)),
+    pairCouplingDb: (a, b) => T.pairCouplingDb(by(a), by(b), scene),
+    groupOf: (id) => T.groupOf(by(id)),
+  };
+}
+
 function rxAntenna(scene) {
   const { imd } = imdOf(scene);
   const link = (scene.links || [])[0];
@@ -164,12 +222,12 @@ export function couplingLossDb(txA, txB, freqMHz, scene) {
 
 // Tone levels at the receiver input: solveLink-style budget (antenna gains, path, reflections, walls, rx chain).
 function toneLevels(scene, rxPoint) {
-  const comb = combinerOf(scene);
+  const T = topologyOf(scene);
   const rx = rxPointOf(scene, rxPoint);
   const ant = rxAntenna(scene);
   const chain = (scene.imd && scene.imd.rxChain) || [];
   return txOf(scene).map((t) => {
-    const powerEff = t.powerDbm - (comb.shared ? comb.lossDb : 0);
+    const powerEff = t.powerDbm - T.through(t);
     const link = {
       id: `imd-${t.id}`, kind: 'mic', freqMHz: t.freqMHz,
       tx: { pos: t.pos, powerDbm: powerEff, antenna: t.antenna || DEFAULT_ANT },
@@ -236,7 +294,7 @@ export function frontEndImd(scene, rxPoint, orders = [3, 5]) {
  */
 export function txReverseImd(scene, rxPoint) {
   const tx = txOf(scene);
-  const comb = combinerOf(scene);
+  const T = topologyOf(scene);
   if (tx.length < 2) return [];
   const lv = toneLevels(scene, rxPoint);
   const out = [];
@@ -244,13 +302,13 @@ export function txReverseImd(scene, rxPoint) {
     tx.forEach((b, ib) => {
       if (ia === ib) return;
       // shared combiner: port-to-port isolation only (it already includes the split); insertion loss belongs to the through path
-      const coupling = comb.shared ? comb.isolationDb : couplingLossDb(a, b, b.freqMHz, scene);
+      const coupling = T.pairCouplingDb(a, b, scene);
       const pIn = b.powerDbm - coupling;
       for (const order of [3, 5]) {
         const fMHz = order === 3 ? 2 * a.freqMHz - b.freqMHz : 3 * a.freqMHz - 2 * b.freqMHz;
         if (!(fMHz > 0)) continue;
         const atPaOut = pIn - conversionDb(scene, a) - (order === 5 ? TX_REVERSE_IM_5TH_EXTRA_DB : 0);
-        const levelDbm = atPaOut - (comb.shared ? comb.lossDb : 0) + lv[ia].pathGainDb;
+        const levelDbm = atPaOut - T.through(a) + lv[ia].pathGainDb;
         out.push({
           fMHz, order, label: order === 3 ? `2f${ia + 1}-f${ib + 1}` : `3f${ia + 1}-2f${ib + 1}`,
           source: 'tx-reverse', pumpTx: a.id, interfererTx: b.id, levelDbm, atPaOutDbm: atPaOut,
@@ -282,7 +340,7 @@ export function pimImd(scene, rxPoint) {
   const dbcRef = pimDbcAtRef(scene);
   const tx = txOf(scene);
   if (dbcRef === null || tx.length < 2) return [];
-  const comb = combinerOf(scene);
+  const T = topologyOf(scene);
   const lv = toneLevels(scene, rxPoint);
   const out = [];
   tx.forEach((a, ia) => {
@@ -290,8 +348,8 @@ export function pimImd(scene, rxPoint) {
       if (ia === ib) return;
       const fMHz = 2 * a.freqMHz - b.freqMHz;
       if (!(fMHz > 0)) return;
-      const pa = a.powerDbm - (comb.shared ? comb.lossDb : 0);
-      const pb = b.powerDbm - (comb.shared ? comb.lossDb : couplingLossDb(a, b, b.freqMHz, scene));
+      const pa = a.powerDbm - T.through(a);
+      const pb = b.powerDbm - T.through(b) - (T.feedOf(a) === T.feedOf(b) ? 0 : couplingLossDb(a, b, b.freqMHz, scene));
       const atJunction = (PIM_REFERENCE_DBM + dbcRef) + 2 * (pa - PIM_REFERENCE_DBM) + (pb - PIM_REFERENCE_DBM);
       out.push({
         fMHz, order: 3, label: `2f${ia + 1}-f${ib + 1}`, source: 'pim', pumpTx: a.id, interfererTx: b.id,
@@ -440,6 +498,59 @@ export function spectrum(scene, { centerMHz, spanMHz, points = 512, rbwKHz = 10 
     pimDbm: trace(pim),
     noiseDbm,
     markers,
+  };
+}
+
+// ---------------------------------------------------------------- side-by-side summary
+
+/**
+ * imdSummary(scene, rxPoint) -> {
+ *   perTx: [{ id, name, freqMHz, group, throughLossDb, levelAtRxDbm }], meanThroughLossDb, levelSpreadDb,
+ *   worstPairIsolationDb, worstPair: [idA, idB], crossGroupIsolationDb (smallest pump coupling between members of different groups, null if none), worstProduct: { label, source, levelDbm, fMHz } | null, worstProductDbc,
+ *   worstReverse: { ... } | null, inChannelCount, criticalCount, warningCount, worstCiDb, riseDb }
+ * One-call comparison of a combining scheme: insertion loss per transmitter (through the combiners to its antenna), level of each
+ * carrier at the receive point, the smallest pump isolation between any two transmitters (what reaches an output stage), the
+ * strongest intermodulation product (any mechanism) and its level relative to the weakest wanted carrier, the number of products that
+ * land inside a wanted channel (coordinationCheck) with severity counts, and the noise rise of the worst channel.
+ */
+export function imdSummary(scene, rxPoint) {
+  const tx = txOf(scene);
+  const T = topologyOf(scene);
+  const lv = toneLevels(scene, rxPoint);
+  const perTx = tx.map((t, i) => ({ id: t.id, name: t.name, freqMHz: t.freqMHz, group: T.groupOf(t), throughLossDb: T.through(t), levelAtRxDbm: lv[i].levelDbm }));
+  let worstPairIsolationDb = Infinity, worstPair = null, crossGroupIsolationDb = Infinity;
+  tx.forEach((a, ia) => tx.forEach((b, ib) => {
+    if (ia === ib) return;
+    const c = T.pairCouplingDb(a, b, scene);
+    if (c < worstPairIsolationDb) { worstPairIsolationDb = c; worstPair = [a.id, b.id]; }
+    const ga = T.groupOf(a), gb = T.groupOf(b);
+    if (ga && gb && ga !== gb && c < crossGroupIsolationDb) crossGroupIsolationDb = c;
+  }));
+  const top = (arr) => arr.reduce((w, p) => (!w || p.levelDbm > w.levelDbm ? p : w), null);
+  const summ = (p) => (p ? { label: p.label, source: p.source, levelDbm: p.levelDbm, fMHz: p.fMHz } : null);
+  const rev = txReverseImd(scene, rxPoint);
+  const wp = top([...frontEndImd(scene, rxPoint), ...rev, ...pimImd(scene, rxPoint)]);
+  const levels = lv.map((x) => x.levelDbm);
+  const checks = coordinationCheck(scene, rxPoint);
+  const nf = tx.length ? noiseFloor(scene, rxPoint) : { riseDb: 0 };
+  return {
+    perTx,
+    meanThroughLossDb: perTx.length ? perTx.reduce((s, x) => s + x.throughLossDb, 0) / perTx.length : 0,
+    levelSpreadDb: levels.length ? Math.max(...levels) - Math.min(...levels) : 0,
+    worstPairIsolationDb: Number.isFinite(worstPairIsolationDb) ? worstPairIsolationDb : null, worstPair,
+    crossGroupIsolationDb: Number.isFinite(crossGroupIsolationDb) ? crossGroupIsolationDb : null,
+    worstProduct: summ(wp), worstProductDbc: wp && levels.length ? wp.levelDbm - Math.min(...levels) : null,
+    worstReverse: summ(top(rev)),
+    inChannelCount: checks.length, criticalCount: checks.filter((c) => c.severity === 'critical').length,
+    warningCount: checks.filter((c) => c.severity === 'warning').length, worstCiDb: checks.length ? checks[0].ciDb : null,
+    riseDb: nf.riseDb,
+    // Wanted-to-product ratio: weakest wanted carrier minus the strongest product anywhere (dB, larger = cleaner). Unlike riseDb it does not
+    // improve just because a lossier combiner pulls every level (and the noise-floor lift) down together; compare schemes with this.
+    worstWantedToProductDb: wp && levels.length ? Math.min(...levels) - wp.levelDbm : null,
+    // How many products fall in a channel, by order, and how many are third order (the ones that matter in practice). Fifth-order hits are
+    // common on an evenly spaced grid and are usually 70+ dB below the wanted carrier (severity 'info').
+    inChannelByOrder: checks.reduce((o, c) => { o[c.product.order] = (o[c.product.order] || 0) + 1; return o; }, {}),
+    inChannelThirdOrderCount: checks.filter((c) => c.product.order === 3).length,
   };
 }
 

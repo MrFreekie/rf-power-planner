@@ -25,6 +25,7 @@
   <div class="group" role="group" aria-label="Scenario">
     <button type="button" id="btn-mic" aria-pressed="true">Mic</button>
     <button type="button" id="btn-iem" aria-pressed="false">IEM</button>
+    <button type="button" id="btn-p2p" aria-pressed="false" title="Point-to-point link: fixed directional antennas, long distance">P2P</button>
   </div>
   <label>Frequency <input id="freq" type="number" min="1" max="6000" step="0.025" inputmode="decimal"> MHz</label>
   <label>Floor <select id="floor"></select></label>
@@ -73,6 +74,12 @@
   </div>
   <button type="button" id="btn-modlab" aria-expanded="false" aria-controls="modlab" title="Animated AM, FM, digital, stereo FM and mic tone-key demonstrations">Modulation lab</button>
   <button type="button" id="btn-venue" aria-haspopup="dialog" title="Import a venue drawing as a grey underlay">Venue</button>
+  <div class="group panels-group" role="group" aria-label="Panels">
+    <button type="button" id="btn-panel-left" data-toggle="left" aria-expanded="true" aria-controls="leftpanel-body" title="Show or hide the budgets panel on the left (key B)">Left</button>
+    <button type="button" id="btn-panel-right" data-toggle="right" aria-expanded="true" aria-controls="sidebar-body" title="Show or hide the inspector panel on the right (key I)">Right</button>
+    <button type="button" id="btn-panel-bottom" data-toggle="bottom" aria-expanded="true" aria-controls="bottombar-body" title="Show or hide the meters, timeline and spectra (key M)">Bottom</button>
+    <button type="button" id="btn-focus" aria-pressed="false" title="Hide all three panels for the biggest plan and side views (key F)">Focus</button>
+  </div>
   <div class="group" role="group" aria-label="Help and reset">
     <button type="button" id="btn-help" aria-expanded="false" aria-controls="welcome">Help</button>
     <button type="button" id="btn-reset">Reset</button>
@@ -105,7 +112,9 @@
     <h2>Side</h2>
     <canvas id="side-canvas" tabindex="0" aria-label="Side view of the Tx to Rx line"></canvas>
   </section>
-  <div id="sidebar">
+  <div id="leftpanel" data-panel="left">
+  <button type="button" class="panel-tab" data-toggle="left" aria-expanded="true" aria-controls="leftpanel-body">Budgets</button>
+  <div id="leftpanel-body" class="panel-body">
   <aside id="results" aria-label="Link budget results" aria-live="polite">
     <h2>Link budget</h2>
     <dl id="readout">
@@ -117,27 +126,40 @@
       <div><dt>Noise floor</dt><dd id="r-floor">-</dd></div>
       <div><dt>Status</dt><dd id="r-status" class="status">-</dd></div>
     </dl>
+    <dl id="readout-extra" aria-label="Polarisation, antenna match and path details" hidden></dl>
     <ul id="r-warnings" class="r-warnings" aria-label="Link warnings" hidden></ul>
     <p id="app-error" role="alert" hidden></p>
   </aside>
+  <section id="waterfall" aria-label="Signal level waterfall"></section>
+  </div>
+  </div>
+  <div id="sidebar" data-panel="right">
+  <button type="button" class="panel-tab" data-toggle="right" aria-expanded="true" aria-controls="sidebar-body">Inspector</button>
+  <div id="sidebar-body" class="panel-body">
   <details id="scenes" class="ob-details"></details>
   <details id="compare" class="ob-details"></details>
   <details id="coordination" class="ob-details"></details>
-  <section id="meters" aria-label="RF and audio meters"></section>
-  <section id="mpx" aria-label="Stereo multiplex"></section>
   <section id="diversity" aria-label="Antenna diversity"></section>
   <section id="telemetry" aria-label="Telemetry"></section>
-  <section id="digital" aria-label="Digital link"></section>
   <section id="coverage" aria-label="Coverage zones"></section>
   <section id="imd" aria-label="Intermodulation"></section>
   <section id="inspector" aria-label="Inspector"></section>
-  <section id="waterfall" aria-label="Signal level waterfall"></section>
+  </div>
   </div>
 </main>
 
-<div id="bottombar">
+<div id="slot-store" hidden>
+  <section id="mpx" aria-label="Stereo multiplex readouts"></section>
+  <section id="digital" aria-label="Digital link"></section>
+</div>
+
+<div id="bottombar" data-panel="bottom">
+  <button type="button" class="panel-tab" data-toggle="bottom" aria-expanded="true" aria-controls="bottombar-body">Meters, timeline and spectra</button>
+  <div id="bottombar-body" class="panel-body">
+  <div class="bb-col bb-meters"><section id="meters" aria-label="RF and audio meters"></section></div>
   <div class="bb-col"><section id="timeline" aria-label="Level timeline"></section></div>
   <div class="bb-col"><section id="spectra" aria-label="Spectrum views"></section></div>
+  </div>
 </div>
 
 <script type="module" src="js/app.js"></script>

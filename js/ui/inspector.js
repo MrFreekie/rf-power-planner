@@ -3,7 +3,18 @@
 // otherwise every field is patched in place and a focused field is never overwritten.
 import { findItem, activeLink, solveCached } from '../view/util.js';
 import { chainItemLossDb } from '../model/rf.js';
-import { CABLES, ANTENNAS, SURFACES, MATERIALS, BANDS } from '../model/library.js';
+import { CABLES, ANTENNAS, SURFACES, MATERIALS, BANDS, GROUND_PLANE_LABELS, GROUND_PLANE_GAIN_DBI, ANTENNA_CONTACT_LABELS, ANTENNA_DAMPNESS_LABELS, allowedPolarisations, defaultPolarisation } from '../model/library.js';
+import { setAntennaField, setAntennaType, antennaOf } from '../actions.js';
+import { POLARISATION_LABELS, ORIENTATION_HINT, POLARISATION_HINT } from './antennaFields.js';
+import { CHAIN_PRESETS, DC_MODES, FILTER_TYPES } from '../model/chain-presets.js';
+import { addAudience, updateAudience, removeAudience, setCeiling, addOverheadPanel, updateOverheadPanel, removeOverheadPanel, setP2pField, setAntennaDesignBand, densityChoiceId } from '../actionsAreas.js';
+import { AUDIENCE_DENSITY_PRESETS, AUDIENCE_DENSITY_LIMITS, AUDIENCE_DB_PER_M_PER_PERSON, AUDIENCE_MAX_LOSS_DB } from '../model/audience.js';
+import { CEILING_MATERIALS, CEILING_LIMITS } from '../model/ceiling.js';
+import { ANTENNA_BANDS, antennaMatch, resolveDesignBand } from '../model/antenna-band.js';
+import { rofEffective } from '../model/rof.js';
+import { vswrText } from './budgetExtras.js';
+import { createChainItemFromPreset } from '../model/scene.js';
+import { FLAG_TEXT, DC_MODE_LABELS, FILTER_TYPE_LABELS, presetOptions, presetFlag } from './chainFields.js';
 import { dbmToUnit } from '../model/units.js';
 import { squelch } from '../squelchTracker.js';
 import { rxConfig } from '../rxTracker.js';
@@ -25,7 +36,7 @@ import { txPresetOptions, powerOptionChoices, currentPowerOption, lowIntermodAva
 import { setTxFmPreset, setTxPowerOption, setTxLowIntermod, setRxFmPreset, setImdTransmitterFm } from '../actions.js';
 import { noiseOptions, noiseValue, noiseFromChoice, noiseHint, interferenceApplies, interferenceOptions, interferenceValue, interferenceHint, rxPresetOffer } from './noise.js';
 import {
-  setPath, setLinkField, setLinkKind, setUnits, addChainItem, removeChainItem, moveChainItem,
+  setPath, setLinkField, setLinkKind, addChainItem, removeChainItem, moveChainItem,
   addReflector, removeReflector,
 } from '../actions.js';
 import {
@@ -38,9 +49,10 @@ const val = (v, c) => (typeof v === 'function' ? v(c) : v);
 const KIND_NAMES = {
   cable: 'Cable', booster: 'Booster / amplifier', filter: 'Filter', connector: 'Connector',
   attenuator: 'Attenuator', splitter: 'Splitter', combiner: 'Combiner',
+  rof: 'RF over fibre', coupler: 'Directional coupler', biastee: 'Bias tee', dcblock: 'DC block', activesplitter: 'Active splitter', activecombiner: 'Active combiner',
 };
 const PREVIEW_KINDS = new Set(['splitter', 'combiner']);
-const SECTION_FOR = { tx: 'tx', rx: 'rx', reflector: 'refl', link: 'link', platform: 'plats' };
+const SECTION_FOR = { tx: 'tx', rx: 'rx', reflector: 'refl', link: 'link', platform: 'plats', audience: 'aud', panel: 'ovh' };
 
 export function mountInspector({ container, store }) {
   container.classList.add('inspector');
@@ -49,7 +61,7 @@ export function mountInspector({ container, store }) {
   let updaters = [];
   let refs = {};
   let session = 0; // bumped on focus so each editing burst is its own undo step
-  const open = { stage: false, plats: false, chainB: true, imd: true, link: true, tx: false, rx: false, env: false, chain: true, refl: false, paths: false };
+  const open = { stage: false, plats: false, chainB: true, imd: true, aud: false, ovh: false, p2p: true, link: true, tx: false, rx: false, env: false, chain: true, refl: false, paths: false };
   let lastSel = Symbol('none');
 
   const getCtx = () => {
@@ -214,16 +226,84 @@ export function mountInspector({ container, store }) {
         key: `${who}-ant`, label: 'Antenna type',
         options: Object.entries(ANTENNAS).map(([id, a]) => [id, a.name]),
         get: (c) => c.link[who].antenna.type,
-        set: (c, v) => store.update((d) => {
-          const l = d.links.find((x) => x.id === c.link.id);
-          if (!l) return;
-          l[who].antenna.type = v;
-          if (ANTENNAS[v]) l[who].antenna.gainDbi = ANTENNAS[v].gainDbi;
-        }),
+        set: (c, v) => setAntennaType(store, c.link.id, who, v),
       }),
       numLink(`${who}-gain`, 'Antenna gain', `${prefix}.antenna.gainDbi`, -20, 40, 0.5, 'dBi', { decimals: 1 }),
       numLink(`${who}-az`, 'Azimuth', `${prefix}.antenna.orientation.az`, 0, 360, 1, '° (0 = toward audience, clockwise)', { decimals: 1 }),
       numLink(`${who}-el`, 'Elevation', `${prefix}.antenna.orientation.el`, -90, 90, 1, '° (0 = horizontal)', { decimals: 1 }),
+      detailFields(who, who, () => true),
+    );
+    return frag;
+  }
+
+  /** One line under the band fields: VSWR, return loss and mismatch loss of the antenna at the link frequency. */
+  function vswrLine(A, vis) {
+    const p = el('p', 'hint insp-vswr');
+    updaters.push((c) => {
+      const a = A(c);
+      const m = a && vis(c) && resolveDesignBand(a) ? antennaMatch(a, c.link.freqMHz) : null;
+      p.hidden = !m; p.textContent = m ? `At ${c.link.freqMHz} MHz: ${vswrText(m)}. Series-resonator model, assumed.` : '';
+      p.dataset.over = String(!!(m && m.vswr >= 3));
+    });
+    return p;
+  }
+
+  /** Tilt, roll, polarisation, ground plane, contact and dampness for the antenna named by target ('tx' | 'rx' | 'antennaB'). */
+  function detailFields(key, target, visible) {
+    const frag = document.createDocumentFragment();
+    const A = (c) => antennaOf(c.link, target);
+    const vis = (c) => !!A(c) && visible(c);
+    const label = key === 'antennaB' ? 'Antenna B ' : '';
+    frag.append(
+      numberField({
+        key: `${key}-tilt`, label: `${label}Tilt (deg, nose up)`, min: -90, max: 90, step: 1, unit: '\u00b0 (0 = as aimed)', decimals: 1,
+        visible: vis, get: (c) => A(c)?.tiltDeg ?? 0, set: (c, v, o) => setAntennaField(store, c.link.id, target, 'tiltDeg', v, o),
+      }),
+      numberField({
+        key: `${key}-roll`, label: `${label}Roll (deg)`, min: -180, max: 180, step: 1, unit: '\u00b0 (0 = upright)', decimals: 1,
+        visible: vis, get: (c) => A(c)?.rollDeg ?? 0, set: (c, v, o) => setAntennaField(store, c.link.id, target, 'rollDeg', v, o),
+      }),
+      selectField({
+        key: `${key}-pol`, label: `${label}Polarisation`,
+        options: (c) => allowedPolarisations(A(c)?.type).map((p) => [p, POLARISATION_LABELS[p] || p]),
+        visible: vis, get: (c) => A(c)?.polarisation ?? defaultPolarisation(A(c)?.type), set: (c, v) => setAntennaField(store, c.link.id, target, 'polarisation', v),
+      }),
+      selectField({
+        key: `${key}-gp`, label: `${label}Ground plane`,
+        options: [['', 'Not set']].concat(Object.keys(GROUND_PLANE_GAIN_DBI).map((g) => [g, `${GROUND_PLANE_LABELS[g]} (${GROUND_PLANE_GAIN_DBI[g]} dBi)`])),
+        visible: (c) => vis(c) && A(c).type === 'quarterwave', get: (c) => A(c)?.groundPlane ?? '',
+        set: (c, v) => setAntennaField(store, c.link.id, target, 'groundPlane', v || null),
+      }),
+      selectField({
+        key: `${key}-contact`, label: `${label}Body contact`, options: Object.entries(ANTENNA_CONTACT_LABELS),
+        visible: vis, get: (c) => A(c)?.contact ?? 'free', set: (c, v) => setAntennaField(store, c.link.id, target, 'contact', v),
+      }),
+      selectField({
+        key: `${key}-damp`, label: `${label}Dampness`, options: Object.entries(ANTENNA_DAMPNESS_LABELS),
+        visible: vis, get: (c) => A(c)?.dampness ?? 'dry', set: (c, v) => setAntennaField(store, c.link.id, target, 'dampness', v),
+      }),
+      selectField({
+        key: `${key}-band`, label: `${label}Design band`,
+        options: [['', 'Not stated (no mismatch)'], ...Object.entries(ANTENNA_BANDS).map(([id, b]) => [id, b.label]), ['custom', 'Custom lo / hi band']],
+        visible: vis, get: (c) => { const b = A(c)?.designBand; return b === undefined ? '' : typeof b === 'string' ? b : 'custom'; },
+        set: (c, v) => {
+          if (v === 'custom') { const f = c.link.freqMHz; setAntennaDesignBand(store, c.link.id, target, { loMHz: Math.round(f * 0.96 * 1000) / 1000, hiMHz: Math.round(f * 1.04 * 1000) / 1000 }); }
+          else setAntennaDesignBand(store, c.link.id, target, v || null);
+        },
+      }),
+      numberField({
+        key: `${key}-band-lo`, label: `${label}Band low`, min: 1, max: 99999, step: 1, unit: 'MHz', decimals: 3,
+        visible: (c) => vis(c) && typeof A(c)?.designBand === 'object', get: (c) => A(c)?.designBand?.loMHz,
+        set: (c, v, o) => { const b = A(c)?.designBand; if (b && typeof b === 'object') setAntennaDesignBand(store, c.link.id, target, { ...b, loMHz: v }, o); },
+      }),
+      numberField({
+        key: `${key}-band-hi`, label: `${label}Band high`, min: 1, max: 99999, step: 1, unit: 'MHz', decimals: 3,
+        visible: (c) => vis(c) && typeof A(c)?.designBand === 'object', get: (c) => A(c)?.designBand?.hiMHz,
+        set: (c, v, o) => { const b = A(c)?.designBand; if (b && typeof b === 'object') setAntennaDesignBand(store, c.link.id, target, { ...b, hiMHz: v }, o); },
+      }),
+      vswrLine(A, vis),
+      el('p', 'hint', POLARISATION_HINT),
+      el('p', 'hint', ORIENTATION_HINT),
     );
     return frag;
   }
@@ -256,7 +336,7 @@ export function mountInspector({ container, store }) {
     const link = c.link;
     const heading = el('h2', null, 'Inspector');
     const who = c.found
-      ? el('p', 'insp-who', c.found.type === 'platform' ? `Selected: platform "${c.found.item.name}"` : c.found.type === 'reflector' ? `Selected: reflector "${c.found.item.name}"`
+      ? el('p', 'insp-who', c.found.type === 'platform' ? `Selected: platform "${c.found.item.name}"` : c.found.type === 'audience' ? `Selected: audience area "${c.found.item.name}"` : c.found.type === 'panel' ? `Selected: overhead panel "${c.found.item.name}"` : c.found.type === 'reflector' ? `Selected: reflector "${c.found.item.name}"`
         : c.found.type === 'link' ? `Selected: link "${link.name}"` : `Selected: ${c.found.type === 'tx' ? 'transmitter' : 'receiver'} "${c.found.item.name}"`)
       : el('p', 'insp-who', `Nothing selected: editing link "${link.name}"`);
     container.append(heading, who);
@@ -275,12 +355,17 @@ export function mountInspector({ container, store }) {
     const plb = section('plats', 'Platforms', 'A platform is a raised block on the stage (drum riser, choir steps). Its top height is measured from the ground.');
     buildPlatforms(plb, c);
 
+    const audb = section('aud', 'Audience', `A crowd absorbs signal below head height: ${AUDIENCE_DB_PER_M_PER_PERSON} dB per metre per person per square metre, capped at ${AUDIENCE_MAX_LOSS_DB} dB per path (assumed, unverified). Drag an audience area onto the plan, or add one here.`);
+    buildAudience(audb, c);
+    const ovb = section('ovh', 'Ceiling and overhead panels', 'A ceiling and flown panels reflect signal back down. Heights are above the ground. Panels are drawn on the plan and in the side view.');
+    buildOverhead(ovb, c);
+
     // Link
     const lb = section('link', 'Link');
     lb.append(
       textField({ key: 'link-name', label: 'Link name', get: (cc) => cc.link.name, set: (cc, v, o) => linkSet('name')(cc, v, o) }),
       selectField({
-        key: 'link-kind', label: 'Link kind', options: [['mic', 'Microphone (Tx on stage, Rx at rack)'], ['iem', 'In-ear monitor (Tx at rack, Rx on performer)']],
+        key: 'link-kind', label: 'Link kind', options: [['mic', 'Microphone (Tx on stage, Rx at rack)'], ['iem', 'In-ear monitor (Tx at rack, Rx on performer)'], ['p2p', 'Point to point (fixed directional link)']],
         get: (cc) => cc.link.kind, set: (cc, v) => setLinkKind(store, cc.link.id, v),
       }),
       numberField({
@@ -292,14 +377,6 @@ export function mountInspector({ container, store }) {
         options: [['', 'Custom'], ...BANDS.map((b) => [b.id, b.name])],
         get: (cc) => bandForFreq(cc.link.freqMHz),
         set: (cc, v) => { const f = bandCentre(v); if (Number.isFinite(f)) linkSet('freqMHz')(cc, f); },
-      }),
-      selectField({
-        key: 'units-power', label: 'Power unit', options: [['dBm', 'dBm'], ['dBW', 'dBW'], ['mW', 'mW']],
-        get: (cc) => cc.pu, set: (cc, v) => setUnits(store, { power: v }),
-      }),
-      selectField({
-        key: 'units-length', label: 'Length unit', options: [['m', 'metres'], ['ft', 'feet']],
-        get: (cc) => cc.lu, set: (cc, v) => setUnits(store, { length: v }),
       }),
     );
 
@@ -355,6 +432,8 @@ export function mountInspector({ container, store }) {
         get: (cc) => cc.link.rx.squelch?.hysteresisDb ?? 3, set: (cc, v, o) => setSquelch(cc, 'hysteresisDb', v, o),
       }),
       antennaFields('rx', 'rx'),
+      numLink('rx-bias-v', 'Antenna bias supplied', 'rx.antennaBiasV', 0, 1000, 0.5, 'V (0 = none)', { decimals: 1, visible: (cc) => cc.link.kind !== 'iem', get: (cc) => cc.link.rx.antennaBiasV ?? 0 }),
+      numLink('rx-bias-ma', 'Antenna bias current limit', 'rx.antennaBiasMa', 0, 1000, 5, 'mA (0 = not stated)', { decimals: 0, visible: (cc) => cc.link.kind !== 'iem' && (cc.link.rx.antennaBiasV ?? 0) > 0, get: (cc) => cc.link.rx.antennaBiasMa ?? 0 }),
       posFields('rx'),
     );
     rb.append(
@@ -402,17 +481,12 @@ export function mountInspector({ container, store }) {
         key: 'rx-b-ant', label: 'Antenna B model', options: Object.entries(ANTENNAS).map(([id, a]) => [id, a.name]),
         visible: (cc) => !!cc.link.rx.diversity?.enabled && !!cc.link.rx.diversity?.antennaB?.antenna,
         get: (cc) => cc.link.rx.diversity?.antennaB?.antenna?.type,
-        set: (cc, v) => store.update((d) => {
-          const l = d.links.find((x) => x.id === cc.link.id);
-          const a = l?.rx.diversity?.antennaB?.antenna;
-          if (!a) return;
-          a.type = v;
-          if (ANTENNAS[v]) a.gainDbi = ANTENNAS[v].gainDbi;
-        }),
+        set: (cc, v) => setAntennaType(store, cc.link.id, 'antennaB', v),
       }),
       numLink('rx-b-gain', 'Antenna B gain', 'rx.diversity.antennaB.antenna.gainDbi', -20, 40, 0.5, 'dBi', {
         decimals: 1, visible: (cc) => !!cc.link.rx.diversity?.enabled && !!cc.link.rx.diversity?.antennaB?.antenna,
       }),
+      detailFields('antennaB', 'antennaB', (cc) => !!cc.link.rx.diversity?.enabled),
       selectField({
         key: 'rx-b-dirmode', label: 'Antenna B direction', options: [['same', 'Same as antenna A'], ['own', 'Own direction']],
         visible: (cc) => !!cc.link.rx.diversity?.enabled,
@@ -482,10 +556,6 @@ export function mountInspector({ container, store }) {
         get: (cc) => cc.scene.environment.floor, set: (cc, v) => setPath(store, 'environment.floor', v),
       }),
       selectField({
-        key: 'env-pol', label: 'Polarisation', options: [['vertical', 'Vertical'], ['horizontal', 'Horizontal']],
-        get: (cc) => cc.scene.environment.polarisation, set: (cc, v) => setPath(store, 'environment.polarisation', v),
-      }),
-      selectField({
         key: 'env-model', label: 'Propagation model', options: [['two-ray', 'Two-ray (multipath)'], ['free-space', 'Free space']],
         get: (cc) => cc.scene.environment.model, set: (cc, v) => setPath(store, 'environment.model', v),
       }),
@@ -553,7 +623,9 @@ export function mountInspector({ container, store }) {
       }
     });
 
-    const secs = ['stage', 'plats', 'link', 'tx', 'rx', 'env', 'chain', ...(refs.chainB ? ['chainB'] : []), 'refl', 'paths'];
+    const p2pb = c.link.kind === 'p2p' ? section('p2p', 'Point-to-point path', 'Heights are above a common flat datum. Terrain profiles, multiple edges, rain and ducting are not modelled.') : null;
+    if (p2pb) buildP2p(p2pb);
+    const secs = ['stage', 'plats', ...(p2pb ? ['p2p'] : []), 'aud', 'ovh', 'link', 'tx', 'rx', 'env', 'chain', ...(refs.chainB ? ['chainB'] : []), 'refl', 'paths'];
     if (c.scene.imd && c.scene.imd.enabled) { buildImd(section('imd', 'Intermod demo'), c); secs.unshift('imd'); }
     container.append(...secs.map((n) => refs[n].details));
   }
@@ -661,6 +733,128 @@ export function mountInspector({ container, store }) {
     body.append(form);
   }
 
+  // ---- audience areas -------------------------------------------------------------------------
+  function buildAudience(body, c) {
+    const areas = c.scene.audience || [];
+    const list = el('ul', 'refl-list');
+    areas.forEach((a) => {
+      const li = el('li');
+      const b = button(a.name || 'Audience', `aud:${a.id}`, () => store.select(a.id));
+      b.setAttribute('aria-pressed', String(c.sel === a.id));
+      li.append(b); list.append(li);
+    });
+    if (!areas.length) body.append(el('p', 'hint', 'No audience areas. Add one, or drag the chip below onto the plan.'));
+    body.append(list);
+    const addB = button('Add audience area', 'aud-add', (e) => { addOrLimit(store, e && e.currentTarget, 'audience area', () => { const id = addAudience(store); if (id) store.select(id); return id; }); });
+    const chip = el('span', 'drag-chip', 'Drag onto the plan');
+    chip.draggable = true; chip.title = 'Drag onto the plan to place an audience area';
+    chip.addEventListener('dragstart', (e) => { e.dataTransfer.setData('application/x-rfbench-audience', 'standing'); e.dataTransfer.setData('text/plain', 'audience area'); e.dataTransfer.effectAllowed = 'copy'; });
+    body.append(addB, chip);
+    const a0 = c.found?.type === 'audience' ? c.found.item : null;
+    if (!a0) return;
+    const id = a0.id;
+    const Aa = (cc) => (cc.scene.audience || []).find((q) => q.id === id);
+    const len = (key, label, field, min, max, axis = null) => numberField({
+      key: `aud-${key}`, label, decimals: 2, min: (cc) => lengthToUi(dispRange(cc.scene, axis, min, max)[0], cc.lu), max: (cc) => lengthToUi(dispRange(cc.scene, axis, min, max)[1], cc.lu), step: (cc) => (cc.lu === 'ft' ? 0.5 : 0.1), unit: (cc) => cc.lu,
+      get: (cc) => lengthToUi(dispAxis(cc.scene, axis, Aa(cc)?.[field] ?? 0), cc.lu), set: (cc, v, o) => updateAudience(store, id, { [field]: internalAxis(cc.scene, axis, lengthFromUi(v, cc.lu)) }, o),
+    });
+    const form = el('div', 'refl-form');
+    const flagU = (row) => { const sp = el('span', 'flag flag-U', 'U'); sp.title = FLAG_TEXT.U; sp.setAttribute('role', 'img'); sp.setAttribute('aria-label', FLAG_TEXT.U); row.querySelector('.inp').append(sp); return row; };
+    form.append(
+      textField({ key: 'aud-name', label: 'Name', get: (cc) => Aa(cc)?.name, set: (cc, v, o) => updateAudience(store, id, { name: v }, o) }),
+      selectField({ key: 'aud-kind', label: 'Posture', options: [['standing', 'Standing (head 1.7 m)'], ['seated', 'Seated (head 1.2 m)']], get: (cc) => Aa(cc)?.kind, set: (cc, v) => updateAudience(store, id, { kind: v }) }),
+      flagU(selectField({
+        key: 'aud-dens-preset', label: 'Density',
+        options: [...AUDIENCE_DENSITY_PRESETS.filter((p) => p.id !== 'seated').map((p) => [p.id, `${p.label}, ${p.densityPerM2}/m2`]), ['custom', 'Custom']],
+        get: (cc) => densityChoiceId(AUDIENCE_DENSITY_PRESETS, Aa(cc)?.densityPerM2 ?? 2),
+        set: (cc, v) => { const p = AUDIENCE_DENSITY_PRESETS.find((q) => q.id === v); if (p) updateAudience(store, id, { densityPerM2: p.densityPerM2 }); },
+      })),
+      numberField({
+        key: 'aud-dens', label: 'Persons per square metre', decimals: 2, min: AUDIENCE_DENSITY_LIMITS[0], max: AUDIENCE_DENSITY_LIMITS[1], step: 0.1, unit: `per m2 (${AUDIENCE_DENSITY_LIMITS[0]} to ${AUDIENCE_DENSITY_LIMITS[1]})`,
+        get: (cc) => Aa(cc)?.densityPerM2, set: (cc, v, o) => updateAudience(store, id, { densityPerM2: v }, o),
+      }),
+      len('x', 'Left edge x (0 = centre line)', 'x', -500, 1000, 'x'), len('y', 'Back edge y (0 = front edge)', 'y', -500, 1000, 'y'),
+      len('w', 'Width', 'width', 0.1, 500), len('d', 'Depth', 'depth', 0.1, 500),
+    );
+    const slider = el('input'); slider.type = 'range'; slider.min = AUDIENCE_DENSITY_LIMITS[0]; slider.max = AUDIENCE_DENSITY_LIMITS[1]; slider.step = 0.1;
+    slider.setAttribute('aria-label', 'Audience density, persons per square metre'); slider.dataset.fkey = 'aud-slider';
+    slider.addEventListener('input', () => updateAudience(store, id, { densityPerM2: Number(slider.value) }, { coalesce: `aud-dens-${id}` }));
+    updaters.push((cc) => { const a = Aa(cc); if (a && document.activeElement !== slider) slider.value = a.densityPerM2; });
+    const srow = el('div', 'f'); const sl = el('label', null, 'Density slider'); sl.htmlFor = (slider.id = `insp-aud-sl`); srow.append(sl, slider);
+    const info = el('p', 'hint');
+    updaters.push((cc) => { const a = Aa(cc); if (a) info.textContent = `About ${Math.round(a.width * a.depth * a.densityPerM2)} people. Loss ${(AUDIENCE_DB_PER_M_PER_PERSON * a.densityPerM2).toFixed(2)} dB per metre of path inside the crowd (assumed, unverified).`; });
+    form.append(srow, info, button('Remove audience area', 'aud-remove', () => { removeAudience(store, id); store.select(null); }, { cls: 'danger' }));
+    body.append(form);
+  }
+
+  // ---- ceiling and overhead panels --------------------------------------------------------------
+  function buildOverhead(body, c) {
+    const matOpts = Object.entries(CEILING_MATERIALS).map(([id, m]) => [id, m.name]);
+    const C = (cc) => cc.scene.ceiling;
+    const hRange = CEILING_LIMITS.heightM;
+    body.append(
+      selectField({
+        key: 'ceil-on', label: 'Ceiling', options: [['off', 'None'], ['on', 'Reflecting ceiling']],
+        get: (cc) => (C(cc) && C(cc).enabled !== false ? 'on' : 'off'),
+        set: (cc, v) => (v === 'on' ? setCeiling(store, { enabled: true }) : setCeiling(store, C(cc) ? { enabled: false } : null)),
+      }),
+      numberField({
+        key: 'ceil-h', label: 'Ceiling height', decimals: 2, min: (cc) => lengthToUi(hRange[0], cc.lu), max: (cc) => lengthToUi(hRange[1], cc.lu), step: 0.1, unit: (cc) => cc.lu,
+        visible: (cc) => !!C(cc), get: (cc) => lengthToUi(C(cc)?.heightM ?? 5, cc.lu), set: (cc, v, o) => setCeiling(store, { heightM: lengthFromUi(v, cc.lu) }, o),
+      }),
+      selectField({ key: 'ceil-mat', label: 'Ceiling material', options: matOpts, visible: (cc) => !!C(cc), get: (cc) => C(cc)?.material, set: (cc, v) => setCeiling(store, { material: v }) }),
+      numberField({
+        key: 'ceil-loss', label: 'Extra ceiling loss', min: 0, max: CEILING_LIMITS.lossDb[1], step: 0.5, unit: 'dB', decimals: 1,
+        visible: (cc) => !!C(cc), get: (cc) => C(cc)?.lossDb ?? 0, set: (cc, v, o) => setCeiling(store, { lossDb: v }, o),
+      }),
+    );
+    const panels = c.scene.overheadPanels || [];
+    const list = el('ul', 'refl-list');
+    panels.forEach((p) => {
+      const li = el('li');
+      const b = button(p.name || 'Overhead panel', `ovh:${p.id}`, () => store.select(p.id));
+      b.setAttribute('aria-pressed', String(c.sel === p.id));
+      li.append(b); list.append(li);
+    });
+    if (!panels.length) body.append(el('p', 'hint', 'No overhead panels. Add one to put a flown reflector above the stage.'));
+    body.append(list, button('Add overhead panel', 'ovh-add', (e) => { addOrLimit(store, e && e.currentTarget, 'overhead panel', () => { const id = addOverheadPanel(store); if (id) store.select(id); return id; }); }));
+    const p0 = c.found?.type === 'panel' ? c.found.item : null;
+    if (!p0) return;
+    const id = p0.id;
+    const P = (cc) => (cc.scene.overheadPanels || []).find((q) => q.id === id);
+    const len = (key, label, field, min, max, axis = null) => numberField({
+      key: `ovh-${key}`, label, decimals: 2, min: (cc) => lengthToUi(dispRange(cc.scene, axis, min, max)[0], cc.lu), max: (cc) => lengthToUi(dispRange(cc.scene, axis, min, max)[1], cc.lu), step: (cc) => (cc.lu === 'ft' ? 0.5 : 0.1), unit: (cc) => cc.lu,
+      get: (cc) => lengthToUi(dispAxis(cc.scene, axis, P(cc)?.[field] ?? 0), cc.lu), set: (cc, v, o) => updateOverheadPanel(store, id, { [field]: internalAxis(cc.scene, axis, lengthFromUi(v, cc.lu)) }, o),
+    });
+    const form = el('div', 'refl-form');
+    form.append(
+      textField({ key: 'ovh-name', label: 'Name', get: (cc) => P(cc)?.name, set: (cc, v, o) => updateOverheadPanel(store, id, { name: v }, o) }),
+      selectField({ key: 'ovh-mat', label: 'Material', options: matOpts, get: (cc) => P(cc)?.material, set: (cc, v) => updateOverheadPanel(store, id, { material: v }) }),
+      len('x', 'Left edge x (0 = centre line)', 'x', -500, 1000, 'x'), len('y', 'Back edge y (0 = front edge)', 'y', -500, 1000, 'y'),
+      len('w', 'Width', 'width', 0.1, 500), len('d', 'Depth', 'depth', 0.1, 500),
+      numberField({
+        key: 'ovh-h', label: 'Height above the ground', decimals: 2, min: (cc) => lengthToUi(hRange[0], cc.lu), max: (cc) => lengthToUi(hRange[1], cc.lu), step: 0.1, unit: (cc) => cc.lu,
+        get: (cc) => lengthToUi(P(cc)?.heightM ?? 5, cc.lu), set: (cc, v, o) => updateOverheadPanel(store, id, { heightM: lengthFromUi(v, cc.lu) }, o),
+      }),
+      numberField({ key: 'ovh-loss', label: 'Extra loss', min: 0, max: CEILING_LIMITS.lossDb[1], step: 0.5, unit: 'dB', decimals: 1, get: (cc) => P(cc)?.lossDb ?? 0, set: (cc, v, o) => updateOverheadPanel(store, id, { lossDb: v }, o) }),
+    );
+    form.append(button('Remove overhead panel', 'ovh-remove', () => { removeOverheadPanel(store, id); store.select(null); }, { cls: 'danger' }));
+    body.append(form);
+  }
+
+  // ---- point-to-point block ---------------------------------------------------------------------
+  function buildP2p(body) {
+    const Q = (cc) => cc.link.p2p || {};
+    body.append(
+      numberField({ key: 'p2p-k', label: 'Earth radius factor K', min: 0.5, max: 10, step: 0.05, unit: '(4/3 standard)', decimals: 2, get: (cc) => Q(cc).kFactor ?? 4 / 3, set: (cc, v, o) => setP2pField(store, cc.link.id, 'kFactor', v, o) }),
+      numberField({ key: 'p2p-fade', label: 'Fade margin', min: 0, max: 60, step: 1, unit: 'dB', decimals: 1, get: (cc) => Q(cc).fadeMarginDb ?? 0, set: (cc, v, o) => setP2pField(store, cc.link.id, 'fadeMarginDb', v, o) }),
+      numberField({ key: 'p2p-od', label: 'Obstacle distance from Tx', min: 1, max: 40000, step: 10, unit: 'm (blank = none)', decimals: 0, get: (cc) => Q(cc).obstacle?.distanceM, set: (cc, v, o) => setP2pField(store, cc.link.id, 'obstacleDistanceM', v, o) }),
+      numberField({ key: 'p2p-oh', label: 'Obstacle height', min: -100, max: 5000, step: 1, unit: 'm above the datum', decimals: 1, visible: (cc) => !!Q(cc).obstacle, get: (cc) => Q(cc).obstacle?.heightM, set: (cc, v, o) => setP2pField(store, cc.link.id, 'obstacleHeightM', v, o) }),
+      selectField({ key: 'p2p-gr', label: 'Ground reflection', options: [['off', 'Off (direct only)'], ['on', 'On (short paths only)']], get: (cc) => (Q(cc).groundReflection === true ? 'on' : 'off'), set: (cc, v) => setP2pField(store, cc.link.id, 'groundReflection', v === 'on') }),
+      button('Remove obstacle', 'p2p-od-clear', () => { const cc = getCtx(); setP2pField(store, cc.link.id, 'obstacleDistanceM', null); }),
+    );
+  }
+
   /** Small hint under the Tx power field: the regional power limit for this band (UK by default) and a warning, never a block. */
   function txLimitRow() {
     const p = el('p', 'hint insp-txlimit');
@@ -752,6 +946,30 @@ export function mountInspector({ container, store }) {
       const here = (c2) => chainOf(c2.link)[i];
       const k = (s) => `ci:${idKey}:${s}`;
       const add = (...nodes) => fields.append(...nodes);
+      const fl = (row, field) => {
+        const f = presetFlag(item, field);
+        if (f) {
+          const sp = el('span', `flag flag-${f}`, f);
+          sp.title = FLAG_TEXT[f]; sp.setAttribute('role', 'img'); sp.setAttribute('aria-label', FLAG_TEXT[f]);
+          row.querySelector('.inp').append(sp);
+        }
+        return row;
+      };
+      // optional figure: blank when the item does not carry it
+      const nf = (field, label, min, max, step, unit, extra = {}) => fl(numLink(k(field), label, `${p}.${field}`, min, max, step, unit, { decimals: 1, get: (c2) => here(c2)?.[field], ...extra }), field);
+      const sel = (field, label, options, dflt) => fl(selectField({
+        key: k(field), label, options, get: (c2) => here(c2)?.[field] ?? dflt,
+        set: (c2, v) => setNested(c2, `${p}.${field}`, v),
+      }), field);
+      const dcOk = () => fl(selectField({
+        key: k('noDc'), label: 'DC on the ports', options: [['rated', 'Rated for DC'], ['noDc', 'Not rated for DC (warns if bias is present)']],
+        get: (c2) => (here(c2)?.noDc ? 'noDc' : 'rated'),
+        set: (c2, v) => store.update((d) => { const l = d.links.find((x) => x.id === c2.link.id); const it = l ? chainOf(l)[i] : null; if (!it) return; if (v === 'noDc') it.noDc = true; else delete it.noDc; }),
+      }), 'dcMode');
+      if (item.presetId && CHAIN_PRESETS[item.presetId]) {
+        const pr = CHAIN_PRESETS[item.presetId];
+        li.append(el('p', 'hint ci-preset', `Preset: ${pr.label}. ${pr.note || ''} S = stated in a source, I = inferred, U = unverified; check the datasheet.`));
+      }
       switch (item.kind) {
         case 'cable': {
           const isCustom = (c2) => here(c2)?.cableType === 'custom' || here(c2)?.freqLossOverrideDbPer100m != null;
@@ -790,19 +1008,87 @@ export function mountInspector({ container, store }) {
         }
         case 'booster':
           add(
-            numLink(k('gain'), 'Gain', `${p}.gainDb`, 0, 60, 0.5, 'dB', { decimals: 1 }),
-            numLink(k('nf'), 'Noise figure', `${p}.nfDb`, 0, 20, 0.5, 'dB (not in power budget)', { decimals: 1, get: (c2) => here(c2)?.nfDb ?? 0 }),
+            fl(numLink(k('gain'), 'Gain', `${p}.gainDb`, 0, 60, 0.5, 'dB', { decimals: 1 }), 'gainDb'),
+            fl(numLink(k('nf'), 'Noise figure', `${p}.nfDb`, 0, 20, 0.5, 'dB (not in power budget)', { decimals: 1, get: (c2) => here(c2)?.nfDb ?? 0 }), 'nfDb'),
+            nf('iip3Dbm', 'Input IP3', -30, 60, 0.5, 'dBm (blank = not set)'),
+            nf('maxInputDbm', 'Max input', -30, 60, 0.5, 'dBm (blank = not set)'),
+            nf('dcNeedV', 'DC needed over the coax', 0, 48, 0.5, 'V (0 = own supply)'),
+            nf('dcNeedMa', 'DC current needed', 0, 2000, 5, 'mA'),
+          );
+          break;
+        case 'activesplitter':
+        case 'activecombiner':
+          add(
+            fl(numLink(k('ports'), 'Ports', `${p}.ports`, 2, 16, 1, '', { decimals: 0 }), 'ports'),
+            fl(numLink(k('gain'), 'Gain', `${p}.gainDb`, -30, 40, 0.5, 'dB', { decimals: 1, get: (c2) => here(c2)?.gainDb ?? 0 }), 'gainDb'),
+            fl(numLink(k('nf'), 'Noise figure', `${p}.nfDb`, 0, 30, 0.5, 'dB', { decimals: 1, get: (c2) => here(c2)?.nfDb ?? 0 }), 'nfDb'),
+            nf('iip3Dbm', 'Input IP3', -30, 60, 0.5, 'dBm (blank = not set)'),
+            nf('isolationDb', 'Port isolation', 0, 80, 1, 'dB'),
+            nf('maxInputDbm', 'Max input', -30, 60, 0.5, 'dBm (blank = not set)'),
+            nf('dcNeedV', 'DC needed over the coax', 0, 48, 0.5, 'V (0 = own supply)'),
+            nf('dcNeedMa', 'DC current needed', 0, 2000, 5, 'mA'),
+          );
+          break;
+        case 'rof': {
+          const eff = el('p', 'hint ci-rof');
+          add(
+            fl(numLink(k('gain'), 'Gain at 0 km fibre', `${p}.gainDb`, -60, 40, 0.5, 'dB', { decimals: 1, get: (c2) => here(c2)?.gainDb ?? 0 }), 'gainDb'),
+            fl(numLink(k('nf'), 'Noise figure', `${p}.nfDb`, 0, 60, 0.5, 'dB', { decimals: 1, get: (c2) => here(c2)?.nfDb ?? 0 }), 'nfDb'),
+            nf('iip3Dbm', 'Input IP3', -30, 60, 0.5, 'dBm (blank = from SFDR)'),
+            nf('sfdrDbHz23', 'SFDR', 60, 140, 1, 'dB Hz^(2/3)'),
+            fl(numLink(k('km'), 'Fibre length', `${p}.fibreKm`, 0, 100, 0.01, 'km', { decimals: 2, get: (c2) => here(c2)?.fibreKm ?? 0 }), 'fibreKm'),
+            nf('fibreLossDbPerKm', 'Fibre loss', 0, 5, 0.05, 'dB per km', { decimals: 2 }),
+            nf('connectorLossDb', 'Connector loss', 0, 10, 0.1, 'dB'),
+            nf('bwMinMHz', 'Band low', 0, 6000, 10, 'MHz'),
+            nf('bwMaxMHz', 'Band high', 0, 6000, 10, 'MHz'),
+            nf('powerV', 'Own supply', 0, 48, 0.5, 'V (information)'),
+            nf('powerMa', 'Own supply current', 0, 2000, 5, 'mA (information)'),
+            eff,
+          );
+          updaters.push((c2) => {
+            const it = here(c2); if (!it) return;
+            try { const e = rofEffective(it); eff.textContent = `Effective at this fibre length: gain ${e.gainDb.toFixed(1)} dB, NF ${e.nfDb.toFixed(1)} dB, optical loss ${e.opticalLossDb.toFixed(2)} dB each way, input IP3 ${e.iip3Dbm.toFixed(1)} dBm, delay ${e.delayUs.toFixed(2)} us (${e.electricalLengthM.toFixed(0)} m of coax-equivalent).`; } catch { eff.textContent = ''; }
+          });
+          break;
+        }
+        case 'coupler':
+          add(
+            nf('couplingDb', 'Coupling (tap)', 1, 60, 0.5, 'dB'),
+            nf('excessLossDb', 'Excess loss', 0, 10, 0.05, 'dB (plus the tap loss)', { decimals: 2 }),
+            nf('isolationDb', 'Isolation / directivity', 0, 80, 1, 'dB'),
+            nf('maxInputDbm', 'Max input', -30, 60, 0.5, 'dBm (blank = not set)'),
+          );
+          break;
+        case 'biastee':
+          add(
+            fl(numLink(k('loss'), 'Insertion loss', `${p}.lossDb`, 0, 20, 0.1, 'dB', { decimals: 2 }), 'lossDb'),
+            nf('dcSupplyV', 'DC injected', 0, 48, 0.5, 'V'),
+            nf('dcSupplyMa', 'DC current available', 0, 2000, 5, 'mA (blank = not limited)'),
+            nf('maxInputDbm', 'Max RF input', -30, 60, 0.5, 'dBm (blank = not set)'),
+          );
+          break;
+        case 'dcblock':
+          add(
+            fl(numLink(k('loss'), 'Insertion loss', `${p}.lossDb`, 0, 20, 0.1, 'dB', { decimals: 2 }), 'lossDb'),
+            sel('dcMode', 'DC behaviour', DC_MODES.map((m) => [m, DC_MODE_LABELS[m]]), 'block'),
+            nf('maxInputDbm', 'Max RF input', -30, 60, 0.5, 'dBm (blank = not set)'),
           );
           break;
         case 'splitter':
         case 'combiner':
           add(
-            numLink(k('ports'), 'Ports', `${p}.ports`, 2, 16, 1, '', { decimals: 0 }),
-            numLink(k('il'), 'Insertion loss', `${p}.insertionLossDb`, 0, 20, 0.5, 'dB (plus split loss)', { decimals: 1 }),
+            fl(numLink(k('ports'), 'Ports', `${p}.ports`, 2, 16, 1, '', { decimals: 0 }), 'ports'),
+            fl(numLink(k('il'), 'Insertion loss', `${p}.insertionLossDb`, 0, 20, 0.5, 'dB (plus split loss)', { decimals: 1 }), 'insertionLossDb'),
+            nf('isolationDb', 'Port isolation', 0, 80, 1, 'dB'),
+            dcOk(),
           );
           break;
         default:
-          add(numLink(k('loss'), 'Loss', `${p}.lossDb`, 0, 60, 0.1, 'dB', { decimals: 2 }));
+          add(fl(numLink(k('loss'), 'Loss', `${p}.lossDb`, 0, 60, 0.1, 'dB', { decimals: 2 }), 'lossDb'));
+          if (item.kind === 'filter') add(
+            sel('filterType', 'Filter type', FILTER_TYPES.map((m) => [m, FILTER_TYPE_LABELS[m]]), 'bandpass'),
+            nf('rejectionDb', 'Rejection', 0, 120, 1, 'dB'),
+          );
       }
       updaters.push((c2) => {
         const it = here(c2);
@@ -834,6 +1120,19 @@ export function mountInspector({ container, store }) {
       if (cc.link) addChainItem(store, cc.link.id, createChainItem(kindSel.value), undefined, tOpt);
     }));
     body.append(addRow);
+    const presetRow = el('div', 'chain-add');
+    const presetSel = el('select');
+    presetSel.setAttribute('aria-label', 'Add a chain item from a preset');
+    presetSel.dataset.fkey = `chain-preset-${target}`;
+    for (const [v, t] of presetOptions()) { const o = el('option', null, t); o.value = v; presetSel.append(o); }
+    presetSel.addEventListener('change', () => {
+      const id = presetSel.value; presetSel.value = '';
+      const cc = getCtx();
+      if (id && cc.link) addChainItem(store, cc.link.id, createChainItemFromPreset(id), undefined, tOpt);
+    });
+    presetRow.append(presetSel);
+    body.append(presetRow);
+    body.append(el('p', 'hint', 'Presets are generic device classes, not products. Each figure carries a flag: S stated in a source, I inferred, U unverified.'));
     if (target === 'main') body.append(el('p', 'hint', 'Splitters and combiners are included in the budget but are a preview feature.'));
   }
 
@@ -926,6 +1225,7 @@ export function mountInspector({ container, store }) {
       c.link.kind !== 'iem' && c.link.rx.diversity && c.link.rx.diversity.enabled && c.link.rx.diversity.antennaB ? (Array.isArray(c.link.rx.diversity.antennaB.chain) ? c.link.rx.diversity.antennaB.chain.map((x, i) => `${x.id || i}:${x.kind}`) : 'same') : null,
       c.scene.reflectors.map((r) => `${r.id}:${r.name}`),
       (c.scene.platforms || []).map((p) => `${p.id}:${p.name}`),
+      (c.scene.audience || []).map((a) => `${a.id}:${a.name}`), (c.scene.overheadPanels || []).map((o) => `${o.id}:${o.name}`), !!(c.scene.ceiling),
       c.scene.imd && c.scene.imd.enabled ? c.scene.imd.transmitters.map((t) => t.id) : null,
     ]);
   }

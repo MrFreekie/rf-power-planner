@@ -16,10 +16,21 @@
 //    antenna gains + reflection losses. pathLossDb is the effective path loss WITHOUT
 //    antenna gains: fsplDb minus the coherent multipath effect relative to the direct ray.
 //  * arrivalBearing = direction from the Rx antenna toward the last point on the path.
-//  * Body loss applied = environment.bodyLossDb + rx.bodyLossDb.
+//  * Body loss applied = environment.bodyLossDb + rx.bodyLossDb, replaced by the antenna contact option on body antennas (bodyCouplingLossDb).
 
-import { CABLES, ANTENNAS, SURFACES, MATERIALS, cableDbPer100m as libraryCableDbPer100m, surfaceAt, materialAt } from './library.js';
+import { CABLES, ANTENNAS, GROUND_PLANE_GAIN_DBI, ANTENNA_POLARISATIONS, ANTENNA_CONTACT_LOSS_DB, ANTENNA_DAMPNESS_LOSS_DB, ANTENNA_CONTACT_LABELS, ANTENNA_DAMPNESS_LABELS, SURFACES, MATERIALS, cableDbPer100m as libraryCableDbPer100m, surfaceAt, materialAt } from './library.js';
 import { formatLength } from './units.js';
+import { p2pGeometry, suggestedFadeMarginDb, K_STANDARD } from './p2p.js';
+export { p2pGeometry, earthBulgeM, fresnelRadiusM, knifeEdgeLossDb, requiredAntennaHeightM, radioHorizonM, suggestedFadeMarginDb } from './p2p.js';
+import { rofEffective, rofChainWarnings, rofBranchDelays } from './rof.js';
+import { wallNoiseAt, wallConstruction } from './ledwall.js';
+export { wallNoiseAt, wallFieldDbuvm, WALL_NOISE_PRESETS, WALL_CONSTRUCTIONS, wallConstruction, meshShieldingDb } from './ledwall.js';
+export { rofEffective, rofOpticalLossDb, rofIip3FromSfdr, rofBranchDelays } from './rof.js';
+import { audiencePathLoss } from './audience.js';
+import { CEILING_MATERIALS, overheadPlanes, overheadZoneFraction } from './ceiling.js';
+import { antennaMatch, vswrThroughLoss, BAND_VSWR_WARN, BAND_VSWR_STRONG } from './antenna-band.js';
+export { antennaMatch, mismatchLossDb, returnLossSweep, ANTENNA_BANDS, resolveDesignBand } from './antenna-band.js';
+import { ACTIVE_CHAIN_KINDS, couplerThroughLossDb, chainDcWarnings, CHAIN_PRESETS } from './chain-presets.js';
 import { hasFloorFeatures, floorHeightAt, floorSurfaceAt, absolutePos, allReflectors, chordsThrough, floorZoneFraction } from './floor.js';
 import { RX_PRESETS, RX_DEFAULTS, externalNoiseFigureDb, INTERFERENCE_RISE_DB, INTERFERENCE_LEVELS, isInterferenceBand, interferenceBandOf, cascadeIip3Dbm as stagesIip3Dbm } from './rx-params.js';
 
@@ -110,18 +121,53 @@ function analyticRelDb(name, f, uu) {
  * Gain in dBi toward `bearing` (direction from antenna to the other end).
  * = gainDbi + relative pattern, evaluated in the antenna's own frame.
  */
-export function antennaGainDb(antennaRef, bearing) {
-  if (!bearing || !Number.isFinite(bearing.az) || !Number.isFinite(bearing.el)) return (antennaRef && antennaRef.gainDbi) ?? ((ANTENNAS[antennaRef && antennaRef.type] || {}).gainDbi ?? 0);
-  const lib = ANTENNAS[antennaRef.type] || {};
-  const gain = antennaRef.gainDbi ?? lib.gainDbi ?? 0;
-  const orient = antennaRef.orientation || { az: 0, el: 0 };
-  const b = unitVec(orient);
-  const r = [Math.cos(orient.az * DEG), -Math.sin(orient.az * DEG), 0];
-  const u = [
+/**
+ * Nominal gain (dBi) of an antenna reference: gainDbi, or the library value; for a quarter-wave whip with a `groundPlane` choice
+ * ('none' | 'body' | 'rack' | 'large') the ground-plane table GROUND_PLANE_GAIN_DBI (approx -1 / 1 / 3 / 5 dBi) replaces gainDbi.
+ */
+export function nominalGainDbi(antennaRef) {
+  const a = antennaRef || {};
+  if (a.type === 'quarterwave' && typeof a.groundPlane === 'string' && Object.prototype.hasOwnProperty.call(GROUND_PLANE_GAIN_DBI, a.groundPlane)) return GROUND_PLANE_GAIN_DBI[a.groundPlane];
+  return a.gainDbi ?? (ANTENNAS[a.type] || {}).gainDbi ?? 0;
+}
+
+/**
+ * Orthonormal antenna frame { b: boresight, r: right, u: up } in world axes (x east, y north, z up). Starts from orientation
+ * {az, el}; then tiltDeg (pitch about the right axis r, positive = nose up, added on top of orientation.el) and rollDeg (rotation
+ * about the boresight, positive = top tips toward r). Both default to 0; with both 0 this is exactly the orientation frame.
+ * Rodrigues rotation: v' = v cos t + (k x v) sin t + k (k.v)(1 - cos t).
+ */
+export function antennaFrame(antennaRef) {
+  const orient = (antennaRef && antennaRef.orientation) || { az: 0, el: 0 };
+  let b = unitVec(orient);
+  let r = [Math.cos(orient.az * DEG), -Math.sin(orient.az * DEG), 0];
+  let u = [
     r[1] * b[2] - r[2] * b[1],
     r[2] * b[0] - r[0] * b[2],
     r[0] * b[1] - r[1] * b[0],
   ];
+  const tilt = antennaRef && Number.isFinite(antennaRef.tiltDeg) ? antennaRef.tiltDeg : 0;
+  const roll = antennaRef && Number.isFinite(antennaRef.rollDeg) ? antennaRef.rollDeg : 0;
+  if (tilt !== 0) {
+    const c = Math.cos(tilt * DEG), sn = Math.sin(tilt * DEG);
+    const nb = [0, 1, 2].map((i) => b[i] * c + u[i] * sn);
+    const nu = [0, 1, 2].map((i) => u[i] * c - b[i] * sn);
+    b = nb; u = nu;
+  }
+  if (roll !== 0) {
+    const c = Math.cos(roll * DEG), sn = Math.sin(roll * DEG);
+    const nr = [0, 1, 2].map((i) => r[i] * c - u[i] * sn);
+    const nu = [0, 1, 2].map((i) => u[i] * c + r[i] * sn);
+    r = nr; u = nu;
+  }
+  return { b, r, u };
+}
+
+export function antennaGainDb(antennaRef, bearing) {
+  if (!bearing || !Number.isFinite(bearing.az) || !Number.isFinite(bearing.el)) return nominalGainDbi(antennaRef);
+  const lib = ANTENNAS[antennaRef.type] || {};
+  const gain = nominalGainDbi(antennaRef);
+  const { b, r, u } = antennaFrame(antennaRef);
   const v = unitVec(bearing);
   const f = dot(v, b), rr = dot(v, r), uu = dot(v, u);
   const pat = antennaRef.patternOverride ?? lib.pattern;
@@ -177,6 +223,20 @@ function fresnel(epsR, sigma, grazingDeg, freqMHz, mode) {
   return { re: g[0], im: g[1] };
 }
 
+/**
+ * Reflection coefficient for the transmit polarisation. Vertical (E in the plane of incidence on a floor) = TM and horizontal = TE
+ * on a floor or ceiling (swapped on a vertical wall). Slant 45 and circular (rhcp, lhcp) are projected onto the linear components:
+ * the co-polar (handedness-flipped, for circular) reflection is the average (Gamma_TE + Gamma_TM) / 2; the cross term
+ * (Gamma_TE - Gamma_TM) / 2, largest near the Brewster angle, is ignored (approximate).
+ */
+function fresnelPol(m, grazingDeg, freqMHz, pol, wall) {
+  const te = () => fresnel(m.epsR, m.sigma, grazingDeg, freqMHz, 'TE'), tm = () => fresnel(m.epsR, m.sigma, grazingDeg, freqMHz, 'TM');
+  if (pol === 'horizontal') return wall ? tm() : te();
+  if (pol === 'vertical' || pol === undefined || pol === null) return wall ? te() : tm();
+  const a = te(), b = tm();
+  return { re: (a.re + b.re) / 2, im: (a.im + b.im) / 2 };
+}
+
 // Optional library field absorbDb: extra loss per reflection (porous/absorbing finishes).
 function absorb(g, m) {
   if (!m.absorbDb) return g;
@@ -189,14 +249,20 @@ const FALLBACK = { epsR: 5, sigma: 0.01 }; // concrete-like, used for unknown id
 /** Floor reflection coefficient. grazingDeg measured from the floor plane. */
 export function floorReflection(floorId, polarisation, grazingDeg, freqMHz) {
   const m = SURFACES[floorId] ? surfaceAt(floorId, freqMHz) : FALLBACK; // conductivity scaled with frequency (ITU-R P.2040)
-  return absorb(fresnel(m.epsR, m.sigma, grazingDeg, freqMHz, polarisation === 'horizontal' ? 'TE' : 'TM'), m);
+  return absorb(fresnelPol(m, grazingDeg, freqMHz, polarisation, false), m);
+}
+
+/** Ceiling / overhead panel reflection coefficient (horizontal plane, like the floor: TE for horizontal, TM for vertical polarisation). grazingDeg from the plane. */
+export function overheadReflection(materialId, polarisation, grazingDeg, freqMHz) {
+  const m = CEILING_MATERIALS[materialId] || FALLBACK;
+  return absorb(fresnelPol(m, grazingDeg, freqMHz, polarisation, false), m);
 }
 
 /** Wall reflection coefficient. incidenceDeg measured from the wall normal. */
 export function reflectorCoefficient(materialId, incidenceDeg, polarisation, freqMHz) {
   const m = MATERIALS[materialId] ? materialAt(materialId, freqMHz) : FALLBACK;
   // Vertical E on a vertical wall is perpendicular to the plane of incidence -> TE.
-  return absorb(fresnel(m.epsR, m.sigma, 90 - incidenceDeg, freqMHz, polarisation === 'horizontal' ? 'TM' : 'TE'), m);
+  return absorb(fresnelPol(m, 90 - incidenceDeg, freqMHz, polarisation, true), m);
 }
 
 // ---------------------------------------------------------------- image-method path tracing
@@ -211,7 +277,7 @@ function wallFrame(w) {
 const wallDist = (w, fr, P) => (P.x - w.p1.x) * fr.nx + (P.y - w.p1.y) * fr.ny;
 
 function mirror(plane, P) {
-  if (plane.type === 'floor') return { x: P.x, y: P.y, z: 2 * (plane.h || 0) - P.z };
+  if (plane.type === 'floor' || plane.type === 'overhead') return { x: P.x, y: P.y, z: 2 * (plane.h || 0) - P.z };
   const d = wallDist(plane.w, plane.fr, P);
   return { x: P.x - 2 * d * plane.fr.nx, y: P.y - 2 * d * plane.fr.ny, z: P.z };
 }
@@ -220,12 +286,12 @@ function mirror(plane, P) {
 // and within the wall's length and zMin..zMax for walls).
 function hitPlane(plane, A, B) {
   let fa, fb;
-  if (plane.type === 'floor') { fa = A.z - (plane.h || 0); fb = B.z - (plane.h || 0); }
+  if (plane.type === 'floor' || plane.type === 'overhead') { fa = A.z - (plane.h || 0); fb = B.z - (plane.h || 0); }
   else { fa = wallDist(plane.w, plane.fr, A); fb = wallDist(plane.w, plane.fr, B); }
   if (!(fa * fb < 0)) return null;
   const t = fa / (fa - fb);
   const H = { x: A.x + t * (B.x - A.x), y: A.y + t * (B.y - A.y), z: A.z + t * (B.z - A.z) };
-  if (plane.type === 'floor') { H.z = plane.h || 0; return H; }
+  if (plane.type === 'floor' || plane.type === 'overhead') { H.z = plane.h || 0; return H; }
   const s = (H.x - plane.w.p1.x) * plane.fr.tx + (H.y - plane.w.p1.y) * plane.fr.ty;
   if (s < 0 || s > plane.fr.len) return null;
   if (H.z < plane.w.zMin || H.z > plane.w.zMax) return null;
@@ -260,7 +326,7 @@ function buildPath(kind, via, planes, points) {
     delayNs: (len / C) * 1e9,
     departureBearing: bearingOf(p1.x - p0.x, p1.y - p0.y, p1.z - p0.z),
     arrivalBearing: bearingOf(pm.x - pn.x, pm.y - pn.y, pm.z - pn.z),
-    reflections: planes.map((p, i) => ({ type: p.type, via: p.w ? p.w.id : undefined, point: points[i + 1] })),
+    reflections: planes.map((p, i) => ({ type: p.type, via: p.w ? p.w.id : p.type === 'overhead' ? p.id : undefined, point: points[i + 1] })),
   };
 }
 
@@ -322,6 +388,28 @@ export function tracePaths(scene, link) {
       for (const c of floorCandidates(seq)) paths.push(withFraction(buildPath('floor-wall', w.id, c.planes, c.pts), c));
     }
   }
+  // Ceiling and overhead panels (opt-in, group f): single bounce each, plus floor+ceiling in both orders for the ceiling. Only when both
+  // antennas are below the plane. Rectangles (panels, a ceiling extent) weight the amplitude by the Fresnel-zone fraction on the rectangle.
+  const freq = link.freqMHz || 600;
+  for (const op of overheadPlanes(scene)) {
+    if (!(tx.z < op.h && rx.z < op.h)) continue;
+    const plane = { type: 'overhead', h: op.h, id: op.id, rect: op.rect, lossDb: op.lossDb, material: op.material };
+    const pts1 = unfold([plane], tx, rx);
+    if (pts1) {
+      const f1 = overheadZoneFraction(op, tx, rx, pts1[1], freq);
+      if (f1 >= 1e-3) paths.push(withFraction(buildPath(op.ceiling ? 'ceiling' : 'panel', op.id, [plane], pts1), { fraction: f1 }));
+    }
+    if (op.ceiling) {
+      for (const seq of [[plane, 'floor'], ['floor', plane]]) {
+        for (const c of floorCandidates(seq)) {
+          const hi = c.planes.indexOf(plane) + 1;
+          const f2 = op.rect ? overheadZoneFraction(op, tx, rx, c.pts[hi], freq) : 1;
+          const fl = (c.fraction === undefined ? 1 : c.fraction) * f2;
+          if (fl >= 1e-3) paths.push(withFraction(buildPath('floor-ceiling', op.id, c.planes, c.pts), { fraction: fl }));
+        }
+      }
+    }
+  }
   return paths;
 }
 
@@ -362,6 +450,8 @@ export function wallTransmissionInfo(w, freqMHz) {
 
 function wallTransmissionLossRaw(w, freqMHz) {
   if (Number.isFinite(w.transmissionLossDb)) return Math.max(0, w.transmissionLossDb);
+  const wc = wallConstruction(w, freqMHz);
+  if (wc) return wc.transmissionLossDb; // video wall construction (ledwall.js, assumed figures)
   const tbl = ZP.MATERIAL_TRANSMISSION || ZP.TRANSMISSION_LOSS_DB;
   const e = tbl && tbl[w.material];
   // Thickness hook: reflector.thicknessFactor scales the table loss directly (1 = reference thickness); otherwise
@@ -420,7 +510,10 @@ export function pathWallLoss(scene, points, freqMHz) {
     }
   }
   lossDb += platformLossDb;
-  return { lossDb, crossed, detail, platformLossDb, platforms };
+  // Audience (crowd) absorption below head height, ASSUMED model (audience.js)
+  const aud = audiencePathLoss(scene, points);
+  lossDb += aud.lossDb;
+  return { lossDb, crossed, detail, platformLossDb, platforms, audienceLossDb: aud.lossDb, audienceChords: aud.chords };
 }
 
 // ---------------------------------------------------------------- cables and chains
@@ -439,13 +532,32 @@ export function chainItemLossDb(item, freqMHz) {
       if (item.freqLossOverrideDbPer100m != null) return (item.lengthM / 100) * item.freqLossOverrideDbPer100m;
       return cableLossDb(item.cableType, item.lengthM, freqMHz);
     case 'booster':
-      return -item.gainDb; // noise figure (nfDb) not modelled in the power budget
+    case 'activesplitter':
+    case 'activecombiner':
+      return -item.gainDb; // noise figure (nfDb) not modelled in the power budget; active splitters/combiners: net distribution gain
+    case 'coupler':
+      return couplerThroughLossDb(item); // main-line loss of a directional coupler
+    case 'rof':
+      return -rofEffective(item).gainDb; // RF over fibre: back-to-back gain less 2 dB per optical dB (rof.js)
     case 'splitter':
     case 'combiner':
       return 10 * Math.log10(Math.max(item.ports || 1, 1)) + (item.insertionLossDb || 0);
-    default: // filter, connector, attenuator
+    case 'filter':
+      return (item.lossDb || 0) + filterStopbandExtraDb(item, freqMHz);
+    default: // connector, attenuator
       return item.lossDb || 0;
   }
+}
+
+/**
+ * Optional filter frequency selectivity: a filter with passLoMHz and passHiMHz adds rejectionDb (default 40, ASSUMED) outside the
+ * passband (bandpass, the default type) or inside it (notch). Without those fields a filter is a flat lossDb, as before.
+ */
+export function filterStopbandExtraDb(item, freqMHz) {
+  if (!(item && item.kind === 'filter' && item.passLoMHz > 0 && item.passHiMHz > item.passLoMHz)) return 0;
+  const inside = freqMHz >= item.passLoMHz && freqMHz <= item.passHiMHz;
+  const rej = Number.isFinite(item.rejectionDb) ? item.rejectionDb : 40;
+  return (item.filterType === 'notch' ? inside : !inside) ? rej : 0;
 }
 
 /** Net chain loss in dB (negative = net gain). */
@@ -457,6 +569,12 @@ function chainLabel(item) {
   switch (item.kind) {
     case 'cable': return `Cable ${CABLES[item.cableType]?.name ?? item.cableType} ${item.lengthM} m`;
     case 'booster': return 'Booster';
+    case 'activesplitter': return `Active splitter 1:${item.ports}`;
+    case 'activecombiner': return `Active combiner ${item.ports}:1`;
+    case 'coupler': return `Coupler ${item.couplingDb} dB`;
+    case 'rof': return `RF over fibre ${Number.isFinite(item.fibreKm) ? item.fibreKm : 0} km`;
+    case 'biastee': return 'Bias tee';
+    case 'dcblock': return 'DC block';
     case 'splitter': return `Splitter 1:${item.ports}`;
     case 'combiner': return `Combiner ${item.ports}:1`;
     default: return item.kind[0].toUpperCase() + item.kind.slice(1);
@@ -481,7 +599,8 @@ export function receiverNoiseFigureDb(rx) {
  *  booster: gain = gainDb, NF = item.nfDb, or 3 dB when missing (a documented default for a low-noise preamp).
  */
 export function chainItemNoise(item, freqMHz) {
-  if (item.kind === 'booster') return { gainDb: item.gainDb, nfDb: Number.isFinite(item.nfDb) ? item.nfDb : 3 };
+  if (item.kind === 'rof') { const e = rofEffective(item); return { gainDb: e.gainDb, nfDb: e.nfDb }; }
+  if (ACTIVE_CHAIN_KINDS.includes(item.kind)) return { gainDb: item.gainDb, nfDb: Number.isFinite(item.nfDb) ? item.nfDb : 3 };
   const loss = chainItemLossDb(item, freqMHz);
   return { gainDb: -loss, nfDb: Math.max(0, loss) };
 }
@@ -518,7 +637,7 @@ export function cascadeChainIip3Dbm(chain, rxIip3Dbm, freqMHz = 600) {
   const stages = [];
   for (const it of chain || []) {
     const { gainDb } = chainItemNoise(it, freqMHz);
-    const iip3Dbm = it.kind === 'booster'
+    const iip3Dbm = it.kind === 'rof' ? rofEffective(it).iip3Dbm : ACTIVE_CHAIN_KINDS.includes(it.kind)
       ? (Number.isFinite(it.iip3Dbm) ? it.iip3Dbm : (Number.isFinite(it.oip3Dbm) ? it.oip3Dbm : 20) - (it.gainDb || 0))
       : Infinity;
     stages.push({ gainDb, iip3Dbm });
@@ -601,32 +720,171 @@ export function cascadeNoiseIem(link, txChain, rxChain, freqMHz, env = {}, pathG
 
 const db20 = (x) => 20 * Math.log10(Math.max(x, 1e-300));
 
+// ---------------------------------------------------------------- antenna contact and dampness (assumed loss options)
+
+/**
+ * ASSUMED, approximate extra loss and detuning (dB) at UHF when the antenna is on or near the wearer: free 0, over clothing 2.5,
+ * skin contact 6, hand cupped over a handheld antenna 8 (ranges quoted as about 0 / 2-3 / 4-8 / 6-10+ dB). Dampness: dry 0,
+ * damp clothing 1, sweaty or wet 3 (about 0 / 1 / 2-4 dB). Selectable options, not extra physics. Wet cable or connectors are a
+ * reliability issue, not a link-budget number.
+ */
+export { ANTENNA_CONTACT_LOSS_DB, ANTENNA_DAMPNESS_LOSS_DB, ANTENNA_CONTACT_LABELS, ANTENNA_DAMPNESS_LABELS };
+
+/**
+ * bodyCouplingLossDb(env, txAnt, rx) -> { bodyDb, contactDb, dampnessDb, totalDb, replaced }.
+ * bodyDb = environment.bodyLossDb + rx.bodyLossDb (the scene-level body setting). contactDb / dampnessDb sum the options on the Tx
+ * and Rx antenna objects (antenna.contact, antenna.dampness). When a contact option is chosen on a body-worn antenna
+ * (type 'body'), it REPLACES the scene-level body loss (replaced = true, bodyDb counted as 0) so the wearer is never counted twice;
+ * on other antennas, and for dampness alone, the loss is added.
+ */
+export function bodyCouplingLossDb(env, txAnt, rx) {
+  const e = env || {};
+  const rxAnt = rx && rx.antenna;
+  let bodyDb = (e.bodyLossDb || 0) + ((rx && rx.bodyLossDb) || 0);
+  let contactDb = 0, dampnessDb = 0, replaced = false;
+  for (const a of [txAnt, rxAnt]) {
+    if (!a) continue;
+    if (Object.prototype.hasOwnProperty.call(ANTENNA_CONTACT_LOSS_DB, a.contact)) {
+      contactDb += ANTENNA_CONTACT_LOSS_DB[a.contact];
+      if (a.type === 'body') replaced = true;
+    }
+    if (Object.prototype.hasOwnProperty.call(ANTENNA_DAMPNESS_LOSS_DB, a.dampness)) dampnessDb += ANTENNA_DAMPNESS_LOSS_DB[a.dampness];
+  }
+  if (replaced) bodyDb = 0;
+  return { bodyDb, contactDb, dampnessDb, totalDb: bodyDb + contactDb + dampnessDb, replaced };
+}
+
+// ---------------------------------------------------------------- polarisation mismatch
+
+/** Per-antenna polarisation ids (antenna.polarisation). Absent = the scene polarisation (environment.polarisation). */
+export { ANTENNA_POLARISATIONS };
+/**
+ * Cross-polar discrimination (dB) floor of the linear-to-orthogonal mismatch loss. ASSUMED 15 dB (flag U): indoors multipath
+ * depolarises the wave, typically 10 to 20 dB, so a perfectly cross-polarised pair is never worse than about 15 dB in practice.
+ */
+export const DEFAULT_XPD_DB = 15;
+/** Circular-to-opposite-sense discrimination (dB), set by the axial ratio of real antennas (an ideal one would be infinite). ASSUMED 20 dB, flag I. */
+export const DEFAULT_CIRCULAR_XPD_DB = 20;
+/** Linear-to-circular loss (dB), at any angle, standard result: 3 dB. */
+export const LINEAR_TO_CIRCULAR_DB = 3.0103;
+/** Antenna types with a ring (rotationally symmetric) pattern about the element axis: their polarisation is referenced to the ground, not to the boresight. */
+const RING_TYPES = ['omni', 'dipole', 'quarterwave', 'body'];
+
+/**
+ * wavePolarisation(scene, link) -> the polarisation of the radiated wave = the TRANSMIT antenna's polarisation ('vertical' when unset;
+ * a legacy environment.polarisation is honoured only when the antenna sets none, and is removed by migrateScene). Decides the
+ * reflection coefficients (TE or TM; slant and circular use the TE/TM average).
+ */
+export function wavePolarisation(scene, link) {
+  const a = link && link.tx && link.tx.antenna;
+  if (a && ANTENNA_POLARISATIONS.includes(a.polarisation)) return a.polarisation;
+  const e = scene && scene.environment && scene.environment.polarisation;
+  return e === 'horizontal' ? 'horizontal' : 'vertical';
+}
+
+/**
+ * polarisationLossDb(txAnt, rxAnt, departure, arrival, { envPolarisation, reflections, xpdDb }) -> dB, >= 0.
+ * Polarisation loss factor (PLF, Balanis): PLF = |e_t . e_r|^2 for unit polarisation vectors projected on the plane
+ * perpendicular to the ray. Linear antenna E axis = u cos(a) + r sin(a) in its own tilted/rolled frame (a = 0 vertical, 90
+ * horizontal, 45 slant). Linear-to-linear: PLF = c^2 (1 - X) + X with c the cosine of the angle between the projected axes and
+ * X = 10^(-xpd/10) (so 45 deg mismatch = 3 dB, near 90 deg limited to xpdDb). Circular to linear: 3 dB. Circular to circular: 0 dB
+ * co-polar, xpdDb cross-polar; every reflection flips the handedness. Reflected linear rays reuse the end bearings (the E vector
+ * rotation at the reflection is ignored: approximate). Horizontal and slant axes lie along the antenna right axis (perpendicular
+ * to its boresight), so aim the antenna (orientation.az) across the path for them to count. departure/arrival are bearings {az, el} from each antenna toward the path.
+ */
+export function polarisationLossDb(txAnt, rxAnt, departure, arrival, { envPolarisation = 'vertical', reflections = 0, xpdDb = DEFAULT_XPD_DB, circularXpdDb = DEFAULT_CIRCULAR_XPD_DB, mirrors = [] } = {}) {
+  const X = Math.pow(10, -xpdDb / 10);
+  const Xc = Math.pow(10, -circularXpdDb / 10);
+  const polOf = (a) => (a && ANTENNA_POLARISATIONS.includes(a.polarisation) ? a.polarisation : (envPolarisation === 'horizontal' ? 'horizontal' : 'vertical'));
+  const pt = polOf(txAnt), pr = polOf(rxAnt);
+  const circ = (x) => x === 'rhcp' || x === 'lhcp';
+  let plf;
+  if (circ(pt) && circ(pr)) {
+    const flipped = reflections % 2 === 1 ? (pt === 'rhcp' ? 'lhcp' : 'rhcp') : pt;
+    plf = flipped === pr ? 1 : Xc;
+  } else if (circ(pt) || circ(pr)) {
+    plf = Math.pow(10, -LINEAR_TO_CIRCULAR_DB / 10); // any angle
+  } else {
+    const axis = (a, pol, bearing) => {
+      // body-worn antennas store el 90 as a convention (boresight up); their polarisation axes start from the horizontal frame
+      const ring = !!(a && RING_TYPES.includes(a.type));
+      // ring-pattern types (omni, dipole, quarterwave, body) store el 90 or el 0 by convention: use the upright frame (el 0), tilt and roll still apply
+      const f = antennaFrame(ring && a.orientation ? { ...a, orientation: { az: a.orientation.az, el: 0 } } : (a || {}));
+      const ang = (pol === 'horizontal' ? 90 : pol === 'slant45' ? 45 : 0) * DEG;
+      const v = unitVec(bearing);
+      if (ring) {
+        // E = cos(a) x (element axis projected on the wave plane) + sin(a) x (horizontal direction perpendicular to the ray, u x v)
+        const d = dot(f.u, v);
+        const pv = [f.u[0] - d * v[0], f.u[1] - d * v[1], f.u[2] - d * v[2]];
+        const npv = Math.hypot(...pv);
+        const h = [f.u[1] * v[2] - f.u[2] * v[1], f.u[2] * v[0] - f.u[0] * v[2], f.u[0] * v[1] - f.u[1] * v[0]];
+        const nh = Math.hypot(...h);
+        const cv = npv > 1e-9 ? Math.cos(ang) / npv : 0, ch = nh > 1e-9 ? Math.sin(ang) / nh : 0;
+        return [0, 1, 2].map((i) => pv[i] * cv + h[i] * ch);
+      }
+      const e = [0, 1, 2].map((i) => f.u[i] * Math.cos(ang) + f.r[i] * Math.sin(ang));
+      const d = dot(e, v);
+      return [e[0] - d * v[0], e[1] - d * v[1], e[2] - d * v[2]];
+    };
+    // Image method for the E vector: the transmit polarisation vector is mirrored in each reflecting plane in order (floor and ceiling
+    // flip z; a wall reflects about its normal), so a vertical antenna stays co-polar after a floor or wall bounce (the sign is in the
+    // Fresnel coefficient). mirrors = [{ z: true } | { nx, ny }] from the first reflection to the last.
+    let qt = axis(txAnt, pt, departure);
+    for (const m of mirrors) {
+      if (m.z) qt = [qt[0], qt[1], -qt[2]];
+      else { const d = qt[0] * m.nx + qt[1] * m.ny; qt = [qt[0] - 2 * d * m.nx, qt[1] - 2 * d * m.ny, qt[2]]; }
+    }
+    const qr = axis(rxAnt, pr, arrival);
+    const nt = Math.hypot(...qt), nr = Math.hypot(...qr);
+    const c = nt > 1e-9 && nr > 1e-9 ? dot(qt, qr) / (nt * nr) : 0;
+    plf = c * c * (1 - X) + X;
+  }
+  return -10 * Math.log10(Math.min(1, Math.max(plf, 1e-12)));
+}
+
 export function solveLink(scene, link) {
   const f = link.freqMHz;
   const env = scene.environment || {};
-  const pol = env.polarisation || 'vertical';
+  const pol = wavePolarisation(scene, link);
   const lambda = wavelengthM(f);
-  const rawPaths = tracePaths(scene, link);
+  const isP2p = link.kind === 'p2p';
+  const p2pOpt = (isP2p && link.p2p) || {};
+  // p2p: the direct ray only (the flat-earth ground and wall reflections are invalid over kilometres) unless link.p2p.groundReflection is set
+  const rawPaths = isP2p && !p2pOpt.groundReflection ? tracePaths(scene, link).filter((q) => q.kind === 'direct') : tracePaths(scene, link);
+  let p2pInfo = null;
+  if (isP2p) {
+    const a = absolutePos(scene, link.tx.pos), b = absolutePos(scene, link.rx.pos);
+    p2pInfo = p2pGeometry({ dM: Math.hypot(b.x - a.x, b.y - a.y), htM: a.z, hrM: b.z, freqMHz: f, K: Number.isFinite(p2pOpt.kFactor) ? p2pOpt.kFactor : K_STANDARD, obstacle: p2pOpt.obstacle || null });
+  }
 
+  const usePol = true; // always computed: a missing antenna.polarisation is 'vertical'
   let sumRe = 0, sumIm = 0;
   const paths = rawPaths.map((p) => {
     const gt = antennaGainDb(link.tx.antenna, p.departureBearing);
     const gr = antennaGainDb(link.rx.antenna, p.arrivalBearing);
+    // Per-antenna polarisation, always applied (the wave's polarisation is the transmit antenna's).
+    const polLoss = usePol ? polarisationLossDb(link.tx.antenna, link.rx.antenna, p.departureBearing, p.arrivalBearing, { envPolarisation: pol, reflections: p.reflections.length, mirrors: p.reflections.map((r) => { if (r.type !== 'wall') return { z: true }; const w = allReflectors(scene).find((x) => x.id === r.via); const fr = wallFrame(w); return { nx: fr.nx, ny: fr.ny }; }) }) : 0;
     // Amplitude (relative to sqrt power): Friis lambda/(4 pi d) * sqrt(Gt Gr) * product of Gamma
-    let amp = lambda / (4 * Math.PI * Math.max(p.lengthM, 1e-3)) * Math.pow(10, (gt + gr) / 20);
+    let amp = lambda / (4 * Math.PI * Math.max(p.lengthM, 1e-3)) * Math.pow(10, (gt + gr - polLoss) / 20);
     let re = 1, im = 0;
     p.reflections.forEach((r, i) => {
       const a = p.points[i], b = p.points[i + 1];
       const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
       const len = Math.hypot(dx, dy, dz);
       let g;
-      if (r.type === 'floor') {
+      if (r.type === 'overhead') {
+        const op = overheadPlanes(scene).find((x) => x.id === r.via);
+        g = overheadReflection(op ? op.material : 'concrete', pol, Math.asin(Math.min(Math.abs(dz) / len, 1)) / DEG, f);
+        if (op && op.lossDb) { const k = Math.pow(10, -op.lossDb / 20); g = { re: g.re * k, im: g.im * k }; }
+      } else if (r.type === 'floor') {
         g = floorReflection(floorSurfaceAt(scene, r.point.x, r.point.y), pol, Math.asin(Math.min(Math.abs(dz) / len, 1)) / DEG, f);
       } else {
         const w = allReflectors(scene).find((x) => x.id === r.via);
         const fr = wallFrame(w);
         const cosInc = Math.min(Math.abs(dx * fr.nx + dy * fr.ny) / len, 1);
-        g = reflectorCoefficient(w.material, Math.acos(cosInc) / DEG, pol, f);
+        const wc = wallConstruction(w, f);
+        g = reflectorCoefficient(wc ? wc.reflectionMaterial : w.material, Math.acos(cosInc) / DEG, pol, f);
+        if (wc && wc.reflectionLossDb) { const k = Math.pow(10, -wc.reflectionLossDb / 20); g = { re: g.re * k, im: g.im * k }; }
       }
       [re, im] = [re * g.re - im * g.im, re * g.im + im * g.re];
     });
@@ -640,7 +898,8 @@ export function solveLink(scene, link) {
     return {
       ...p, ...(wl.lossDb ? { wallLossDb: wl.lossDb, crossedWalls: wl.crossed, wallLossDetail: wl.detail } : {}),
       ...(wl.platformLossDb ? { platformLossDb: wl.platformLossDb, platformChords: wl.platforms } : {}),
-      gainDb: db20(Math.hypot(cre, cim)), phaseRad: Math.atan2(cim, cre), _gt: gt, _gr: gr,
+      ...(wl.audienceLossDb ? { audienceLossDb: wl.audienceLossDb, audienceChords: wl.audienceChords } : {}),
+      gainDb: db20(Math.hypot(cre, cim)), phaseRad: Math.atan2(cim, cre), _gt: gt, _gr: gr, ...(polLoss ? { polarisationLossDb: polLoss } : {}),
     };
   });
 
@@ -661,22 +920,40 @@ export function solveLink(scene, link) {
   wf.push({ label: 'Tx power', valueDbm: level, deltaDb: 0 });
   const step = (label, delta) => { level += delta; wf.push({ label, valueDbm: level, deltaDb: delta }); };
   const chain = link.chain || [];
-  const chainSteps = (list = chain) => list.forEach((it) => step(chainLabel(it), -chainItemLossDb(it, f)));
+  const inputWarn = [];
+  const chainSteps = (list = chain) => list.forEach((it) => {
+    if (Number.isFinite(it.maxInputDbm) && level > it.maxInputDbm) inputWarn.push(`${chainLabel(it)} input is ${level.toFixed(1)} dBm, above its rating of ${it.maxInputDbm} dBm: add a pad or lower the Tx power.`);
+    const stop = filterStopbandExtraDb(it, f);
+    if (stop > 0) inputWarn.push(`${chainLabel(it)} passes ${it.passLoMHz}-${it.passHiMHz} MHz but the link is at ${f} MHz: it ${it.filterType === 'notch' ? 'notches' : 'rejects'} this channel by ${stop} dB (assumed). Use a filter for the right band.`);
+    step(chainLabel(it), -chainItemLossDb(it, f));
+  });
   const iem = link.kind === 'iem';
   // IEM only: optional link.rx.chain = items between the bodypack antenna and the bodypack (cable, LNA, filter).
   const rxChain = iem && Array.isArray(link.rx.chain) ? link.rx.chain : [];
   if (iem) chainSteps(); // transmitter -> chain -> Tx antenna
   const txOutDbm = level;
   step('Tx antenna gain', direct._gt);
+  // Antenna band mismatch (opt-in via antenna.designBand): power not delivered to the radiating element is reflected (mismatch loss).
+  const txM = antennaMatch(link.tx.antenna, f), rxM = antennaMatch(link.rx.antenna, f);
+  if (txM.mismatchDb > 1e-9) step(`Tx antenna mismatch (VSWR ${txM.vswr.toFixed(1)}:1)`, -txM.mismatchDb);
   step(`Free-space loss (${formatLength(distanceM, scene && scene.units && scene.units.length)})`, -fspl);
   const directPlatformDb = direct.platformLossDb || 0;
-  if (directWallDb - directPlatformDb > 1e-12) step('Wall transmission', -(directWallDb - directPlatformDb));
+  const directAudienceDb = direct.audienceLossDb || 0;
+  if (directWallDb - directPlatformDb - directAudienceDb > 1e-12) step('Wall transmission', -(directWallDb - directPlatformDb - directAudienceDb));
   if (directPlatformDb) step('Platform obstruction', -directPlatformDb);
+  if (directAudienceDb) step('Audience absorption (assumed)', -directAudienceDb);
   if (Math.abs(multipathDb) > 1e-9) step('Multipath (coherent sum)', multipathDb);
   step('Rx antenna gain', direct._gr);
-  const body = (env.bodyLossDb || 0) + (link.rx.bodyLossDb || 0);
+  if (isP2p && p2pInfo.diffractionLossDb > 0.05) step(`Diffraction (single knife edge, ${p2pInfo.edge === 'earth' ? 'earth curvature' : 'obstacle'})`, -p2pInfo.diffractionLossDb);
+  if (rxM.mismatchDb > 1e-9) step(`Rx antenna mismatch (VSWR ${rxM.vswr.toFixed(1)}:1)`, -rxM.mismatchDb);
+  if (direct.polarisationLossDb > 1e-9) step('Polarisation mismatch', -direct.polarisationLossDb);
+  const coupling = bodyCouplingLossDb(env, link.tx.antenna, link.rx);
+  const body = isP2p ? 0 : coupling.bodyDb; // a fixed link has no performer
   if (body) step('Body loss', -body);
-  if (env.fadeMarginDb) step('Fade margin', -env.fadeMarginDb);
+  if (coupling.contactDb) step('Antenna contact (assumed)', -coupling.contactDb);
+  if (coupling.dampnessDb) step('Dampness (assumed)', -coupling.dampnessDb);
+  const fadeDb = isP2p && Number.isFinite(p2pOpt.fadeMarginDb) ? p2pOpt.fadeMarginDb : env.fadeMarginDb;
+  if (fadeDb) step('Fade margin', -fadeDb);
   const rxPowerDbm = level;
   if (iem) chainSteps(rxChain); // bodypack antenna -> optional rx chain -> bodypack
   else chainSteps(); // Rx antenna -> chain -> receiver
@@ -688,7 +965,22 @@ export function solveLink(scene, link) {
   const cascade = iem ? cascadeNoiseIem(link, chain, rxChain, f, env, rxPowerDbm - txOutDbm) : cascadeNoise(link, chain, f, false, env);
   if (cascade.interferenceRiseDb > 0) { step(`Interference floor +${cascade.interferenceRiseDb.toFixed(0)} dB (${env.interference}, note)`, 0); wf[wf.length - 1].note = true; }
   step(`System NF ${cascade.systemNfDb.toFixed(1)} dB (cascade, note)`, 0); wf[wf.length - 1].note = true;
+  // Video (LED) wall noise (ledwall.js): broadband field of scene.reflectors[].noise converted to power at the receive antenna terminals, then
+  // power-summed with the noise floor already in the cascade (external noise, interference, system NF). Only walls that carry a noise block count.
+  const marginBeforeWallDb = rxPowerDbm - cascade.sensitivityAtAntennaDbm;
+  const wn = wallNoiseAt(scene.reflectors, absolutePos(scene, link.rx.pos), f, cascade.bandwidthKHz, (b) => antennaGainDb(link.rx.antenna, b));
+  let wallNoise = null;
+  if (wn.walls.length) {
+    const before = cascade.noiseFloorDbm;
+    const after = 10 * Math.log10(Math.pow(10, before / 10) + Math.pow(10, wn.dbm / 10));
+    cascade.noiseFloorDbm = after;
+    cascade.sensitivityAtAntennaDbm = after + cascade.requiredSnrDb;
+    wallNoise = { dbm: wn.dbm, floorBeforeDbm: before, floorAfterDbm: after, riseDb: after - before, bandwidthKHz: cascade.bandwidthKHz, walls: wn.walls, marginChangeDb: 0 };
+    step(`Video wall noise ${wn.dbm.toFixed(1)} dBm in ${cascade.bandwidthKHz} kHz (floor +${wallNoise.riseDb.toFixed(1)} dB, note)`, 0); wf[wf.length - 1].note = true;
+  }
+  cascade.wallNoise = wallNoise;
   cascade.marginAtAntennaDb = rxPowerDbm - cascade.sensitivityAtAntennaDbm;
+  if (wallNoise) wallNoise.marginChangeDb = cascade.marginAtAntennaDb - marginBeforeWallDb;
   const marginDb = cascade.marginAtAntennaDb;
   const status = marginDb >= 6 ? 'pass' : marginDb >= 0 ? 'marginal' : 'fail';
   paths.forEach((p) => { delete p._gt; delete p._gr; });
@@ -698,10 +990,52 @@ export function solveLink(scene, link) {
   const warnings = [];
   const nearField = distanceM < NEAR_FIELD_M;
   if (nearField) warnings.push(`Antennas are ${distanceM.toFixed(2)} m apart, closer than ${NEAR_FIELD_M} m: the free-space formula does not hold in the near field, so the loss is held at its 0.1 m value.`);
+  if (coupling.replaced && ((env.bodyLossDb || 0) + (link.rx.bodyLossDb || 0))) warnings.push('An antenna contact option on a body-worn antenna replaces the scene body loss setting (it is not added), so the wearer is counted once.');
   if (body && ((link.rx.antenna && link.rx.antenna.type === 'body') || (link.tx.antenna && link.tx.antenna.type === 'body'))) {
     warnings.push('A body antenna already includes the loss of the wearer (-3 dBi, weaker behind); a body loss setting on top of it counts the body twice.');
   }
-  return { distanceM, paths, pathLossDb, fsplDb: fspl, rxPowerDbm, waterfall: wf, inputPowerDbm, marginDb, status, cascade, requiredSnrDb: cascade.requiredSnrDb, nearField, warnings };
+  warnings.push(...inputWarn);
+  if (wallNoise && wallNoise.riseDb >= 3) {
+    const w0 = wallNoise.walls.reduce((a, b) => (b.powerDbm > a.powerDbm ? b : a));
+    warnings.push(`Video wall noise ${w0.name ? `from "${w0.name}" ` : ''}raises the receiver noise floor by ${wallNoise.riseDb.toFixed(1)} dB (${wallNoise.dbm.toFixed(1)} dBm in ${wallNoise.bandwidthKHz} kHz, ${w0.distanceM.toFixed(1)} m from the wall, ${w0.side} side, wall limit assumed): move the antenna away from the wall, aim it away, or fix the panel cabling (ferrites, shielded data cable).`);
+  }
+  warnings.push(...rofChainWarnings(chain, f), ...(iem ? rofChainWarnings(rxChain, f) : []));
+  if (Array.isArray(link.branches) && link.branches.length > 1) {
+    const bd = rofBranchDelays(link.branches.map((b) => b.chain));
+    if (bd.warn) warnings.push(`Branches have different fibre lengths (delay spread ${bd.spreadNs.toFixed(0)} ns): combined coherently at RF they will not add in phase (1 ns = 216 degrees at 600 MHz). Use equal fibre lengths.`);
+  }
+  // Reflected power returns toward the transmitter output stage through the chain (twice the one-way chain loss on the reflected wave).
+  // Per item the reverse loss is reverseIsolationDb (an isolator: low forward loss, high reverse isolation) or else twice the forward loss (a reciprocal pad or cable is crossed by the reflected wave on the way back); gain stages count 0.
+  const chainToAntDb = iem ? chain.reduce((sum, it) => sum + (Number.isFinite(it.reverseIsolationDb) ? Math.max(it.reverseIsolationDb, 0) : 2 * Math.max(chainItemLossDb(it, f), 0)), 0) : 0;
+  const antInDbm = txOutDbm;
+  const txReflectedDbm = txM.matched ? -Infinity : antInDbm + 10 * Math.log10(Math.max(txM.gammaSq, 1e-30));
+  const vswrAtPa = txM.matched ? 1 : vswrThroughLoss(txM.vswr, chainToAntDb / 2);
+  const reflectedAtPaDbm = txM.matched ? -Infinity : txReflectedDbm - chainToAntDb;
+  for (const [side, m, a] of [['Tx', txM, link.tx.antenna], ['Rx', rxM, link.rx.antenna]]) {
+    if (!m.matched && !m.inBand) warnings.push(`${side} antenna is cut for ${m.band.label} but the link is at ${f} MHz: VSWR ${m.vswr.toFixed(1)}:1, mismatch loss ${m.mismatchDb.toFixed(1)} dB. Use an antenna cut for this band.`);
+  }
+  if (!txM.matched && vswrAtPa > BAND_VSWR_WARN) warnings.push(`Reflected power: the Tx antenna VSWR is ${txM.vswr.toFixed(1)}:1, so ${(100 * txM.gammaSq).toFixed(0)} percent of the power (${reflectedAtPaDbm.toFixed(1)} dBm) returns to the transmitter output stage (VSWR there ${vswrAtPa.toFixed(1)}:1)${vswrAtPa > BAND_VSWR_STRONG ? ': this can stress the PA or trigger foldback. Fit the correct antenna, or an isolator or pad (a pad of N dB returns the reflection 2N dB weaker; an isolator is better).' : '. Check the antenna.'}`);
+  warnings.push(...chainDcWarnings(chain, { endSupplyV: iem ? 0 : (link.rx.antennaBiasV || 0), endSupplyMa: link.rx.antennaBiasMa > 0 ? link.rx.antennaBiasMa : Infinity }));
+  if (iem && rxChain.length) warnings.push(...chainDcWarnings(rxChain));
+  for (const [side, a] of [['Tx', link.tx.antenna], ['Rx', link.rx.antenna]]) {
+    if (a && a.type === 'quarterwave' && a.groundPlane === 'none') warnings.push(`${side} antenna is a quarter-wave whip with no ground plane (free cable): it needs a ground plane of about a quarter wave radius, so gain is only about ${GROUND_PLANE_GAIN_DBI.none} dBi and unpredictable. Use a rack panel or ground plate, or a dipole with a choke.`);
+  }
+  if (isP2p) {
+    if (p2pInfo.beyondHorizon) warnings.push(`The path (${(p2pInfo.dM / 1000).toFixed(1)} km) is beyond the radio horizon of these antenna heights (${(p2pInfo.horizonM / 1000).toFixed(1)} km at K ${p2pInfo.K.toFixed(2)}): the earth blocks it and the knife-edge loss is only an estimate.`);
+    else if (!p2pInfo.meetsSixtyPercent) warnings.push(`First Fresnel zone clearance is ${(100 * p2pInfo.minClearanceFraction).toFixed(0)} percent at its worst point (${(p2pInfo.worstXM / 1000).toFixed(2)} km from the transmitter), below the 60 percent rule: raise the antennas${p2pInfo.diffractionLossDb > 0.05 ? ` (diffraction loss ${p2pInfo.diffractionLossDb.toFixed(1)} dB)` : ''}.`);
+    const sug = suggestedFadeMarginDb(p2pInfo.dM);
+    if ((fadeDb || 0) < sug) warnings.push(`Fade margin is ${(fadeDb || 0).toFixed(0)} dB; about ${sug.toFixed(0)} dB is suggested for a ${(p2pInfo.dM / 1000).toFixed(1)} km path (assumed).`);
+    if (p2pInfo.dM < 100) warnings.push('This point-to-point path is under 100 m: the antennas may be in each other near field and a mic or IEM link is the better model.');
+  }
+  const polDb = direct.polarisationLossDb || 0;
+  const polarisation = { lossDb: polDb, severity: polDb >= 10 ? 'warning' : polDb >= 3 ? 'info' : 'ok', txPolarisation: pol };
+  if (polDb >= 10) warnings.push(`Polarisation mismatch costs ${polDb.toFixed(1)} dB on the direct path: align the antennas or change polarisation.`);
+  else if (polDb >= 3) warnings.push(`Note: polarisation mismatch costs ${polDb.toFixed(1)} dB on the direct path (circular to linear is always 3 dB).`);
+  const antennaMismatch = (txM.matched && rxM.matched) ? null : {
+    tx: txM.matched ? null : { vswr: txM.vswr, returnLossDb: txM.returnLossDb, mismatchDb: txM.mismatchDb, inBand: txM.inBand, reflectedDbm: txReflectedDbm, reflectedAtPaDbm, vswrAtPa },
+    rx: rxM.matched ? null : { vswr: rxM.vswr, returnLossDb: rxM.returnLossDb, mismatchDb: rxM.mismatchDb, inBand: rxM.inBand },
+  };
+  return { distanceM, paths, pathLossDb, fsplDb: fspl, rxPowerDbm, antennaMismatch, polarisation, p2p: p2pInfo, wallNoise, waterfall: wf, inputPowerDbm, marginDb, status, cascade, requiredSnrDb: cascade.requiredSnrDb, nearField, warnings };
 }
 
 // ---------------------------------------------------------------- multi-antenna (branch) IEM zones
@@ -734,6 +1068,7 @@ export function splitterLossDb(link, n) {
 export function chainElectricalLengthM(chain) {
   let l = 0;
   for (const it of chain || []) {
+    if (it.kind === 'rof') { l += rofEffective(it).electricalLengthM; continue; } // fibre group delay as an equivalent length
     if (it.kind !== 'cable') continue;
     const vf = (CABLES[it.cableType] && CABLES[it.cableType].velocityFactor) || 0.66;
     l += (it.lengthM || 0) / vf;
@@ -765,7 +1100,7 @@ export function prepareBranches(scene, link) {
   const branches = branchesOf(link);
   const split = splitterLossDb(link, branches.length);
   const env = scene.environment || {};
-  const body = (env.bodyLossDb || 0) + (link.rx.bodyLossDb || 0) + (env.fadeMarginDb || 0);
+  const fade = env.fadeMarginDb || 0;
   // IEM links: items between the bodypack antenna and the bodypack (link.rx.chain) also attenuate the coherent sum, as in solveLink
   const rxChainLoss = link.kind === 'iem' && Array.isArray(link.rx.chain) ? chainLossDb(link.rx.chain, link.freqMHz) : 0;
   const lambda = wavelengthM(link.freqMHz);
@@ -776,7 +1111,7 @@ export function prepareBranches(scene, link) {
       bl.rx = { ...link.rx, pos: { x: 0, y: 0, z: 0 } }; // mutable rx point reused for every cell
       return {
         bl,
-        off: bl.tx.powerDbm - chainLossDb(br.chain, link.freqMHz) - body - rxChainLoss,
+        off: bl.tx.powerDbm - chainLossDb(br.chain, link.freqMHz) - (bodyCouplingLossDb(env, bl.tx.antenna, link.rx).totalDb + fade) - rxChainLoss,
         chainPh: -2 * Math.PI * chainElectricalLengthM(br.chain) / lambda,
       };
     }),

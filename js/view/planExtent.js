@@ -7,6 +7,8 @@ export const STAGE_MARGIN = { left: 1.0, top: 1.2, right: 1.0, bottom: 1.8 };
 export const ITEM_MARGIN_M = 1.0;
 /** Generous bound for dragging items: they may sit this far beyond the stage edges. */
 export const FAR_LIMIT_M = 200;
+/** The same bound when a point-to-point link is present (scene coordinates are limited to +-10 km). */
+export const P2P_LIMIT_M = 10000;
 
 const num = (v) => typeof v === 'number' && Number.isFinite(v);
 const okPt = (p) => p && num(p.x) && num(p.y);
@@ -49,4 +51,7 @@ export function planExtent(scene, opts = {}) {
 }
 
 /** Clamp for dragged free items: stage bounds plus FAR_LIMIT_M on every side. */
-export function farBounds(st) { return { x0: -FAR_LIMIT_M, x1: st.width + FAR_LIMIT_M, y0: -FAR_LIMIT_M, y1: st.depth + FAR_LIMIT_M }; }
+export function farBounds(st, scene = null) {
+  const far = scene && (scene.links || []).some((l) => l && l.kind === 'p2p') ? P2P_LIMIT_M : FAR_LIMIT_M; // point-to-point links span kilometres
+  return { x0: -far, x1: st.width + far, y0: -far, y1: st.depth + far };
+}

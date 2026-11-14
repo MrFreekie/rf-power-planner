@@ -5,6 +5,9 @@ import { createCanvasHost, activeLink, setFont, haloText, strokeHatchRect } from
 import { history } from '../history.js';
 import { squelch } from '../squelchTracker.js';
 import { formatPower } from '../model/units.js';
+import { rxState } from '../rxTracker.js';
+import { distortionFromLink } from '../model/spectrum-views.js';
+import { drawDistortionBadge } from './distortionDraw.js';
 
 const RANGES = [[10, '10 s'], [30, '30 s'], [120, '2 min']];
 
@@ -257,6 +260,8 @@ export function mountTimeline({ container, store }) {
       ctx.fillRect(bx, rfY0 + 16, tw, 20); ctx.strokeRect(bx + 0.5, rfY0 + 16.5, tw - 1, 19);
       ctx.fillStyle = best.open ? th.ink : th.fail; ctx.textAlign = 'left'; ctx.fillText(txt, bx + 5, rfY0 + 31);
     }
+    const od = distortionFromLink({ overload: (rxState.get(link.id) || {}).overload }); // overload badge (receiver front end)
+    if (od.active) drawDistortionBadge(ctx, th, { L, T: rfY0, pw: w - L - R, ph: 60 }, od, null);
     if (pausedAt != null) haloText(ctx, th, 'PAUSED', w - R - 4, auY0 - 12, { align: 'right', weight: '600' });
   }
 

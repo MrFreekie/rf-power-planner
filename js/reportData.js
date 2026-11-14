@@ -7,7 +7,7 @@
 // `results` is optional; pass what the trackers already hold to avoid recomputing:
 //   { link: LinkResult, squelch: squelch.get(id), rx: rxState.get(id), digital: digital.get(id), telemetry: telemetry.get(id),
 //     coverage: coverage.get(id), imd: imd.get(), now: Date | ISO string }
-import { solveLink } from './model/rf.js';
+import { solveLink, wavePolarisation } from './model/rf.js';
 import { dispX, dispY } from './ui/coords.js';
 import { formatPower, formatLength, formatDb } from './model/units.js';
 
@@ -55,7 +55,7 @@ export function buildReportData(scene, linkId, results = {}) {
 
   // assumptions
   const A = out.assumptions;
-  A.push(env.model === 'free-space' ? 'Propagation: free space (no ground or wall reflections).' : `Propagation: two-ray with ${env.floor} floor, ${env.polarisation} polarisation, plus single-bounce reflections from ${(scene.reflectors || []).length} wall(s); paths are summed coherently.`);
+  A.push(env.model === 'free-space' ? 'Propagation: free space (no ground or wall reflections).' : `Propagation: two-ray with ${env.floor} floor, ${wavePolarisation(scene, link)} polarisation, plus single-bounce reflections from ${(scene.reflectors || []).length} wall(s); paths are summed coherently.`);
   A.push('Coordinates: x = 0 on the stage centre line (positive to the right on the plan); y = 0 on the front (audience-side) edge, positive upstage, negative in front of the stage. Antenna azimuth is 0 toward the audience.');
   const plats = Array.isArray(scene.platforms) ? scene.platforms : [];
   A.push(`Item heights are measured above the local floor (${deck > 0 ? `the stage deck, ${formatLength(deck, u.length)} above ground, or ` : 'the stage floor or '}the top of the platform an item stands on); the ground is the reference for reflections.`);

@@ -6,8 +6,8 @@ const POWER_UNITS = ['dBm', 'dBW', 'mW'];
 const LENGTH_UNITS = ['m', 'ft'];
 const MODELS = ['two-ray', 'free-space'];
 const POLARISATIONS = ['vertical', 'horizontal'];
-const LINK_KINDS = ['mic', 'iem'];
-const ANTENNA_TYPES = ['dipole', 'paddle', 'helical', 'cardioid', 'omni', 'logperiodic', 'body', 'custom'];
+const LINK_KINDS = ['mic', 'iem', 'p2p'];
+const ANTENNA_TYPES = ['dipole', 'quarterwave', 'paddle', 'helical', 'cardioid', 'omni', 'logperiodic', 'body', 'helical-cp', 'yagi', 'custom'];
 const AUDIO_SOURCES = ['speech', 'tone', 'pink', 'stereo-demo', 'off'];
 export const RX_PRESET_IDS = Object.keys(RX_PRESETS); // includes the analogue FM equipment presets (fm-presets.js)
 export const DIVERSITY_MODES = ['switching', 'true', 'ratio'];
@@ -23,9 +23,14 @@ export const defaultDiversity = (pos, _antennaA) => ({
 });
 import { validateVenue, packUnderlay, unpackUnderlay } from './venue-underlay.js';
 import { MATERIAL_TRANSMISSION } from './zones-params.js';
-import { SURFACES, MATERIALS } from './library.js';
+import { EXTRA_CHAIN_KINDS, CHAIN_PRESETS, DC_MODES, FILTER_TYPES } from './chain-presets.js';
+import { allowedPolarisations, isCircularType, defaultPolarisation, SURFACES, MATERIALS, GROUND_PLANE_GAIN_DBI, ANTENNA_POLARISATIONS, ANTENNA_CONTACT_LOSS_DB, ANTENNA_DAMPNESS_LOSS_DB } from './library.js';
 import { EXTERNAL_NOISE_FIGURE_600MHZ_DB, INTERFERENCE_LEVELS, RX_PRESETS } from './rx-params.js';
 import { FM_TX_PRESET_IDS } from './fm-presets.js';
+import { CEILING_MATERIALS, CEILING_LIMITS } from './ceiling.js';
+import { WALL_NOISE_PRESETS, WALL_NOISE_LIMITS, WALL_CONSTRUCTIONS } from './ledwall.js';
+import { AUDIENCE_KINDS, AUDIENCE_DENSITY_LIMITS, AUDIENCE_MAX } from './audience.js';
+import { ANTENNA_BANDS } from './antenna-band.js';
 
 // Stage and platform limits. Item pos.z everywhere stays the height above the LOCAL floor (deck or platform top).
 export const STAGE_LIMITS = Object.freeze({ size: [0.5, 500], heightM: [0, 20] });
@@ -34,6 +39,21 @@ export const PLATFORM_LIMITS = Object.freeze({ max: 50, size: [0.1, 500], coord:
 export const PLATFORM_MATERIALS = Object.freeze([...new Set([...Object.keys(SURFACES), ...Object.keys(MATERIALS)])]);
 
 /** A raised platform: a rectangle whose top surface is topM metres above the ground. (x, y) = min corner of the UNROTATED box; optional rotationDeg (-180..180, azimuth convention, about the centre; unset = 0, see floor.js). */
+/** An overhead panel (horizontal reflector, ceiling.js). */
+export function createOverheadPanel(overrides = {}) {
+  return { id: newId('ovh'), name: 'Overhead panel', x: 0, y: 0, width: 4, depth: 4, heightM: 5, material: 'metal', lossDb: 0, ...overrides };
+}
+
+/** A ceiling (scene.ceiling). */
+export function createCeiling(overrides = {}) {
+  return { enabled: true, heightM: 5, material: 'metal', ...overrides };
+}
+
+/** An audience area (crowd absorption layer, audience.js). */
+export function createAudience(overrides = {}) {
+  return { id: newId('aud'), name: 'Audience', x: 0, y: 0, width: 6, depth: 4, kind: 'standing', densityPerM2: 2, ...overrides };
+}
+
 export function createPlatform(overrides = {}) {
   return { id: newId('plat'), name: 'Riser', x: 0, y: 0, width: 2, depth: 2, topM: 0.4, material: 'wood', ...overrides };
 }
@@ -66,7 +86,7 @@ export const IMD_PIM_PRESETS = ['none', 'good', 'corroded'];
 export function createImdTransmitter(overrides = {}) {
   return {
     id: newId('imdtx'), name: 'Mic', freqMHz: 606.1, powerDbm: 14, pos: { x: 3, y: 3, z: 1.5 },
-    antenna: { type: 'body', gainDbi: -3, orientation: { az: 0, el: 90 } }, ...overrides,
+    antenna: { type: 'body', gainDbi: -3, orientation: { az: 0, el: 90 }, polarisation: 'vertical' }, ...overrides,
   };
 }
 
@@ -91,7 +111,7 @@ export function createDefaultImd() {
 
 export const DEFAULT_MPX_PRESET = 'iem-typical';
 export const defaultMpx = (kind) => ({ enabled: kind === 'iem', preset: DEFAULT_MPX_PRESET, overrides: {}, pilotSquelch: false });
-const CHAIN_KINDS = ['cable', 'booster', 'filter', 'connector', 'attenuator', 'splitter', 'combiner'];
+const CHAIN_KINDS = ['cable', 'booster', 'filter', 'connector', 'attenuator', 'splitter', 'combiner', ...EXTRA_CHAIN_KINDS];
 
 let idCounter = 0;
 /** Short unique id, e.g. newId('link') -> 'link_k3f9a2'. */
@@ -115,9 +135,25 @@ function buildChainItem(kind, overrides) {
     case 'connector': return { kind, lossDb: 0.2, ...overrides };
     case 'attenuator': return { kind, lossDb: 3, ...overrides };
     case 'splitter':
-    case 'combiner': return { kind, ports: 4, insertionLossDb: 7, ...overrides };
+    case 'combiner': return { kind, ports: 4, insertionLossDb: 1, ...overrides }; // excess loss only (assumed 1 dB); the 10log10(N) split loss is added in chainItemLossDb
+    case 'rof': return { kind, gainDb: -25, nfDb: 30, sfdrDbHz23: 100, fibreKm: 0.1, ...overrides };
+    case 'coupler': return { kind, couplingDb: 10, excessLossDb: 0.1, ...overrides };
+    case 'biastee': return { kind, lossDb: 0.6, dcSupplyV: 12, ...overrides };
+    case 'dcblock': return { kind, lossDb: 0.3, dcMode: 'block', ...overrides };
+    case 'activesplitter':
+    case 'activecombiner': return { kind, ports: 4, gainDb: 0, nfDb: 8, ...overrides };
     default: throw new Error(`Unknown chain item kind: ${kind}`);
   }
+}
+
+/**
+ * createChainItemFromPreset(presetId, overrides) -> chain item with the preset figures (chain-presets.js, each flagged S/I/U) and
+ * `presetId` recorded. Throws for an unknown id.
+ */
+export function createChainItemFromPreset(presetId, overrides = {}) {
+  const pr = CHAIN_PRESETS[presetId];
+  if (!pr) throw new Error(`Unknown chain preset: ${presetId}`);
+  return createChainItem(pr.kind, { ...pr.item, presetId, ...overrides });
 }
 
 /** Build a default link of the given kind ('mic' or 'iem'). */
@@ -169,7 +205,7 @@ export function syncScene(scene) {
 export function createBranch(overrides = {}) {
   return {
     id: newId('br'), name: 'Antenna', chain: [createChainItem('cable', { cableType: 'rg58', lengthM: 10 })],
-    antenna: { type: 'paddle', gainDbi: 2, orientation: { az: 90, el: 0 } }, pos: { x: 6, y: 1, z: 2 }, ...overrides,
+    antenna: { type: 'paddle', gainDbi: 2, orientation: { az: 90, el: 0 }, polarisation: 'vertical' }, pos: { x: 6, y: 1, z: 2 }, ...overrides,
   };
 }
 
@@ -180,17 +216,39 @@ export function createZone(overrides = {}) {
   };
 }
 
+/** A point-to-point audio link: fixed Tx and Rx 1 km apart, directional antennas aimed at each other, no body loss, 100 mW. Figures illustrative. */
+function buildP2pLink() {
+  const yagi = (az) => ({ type: 'yagi', gainDbi: 10, orientation: { az, el: 0 }, polarisation: 'vertical' });
+  return {
+    id: newId('link'), name: 'P2P 1', kind: 'p2p', freqMHz: 600,
+    tx: { id: newId('tx'), name: 'Link transmitter', powerDbm: 20, pos: { x: 100, y: 100, z: 6 }, antenna: yagi(90) },
+    rx: {
+      id: newId('rx'), name: 'Link receiver', pos: { x: 1100, y: 100, z: 6 }, antenna: yagi(270), sensitivityDbm: -95, bodyLossDb: 0,
+      squelch: { enabled: true, thresholdDbm: -90, hysteresisDb: 3 }, rxPreset: 'mic-receiver-typical', overload: {},
+      diversity: defaultDiversity({ x: 1100, y: 100, z: 6 }, { type: 'yagi', gainDbi: 10, orientation: { az: 270, el: 0 } }),
+    },
+    audio: { source: 'speech', gainDb: 0 },
+    mpx: defaultMpx('mic'),
+    interferer: defaultInterferer(),
+    telemetry: defaultTelemetry(),
+    modulation: defaultModulation(),
+    p2p: { kFactor: 4 / 3 },
+    chain: [],
+  };
+}
+
 function buildDefaultLink(kind) {
+  if (kind === 'p2p') return buildP2pLink();
   if (kind === 'iem') {
     return {
       id: newId('link'), name: 'IEM 1', kind: 'iem', freqMHz: 600,
       tx: {
         id: newId('tx'), name: 'IEM transmitter', powerDbm: 17, pos: { x: 11, y: 0.5, z: 1.2 },
-        antenna: { type: 'paddle', gainDbi: 2, orientation: { az: 90, el: 0 } },
+        antenna: { type: 'paddle', gainDbi: 2, orientation: { az: 90, el: 0 }, polarisation: 'vertical' },
       },
       rx: {
         id: newId('rx'), name: 'Bodypack', pos: { x: 4, y: 3, z: 1.0 },
-        antenna: { type: 'body', gainDbi: -3, orientation: { az: 0, el: 90 } },
+        antenna: { type: 'body', gainDbi: -3, orientation: { az: 0, el: 90 }, polarisation: 'vertical' },
         sensitivityDbm: -90, bodyLossDb: 0,
         squelch: { enabled: true, thresholdDbm: -85, hysteresisDb: 3 },
         rxPreset: 'iem-bodypack-typical', overload: {},
@@ -209,11 +267,11 @@ function buildDefaultLink(kind) {
     id: newId('link'), name: 'Mic 1', kind: 'mic', freqMHz: 600,
     tx: {
       id: newId('tx'), name: 'Handheld mic', powerDbm: 14, pos: { x: 4, y: 3, z: 1.5 },
-      antenna: { type: 'body', gainDbi: -3, orientation: { az: 0, el: 90 } },
+      antenna: { type: 'body', gainDbi: -3, orientation: { az: 0, el: 90 }, polarisation: 'vertical' },
     },
     rx: {
       id: newId('rx'), name: 'UHF receiver', pos: { x: 10, y: 6.5, z: 2.5 },
-      antenna: { type: 'paddle', gainDbi: 2, orientation: { az: 270, el: 0 } },
+      antenna: { type: 'paddle', gainDbi: 2, orientation: { az: 270, el: 0 }, polarisation: 'vertical' },
       sensitivityDbm: -95, bodyLossDb: 0,
       squelch: { enabled: true, thresholdDbm: -90, hysteresisDb: 3 },
       rxPreset: 'mic-receiver-typical', overload: {},
@@ -238,7 +296,7 @@ export function createDefaultScene() {
     units: { power: 'dBm', length: 'm' },
     stage: { width: 12, depth: 8, heightM: 0 },
     platforms: [],
-    environment: { floor: 'wood', polarisation: 'vertical', model: 'two-ray', fadeMarginDb: 0, bodyLossDb: 0, externalNoise: DEFAULT_EXTERNAL_NOISE },
+    environment: { floor: 'wood', model: 'two-ray', fadeMarginDb: 0, bodyLossDb: 0, externalNoise: DEFAULT_EXTERNAL_NOISE },
     reflectors: [],
     zones: [],
     coverage: { mode: 'power' },
@@ -265,7 +323,7 @@ const inRange = (v, lo, hi) => isNum(v) && v >= lo && v <= hi;
 export const SCENE_LIMITS = Object.freeze({
   maxText: 4 * 1024 * 1024, // characters of scene JSON that deserialize() will parse
   maxDepth: 24, maxNodes: 200000, maxString: 1000, // generic shape guard (the venue underlay is checked on its own)
-  maxLinks: 64, maxReflectors: 500, maxZones: 100, maxZonePoints: 500, maxImdTransmitters: 16, maxChain: 32, maxBranches: 16,
+  maxLinks: 64, maxReflectors: 500, maxZones: 100, maxZonePoints: 500, maxImdTransmitters: 16, maxImdGroups: 8, maxChain: 32, maxBranches: 16,
   coordM: 10000, zoneCoordM: 2000, zM: 1000, maxFreqMHz: 1e6, maxDb: 1000, maxIdChars: 64,
 });
 const SL = SCENE_LIMITS;
@@ -302,6 +360,7 @@ function checkShape(scene, errors) {
 
 /** Optional analogue-FM transmitter fields: fmPreset (a tx id of fm-presets.js) and lowIntermod (boolean). */
 function checkFmTx(t, path, errors) {
+  if (t.audioBandwidthHz !== undefined && !inRange(t.audioBandwidthHz, 1000, 22000)) errors.push(`${path}.audioBandwidthHz must be between 1000 and 22000`);
   if (t.fmPreset !== undefined && !FM_TX_PRESET_IDS.includes(t.fmPreset)) errors.push(`${path}.fmPreset invalid`);
   if (t.lowIntermod !== undefined && typeof t.lowIntermod !== 'boolean') errors.push(`${path}.lowIntermod must be a boolean`);
 }
@@ -325,9 +384,56 @@ function checkChainItem(c, path, errors) {
   if (!isObj(c) || !CHAIN_KINDS.includes(c.kind)) { errors.push(`${path}.kind invalid`); return; }
   if (c.id !== undefined && !isSafeId(c.id)) errors.push(`${path}.id must be a short plain string`);
   if (c.cableType !== undefined && !isSafeId(c.cableType)) errors.push(`${path}.cableType invalid`);
-  for (const k of ['lengthM', 'gainDb', 'nfDb', 'lossDb', 'insertionLossDb', 'ports']) {
+  for (const k of ['lengthM', 'gainDb', 'nfDb', 'lossDb', 'insertionLossDb', 'ports', 'couplingDb', 'excessLossDb', 'isolationDb', 'rejectionDb', 'iip3Dbm', 'oip3Dbm', 'maxInputDbm', 'dcSupplyV', 'dcSupplyMa', 'dcNeedV', 'dcNeedMa', 'powerV', 'powerMa', 'passLoMHz', 'passHiMHz', 'reverseIsolationDb', 'sfdrDbHz23', 'fibreKm', 'fibreLossDbPerKm', 'connectorLossDb', 'bwMinMHz', 'bwMaxMHz']) {
     if (c[k] !== undefined && !(isNum(c[k]) && Math.abs(c[k]) <= SL.coordM)) errors.push(`${path}.${k} must be a bounded number`);
   }
+  if (c.fibreKm !== undefined && !(isNum(c.fibreKm) && c.fibreKm >= 0 && c.fibreKm <= 100)) errors.push(`${path}.fibreKm must be between 0 and 100`);
+  if (c.fibreLossDbPerKm !== undefined && !(isNum(c.fibreLossDbPerKm) && c.fibreLossDbPerKm >= 0 && c.fibreLossDbPerKm <= 10)) errors.push(`${path}.fibreLossDbPerKm must be between 0 and 10`);
+  if (c.dcMode !== undefined && !DC_MODES.includes(c.dcMode)) errors.push(`${path}.dcMode invalid`);
+  if (c.filterType !== undefined && !FILTER_TYPES.includes(c.filterType)) errors.push(`${path}.filterType invalid`);
+  if (c.noDc !== undefined && typeof c.noDc !== 'boolean') errors.push(`${path}.noDc must be true or false`);
+  if (c.presetId !== undefined && !(isSafeId(c.presetId) && Object.prototype.hasOwnProperty.call(CHAIN_PRESETS, c.presetId))) errors.push(`${path}.presetId invalid`);
+}
+
+function checkImdTopology(t, path, errors) {
+  if (!isObj(t)) { errors.push(`${path} must be an object`); return; }
+  const dbOk = (v) => v === undefined || (isNum(v) && v >= 0 && v <= SL.maxDb);
+  if (!Array.isArray(t.groups)) { errors.push(`${path}.groups must be an array`); return; }
+  if (!checkCount(t.groups, SL.maxImdGroups, `${path}.groups`, errors)) return;
+  t.groups.forEach((g, i) => {
+    const p = `${path}.groups[${i}]`;
+    if (!isObj(g) || !isSafeId(g.id)) { errors.push(`${p}.id must be a short plain string`); return; }
+    if (!Array.isArray(g.members) || g.members.length > SL.maxImdTransmitters || !g.members.every(isSafeId)) errors.push(`${p}.members must be a list of ids (max ${SL.maxImdTransmitters})`);
+    if (!dbOk(g.lossDb) || !dbOk(g.isolationDb) || !dbOk(g.isolatorDb)) errors.push(`${p}: lossDb, isolationDb, isolatorDb must be numbers >= 0`);
+    if (g.underRoot !== undefined && typeof g.underRoot !== 'boolean') errors.push(`${p}.underRoot must be true or false`);
+  });
+  if (t.root !== undefined && t.root !== null && !(isObj(t.root) && dbOk(t.root.lossDb) && dbOk(t.root.isolationDb))) errors.push(`${path}.root must be {lossDb >= 0, isolationDb >= 0} or absent`);
+}
+
+function checkP2p(q, path, errors) {
+  if (!isObj(q)) { errors.push(`${path} must be an object`); return; }
+  if (q.kFactor !== undefined && !(isNum(q.kFactor) && q.kFactor >= 0.5 && q.kFactor <= 10)) errors.push(`${path}.kFactor must be between 0.5 and 10`);
+  if (q.fadeMarginDb !== undefined && !(isNum(q.fadeMarginDb) && q.fadeMarginDb >= 0 && q.fadeMarginDb <= 60)) errors.push(`${path}.fadeMarginDb must be between 0 and 60`);
+  if (q.groundReflection !== undefined && typeof q.groundReflection !== 'boolean') errors.push(`${path}.groundReflection must be true or false`);
+  if (q.obstacle !== undefined && q.obstacle !== null) {
+    const o = q.obstacle;
+    if (!isObj(o) || !(isNum(o.distanceM) && o.distanceM > 0 && o.distanceM <= SL.coordM * 4) || !(isNum(o.heightM) && o.heightM >= -100 && o.heightM <= SL.zM)) errors.push(`${path}.obstacle must be { distanceM > 0, heightM }`);
+  }
+}
+
+function checkOverheadRect(r, path, errors) {
+  const [c0, c1] = CEILING_LIMITS.coord, [s0, s1] = CEILING_LIMITS.size;
+  if (!isObj(r)) { errors.push(`${path} must be an object`); return; }
+  for (const k of ['x', 'y']) if (!(isNum(r[k]) && r[k] >= c0 && r[k] <= c1)) errors.push(`${path}.${k} must be a number between ${c0} and ${c1}`);
+  for (const k of ['width', 'depth']) if (!(isNum(r[k]) && r[k] >= s0 && r[k] <= s1)) errors.push(`${path}.${k} must be between ${s0} and ${s1}`);
+}
+
+function checkDesignBand(b, path, errors) {
+  if (typeof b === 'string') { if (!Object.prototype.hasOwnProperty.call(ANTENNA_BANDS, b)) errors.push(`${path} is not a known band id`); return; }
+  if (!isObj(b) || !isNum(b.loMHz) || !isNum(b.hiMHz) || !(b.loMHz > 0) || !(b.hiMHz > b.loMHz) || b.hiMHz > 100000) { errors.push(`${path} must be a band id or {loMHz < hiMHz} in MHz`); return; }
+  if (b.order !== undefined && b.order !== 1 && b.order !== 3) errors.push(`${path}.order must be 1 or 3`);
+  if (b.minVswr !== undefined && !(isNum(b.minVswr) && b.minVswr >= 1 && b.minVswr <= 3)) errors.push(`${path}.minVswr must be between 1 and 3`);
+  if (b.label !== undefined && !(typeof b.label === 'string' && b.label.length <= 80)) errors.push(`${path}.label must be a short string`);
 }
 
 function checkAntenna(a, path, errors) {
@@ -335,6 +441,16 @@ function checkAntenna(a, path, errors) {
   if (!ANTENNA_TYPES.includes(a.type)) errors.push(`${path}.type invalid: ${a.type}`);
   if (!isNum(a.gainDbi)) errors.push(`${path}.gainDbi must be a finite number`);
   checkPos(a.orientation, `${path}.orientation`, errors, ['az', 'el']);
+  if (a.tiltDeg !== undefined && !inRange(a.tiltDeg, -90, 90)) errors.push(`${path}.tiltDeg must be between -90 and 90`);
+  if (a.rollDeg !== undefined && !inRange(a.rollDeg, -180, 180)) errors.push(`${path}.rollDeg must be between -180 and 180`);
+  if (a.polarisation !== undefined) {
+    if (!ANTENNA_POLARISATIONS.includes(a.polarisation)) errors.push(`${path}.polarisation invalid`);
+    else if (!allowedPolarisations(a.type).includes(a.polarisation)) errors.push(`${path}.polarisation ${a.polarisation} is not allowed on a ${a.type} antenna (${allowedPolarisations(a.type).join(', ')})`);
+  }
+  if (a.contact !== undefined && !(typeof a.contact === 'string' && Object.prototype.hasOwnProperty.call(ANTENNA_CONTACT_LOSS_DB, a.contact))) errors.push(`${path}.contact invalid`);
+  if (a.dampness !== undefined && !(typeof a.dampness === 'string' && Object.prototype.hasOwnProperty.call(ANTENNA_DAMPNESS_LOSS_DB, a.dampness))) errors.push(`${path}.dampness invalid`);
+  if (a.designBand !== undefined) checkDesignBand(a.designBand, `${path}.designBand`, errors);
+  if (a.groundPlane !== undefined && !Object.prototype.hasOwnProperty.call(GROUND_PLANE_GAIN_DBI, a.groundPlane)) errors.push(`${path}.groundPlane invalid`);
 }
 
 /** Validate a scene. Returns { ok, errors: string[] }. Never throws. */
@@ -363,7 +479,7 @@ export function validateScene(scene) {
   if (!isObj(env)) errors.push('environment must be an object');
   else {
     if (typeof env.floor !== 'string' || !env.floor) errors.push('environment.floor must be a string');
-    if (!POLARISATIONS.includes(env.polarisation)) errors.push('environment.polarisation invalid');
+    if (env.polarisation !== undefined && !POLARISATIONS.includes(env.polarisation)) errors.push('environment.polarisation invalid'); // legacy: migrated onto the antennas on load
     if (!MODELS.includes(env.model)) errors.push('environment.model invalid');
     if (!isNum(env.fadeMarginDb)) errors.push('environment.fadeMarginDb must be a number');
     if (!isNum(env.bodyLossDb)) errors.push('environment.bodyLossDb must be a number');
@@ -378,6 +494,46 @@ export function validateScene(scene) {
     else if (ids.has(id)) errors.push(`${path}.id duplicate: ${id}`);
     else ids.add(id);
   };
+  if (scene.ceiling !== undefined) {
+    const c = scene.ceiling, p = 'ceiling', L = CEILING_LIMITS;
+    if (!isObj(c)) errors.push('ceiling must be an object');
+    else {
+      if (c.enabled !== undefined && typeof c.enabled !== 'boolean') errors.push(`${p}.enabled must be true or false`);
+      if (!(isNum(c.heightM) && c.heightM >= L.heightM[0] && c.heightM <= L.heightM[1])) errors.push(`${p}.heightM must be between ${L.heightM[0]} and ${L.heightM[1]} m`);
+      if (!(typeof c.material === 'string' && Object.prototype.hasOwnProperty.call(CEILING_MATERIALS, c.material))) errors.push(`${p}.material invalid`);
+      if (c.lossDb !== undefined && !(isNum(c.lossDb) && c.lossDb >= L.lossDb[0] && c.lossDb <= L.lossDb[1])) errors.push(`${p}.lossDb must be between ${L.lossDb[0]} and ${L.lossDb[1]}`);
+      if (c.extent !== undefined) checkOverheadRect(c.extent, `${p}.extent`, errors);
+    }
+  }
+  if (scene.overheadPanels !== undefined) {
+    const L = CEILING_LIMITS;
+    if (!Array.isArray(scene.overheadPanels)) errors.push('overheadPanels must be an array');
+    else if (scene.overheadPanels.length > L.panelsMax) errors.push(`at most ${L.panelsMax} overhead panels are supported`);
+    else scene.overheadPanels.forEach((o, i) => {
+      const p = `overheadPanels[${i}]`;
+      if (!isObj(o) || !isSafeId(o.id)) { errors.push(`${p}.id must be a short plain string`); return; }
+      if (o.name !== undefined && !(typeof o.name === 'string' && o.name.length <= 80)) errors.push(`${p}.name must be a short string`);
+      checkOverheadRect(o, p, errors);
+      if (!(isNum(o.heightM) && o.heightM >= L.heightM[0] && o.heightM <= L.heightM[1])) errors.push(`${p}.heightM must be between ${L.heightM[0]} and ${L.heightM[1]} m`);
+      if (!(typeof o.material === 'string' && Object.prototype.hasOwnProperty.call(CEILING_MATERIALS, o.material))) errors.push(`${p}.material invalid`);
+      if (o.lossDb !== undefined && !(isNum(o.lossDb) && o.lossDb >= L.lossDb[0] && o.lossDb <= L.lossDb[1])) errors.push(`${p}.lossDb must be between ${L.lossDb[0]} and ${L.lossDb[1]}`);
+    });
+  }
+  if (scene.audience !== undefined) {
+    if (!Array.isArray(scene.audience)) errors.push('audience must be an array');
+    else if (scene.audience.length > AUDIENCE_MAX) errors.push(`at most ${AUDIENCE_MAX} audience areas are supported`);
+    else scene.audience.forEach((a, i) => {
+      const p = `audience[${i}]`;
+      if (!isObj(a) || !isSafeId(a.id)) { errors.push(`${p}.id must be a short plain string`); return; }
+      if (a.name !== undefined && !(typeof a.name === 'string' && a.name.length <= 80)) errors.push(`${p}.name must be a short string`);
+      if (!AUDIENCE_KINDS.includes(a.kind)) errors.push(`${p}.kind must be standing or seated`);
+      const [c0, c1] = PLATFORM_LIMITS.coord, [s0, s1] = PLATFORM_LIMITS.size;
+      for (const k of ['x', 'y']) if (!(isNum(a[k]) && a[k] >= c0 && a[k] <= c1)) errors.push(`${p}.${k} must be a number between ${c0} and ${c1}`);
+      for (const k of ['width', 'depth']) if (!(isNum(a[k]) && a[k] >= s0 && a[k] <= s1)) errors.push(`${p}.${k} must be between ${s0} and ${s1}`);
+      if (!(isNum(a.densityPerM2) && a.densityPerM2 >= AUDIENCE_DENSITY_LIMITS[0] && a.densityPerM2 <= AUDIENCE_DENSITY_LIMITS[1])) errors.push(`${p}.densityPerM2 must be between ${AUDIENCE_DENSITY_LIMITS[0]} and ${AUDIENCE_DENSITY_LIMITS[1]}`);
+      if (a.headM !== undefined && !(isNum(a.headM) && a.headM >= 0.3 && a.headM <= 2.5)) errors.push(`${p}.headM must be between 0.3 and 2.5`);
+    });
+  }
   if (scene.platforms !== undefined) {
     if (!Array.isArray(scene.platforms)) errors.push('platforms must be an array');
     else if (scene.platforms.length > PLATFORM_LIMITS.max) errors.push(`at most ${PLATFORM_LIMITS.max} platforms are supported`);
@@ -427,6 +583,7 @@ export function validateScene(scene) {
       checkPos(m.rxAntennaPos, 'imd.rxAntennaPos', errors);
       if (m.rxAntenna !== undefined) checkAntenna(m.rxAntenna, 'imd.rxAntenna', errors);
       const c = m.combiner;
+      if (m.topology !== undefined) checkImdTopology(m.topology, 'imd.topology', errors);
       if (!isObj(c) || !IMD_COMBINER_TYPES.includes(c.type) || !isDbPos(c.isolationDb) || !isDbPos(c.lossDb)) errors.push('imd.combiner must be {type: none|hybrid|isolated, isolationDb >= 0, lossDb >= 0}');
       const q = m.pim;
       if (!isObj(q) || !IMD_PIM_PRESETS.includes(q.preset) || (q.levelDbc !== null && !inRange(q.levelDbc, -SL.maxDb, SL.maxDb))) errors.push('imd.pim must be {preset: none|good|corroded, levelDbc: number|null}');
@@ -449,6 +606,21 @@ export function validateScene(scene) {
     if (r.transmissionLossDb !== undefined && !isDbPos(r.transmissionLossDb)) errors.push(`${p}.transmissionLossDb must be a number >= 0`);
     if (r.thicknessFactor !== undefined && !isDbPos(r.thicknessFactor)) errors.push(`${p}.thicknessFactor must be a number >= 0`);
     if (r.thicknessM !== undefined && !isDbPos(r.thicknessM)) errors.push(`${p}.thicknessM must be a number >= 0`);
+    if (r.construction !== undefined && !(typeof r.construction === 'string' && Object.prototype.hasOwnProperty.call(WALL_CONSTRUCTIONS, r.construction))) errors.push(`${p}.construction must be one of ${Object.keys(WALL_CONSTRUCTIONS).join(', ')}`);
+    if (r.holeSizeMm !== undefined && !inRange(r.holeSizeMm, 0.01, 2000)) errors.push(`${p}.holeSizeMm must be between 0.01 and 2000`);
+    if (r.noise !== undefined) {
+      const n = r.noise, W = WALL_NOISE_LIMITS;
+      if (!isObj(n)) errors.push(`${p}.noise must be an object`);
+      else {
+        if (n.preset !== undefined && !(typeof n.preset === 'string' && Object.prototype.hasOwnProperty.call(WALL_NOISE_PRESETS, n.preset))) errors.push(`${p}.noise.preset must be one of ${Object.keys(WALL_NOISE_PRESETS).join(', ')}`);
+        if (n.levelDbuvmAt10m !== undefined && !inRange(n.levelDbuvmAt10m, ...W.levelDbuvmAt10m)) errors.push(`${p}.noise.levelDbuvmAt10m must be between ${W.levelDbuvmAt10m.join(' and ')}`);
+        if (n.tiltDbPerDecade !== undefined && !inRange(n.tiltDbPerDecade, ...W.tiltDbPerDecade)) errors.push(`${p}.noise.tiltDbPerDecade must be between ${W.tiltDbPerDecade.join(' and ')}`);
+        if (n.rearLossDb !== undefined && !inRange(n.rearLossDb, ...W.rearLossDb)) errors.push(`${p}.noise.rearLossDb must be between ${W.rearLossDb.join(' and ')}`);
+        if (n.heightM !== undefined && !inRange(n.heightM, ...W.heightM)) errors.push(`${p}.noise.heightM must be between ${W.heightM.join(' and ')}`);
+        for (const k of ['bandMinMHz', 'bandMaxMHz']) if (n[k] !== undefined && !inRange(n[k], ...W.bandMHz)) errors.push(`${p}.noise.${k} must be between ${W.bandMHz.join(' and ')}`);
+        if (n.facing !== undefined && n.facing !== 'left' && n.facing !== 'right') errors.push(`${p}.noise.facing must be 'left' or 'right'`);
+      }
+    }
   });
   if (!Array.isArray(scene.links)) errors.push('links must be an array');
   else if (!checkCount(scene.links, SL.maxLinks, 'links', errors)) { /* reported */ } else scene.links.forEach((l, i) => {
@@ -482,6 +654,7 @@ export function validateScene(scene) {
         errors.push(`${p}.modulation must be {type: analog-fm|digital, digital:{preset, fixedOrder: null|2|4|16|64|256, overrides}}`);
       }
     }
+    if (l.p2p !== undefined) checkP2p(l.p2p, `${p}.p2p`, errors);
     if (l.kind === 'mic' && l.branches !== undefined) errors.push(`${p}: mic links have a single antenna (no branches)`);
     if (l.splitter !== undefined && (!isObj(l.splitter) || !isSafeId(l.splitter.preset) || !isDbPos(l.splitter.insertionLossDb))) {
       errors.push(`${p}.splitter must be {preset: string, insertionLossDb >= 0}`);
@@ -524,6 +697,7 @@ export function validateScene(scene) {
       if (!inRange(l.rx.sensitivityDbm, -SL.maxDb, SL.maxDb)) errors.push(`${p}.rx.sensitivityDbm must be a number`);
       if (l.rx.requiredSnrDb !== undefined && !inRange(l.rx.requiredSnrDb, -SL.maxDb, SL.maxDb)) errors.push(`${p}.rx.requiredSnrDb must be a number`);
       if (!inRange(l.rx.bodyLossDb, -SL.maxDb, SL.maxDb)) errors.push(`${p}.rx.bodyLossDb must be a number`);
+      for (const k of ['antennaBiasV', 'antennaBiasMa']) if (l.rx[k] !== undefined && !inRange(l.rx[k], 0, 1000)) errors.push(`${p}.rx.${k} must be between 0 and 1000`);
       if (l.rx.squelch !== undefined) { // optional on load; migrateScene fills it in
         const q = l.rx.squelch;
         if (!isObj(q) || typeof q.enabled !== 'boolean' || !inRange(q.thresholdDbm, -SL.maxDb, SL.maxDb) || !isDbPos(q.hysteresisDb)) {
@@ -568,12 +742,31 @@ export function validateScene(scene) {
   return { ok: errors.length === 0, errors };
 }
 
+/** See migrateScene: copy environment.polarisation onto antennas without one, then drop it. Exported for tests. */
+export function migrateAntennaPolarisation(s) {
+  const env = isObj(s.environment) ? s.environment : null;
+  const legacy = env && POLARISATIONS.includes(env.polarisation) ? env.polarisation : 'vertical';
+  const fill = (a) => {
+    if (!isObj(a) || a.polarisation !== undefined) return;
+    a.polarisation = isCircularType(a.type) ? defaultPolarisation(a.type) : legacy;
+  };
+  if (Array.isArray(s.links)) for (const l of s.links) {
+    if (!isObj(l)) continue;
+    if (isObj(l.tx)) fill(l.tx.antenna);
+    if (isObj(l.rx)) { fill(l.rx.antenna); if (isObj(l.rx.diversity) && isObj(l.rx.diversity.antennaB)) fill(l.rx.diversity.antennaB.antenna); }
+    if (Array.isArray(l.branches)) for (const b of l.branches) if (isObj(b)) fill(b.antenna);
+  }
+  if (env) delete env.polarisation;
+}
+
 /** Migration hook: bring an older scene up to SCHEMA_VERSION. Unknown future versions throw. */
 export function migrateScene(raw) {
   if (!isObj(raw)) throw new Error('Scene must be an object');
   // cheap size guards before any per-item work (validateScene repeats them for scenes that do not come through here)
   if (Array.isArray(raw.links) && raw.links.length > SL.maxLinks) throw new Error(`Scene has more than ${SL.maxLinks} links`);
   if (Array.isArray(raw.zones) && raw.zones.length > SL.maxZones) throw new Error(`Scene has more than ${SL.maxZones} zones`);
+  if (Array.isArray(raw.overheadPanels) && raw.overheadPanels.length > CEILING_LIMITS.panelsMax) throw new Error(`Scene has more than ${CEILING_LIMITS.panelsMax} overhead panels`);
+  if (Array.isArray(raw.audience) && raw.audience.length > AUDIENCE_MAX) throw new Error(`Scene has more than ${AUDIENCE_MAX} audience areas`);
   if (Array.isArray(raw.platforms) && raw.platforms.length > PLATFORM_LIMITS.max) throw new Error(`Scene has more than ${PLATFORM_LIMITS.max} platforms`);
   const s = structuredClone(raw);
   if (s.version === undefined) s.version = 1; // pre-versioned files
@@ -643,6 +836,9 @@ export function migrateScene(raw) {
     if (!isNum(pl.rotationDeg)) delete pl.rotationDeg;
     else if (pl.rotationDeg < -180 || pl.rotationDeg > 180) { const w = ((((pl.rotationDeg + 180) % 360) + 360) % 360) - 180; pl.rotationDeg = w === -180 ? 180 : w; }
   }
+  // Polarisation is per antenna only: a legacy scene-level environment.polarisation is copied onto every link antenna that has none
+  // (Tx, Rx, diversity B, branches) and dropped; antennas still without one become 'vertical' (circular types 'rhcp').
+  migrateAntennaPolarisation(s);
   if (s.zones === undefined) s.zones = [];
   for (const z of s.zones) if (isObj(z) && z.passAreaFraction === undefined) z.passAreaFraction = DEFAULT_PASS_AREA_FRACTION;
   if (s.coverage === undefined) s.coverage = { mode: 'power' };

@@ -4,10 +4,11 @@
 import { setFont, haloText } from './util.js';
 import { SPEC_DB } from './mpx.js';
 import { dataConfig } from '../telemetryTracker.js';
+import { drawDistortionBadge, drawProductMarker } from './distortionDraw.js';
+import { resolveAudioBandwidthHz, audioBandLabel, monoCaption } from '../model/spectrum-views.js';
 
 const fin = (v) => typeof v === 'number' && Number.isFinite(v);
 
-export const MONO_CAPTION = 'Mono carries only the programme audio (0 to 15 kHz) plus a control tone. Stereo FM adds a 19 kHz pilot and a difference (L-R) signal around 38 kHz.';
 
 /** True when the MPX view shows the stereo multiplex (an IEM with MPX stereo on); every other link shows the mono baseband. */
 export function isStereoMpx(link) { return !!link && link.kind === 'iem' && !!(link.mpx && link.mpx.enabled); }
@@ -25,7 +26,9 @@ export function monoInputs(link, mst, r, t, nBins = 240, dcOverride = null) {
   if (cnrDb === null) cnrDb = 40;
   cnrDb = Math.min(70, Math.max(0, cnrDb));
   const khz = dc && fin(dc.subcarrierKHz) ? dc.subcarrierKHz : 57;
+  const abw = resolveAudioBandwidthHz({ link, kind: link.kind === 'iem' ? 'iem' : 'mic', stereo: false });
   return {
+    audioBandwidthHz: abw && fin(abw.hz) ? abw.hz : undefined,
     kind: link.kind === 'iem' ? 'iem' : 'mic', stereo: false, pilotLocked: true,
     dataConfig: dataOn ? { enabled: true, subcarrierKHz: khz, injectionFrac: dc && fin(dc.injectionFrac) ? dc.injectionFrac : undefined } : { enabled: false },
     cnrDb, nBins, fMaxKhz: Math.max(60, dataOn ? khz + 8 : 60), t, preEmphasisTauUs: 50,
@@ -35,7 +38,7 @@ export function monoInputs(link, mst, r, t, nBins = 240, dcOverride = null) {
 export function monoSummary(m, inp) {
   if (!m) return 'MPX baseband spectrum not available.';
   const who = inp.kind === 'iem' ? 'mono in-ear monitor' : 'microphone';
-  const parts = [`Baseband spectrum of a ${who} link, 0 to ${Math.round(inp.fMaxKhz)} kilohertz, simulated. Audio fills 0 to 15 kilohertz and the noise rises with frequency.`];
+  const parts = [`Baseband spectrum of a ${who} link, 0 to ${Math.round(inp.fMaxKhz)} kilohertz, simulated. Audio fills 0 to ${+((m.audioBandwidthHz || inp.audioBandwidthHz || 15000) / 1000).toFixed(1)} kilohertz and the noise rises with frequency.`];
   for (const k of m.markers) {
     const f = `${+k.freqKhz.toFixed(3)} kilohertz`;
     if (k.name === 'Stereo pilot') parts.push(k.present ? `Stereo pilot present at ${f}.` : `The ${f} stereo pilot position is empty: a mono link carries no pilot.`);
@@ -47,7 +50,7 @@ export function monoSummary(m, inp) {
 }
 
 export function monoNotes(m) {
-  return [MONO_CAPTION, 'Standard: the 19 kHz pilot of FM stereo. Assumed: a microphone tone-key subcarrier near 32.768 kHz, whose real frequency is not published. Programme audio and levels are simulated and illustrative.', ...(m ? m.notes : [])];
+  return [monoCaption(m && m.audioBandwidthHz ? m.audioBandwidthHz : 15000), 'Standard: the 19 kHz pilot of FM stereo. Assumed: a microphone tone-key subcarrier near 32.768 kHz, whose real frequency is not published. Programme audio and levels are simulated and illustrative.', ...(m ? m.notes : [])];
 }
 
 function nearestIdx(xs, v) { let k = -1, d = Infinity; for (let i = 0; i < xs.length; i++) { const e = Math.abs(xs[i] - v); if (e < d) { d = e; k = i; } } return k; }
@@ -90,7 +93,19 @@ export function drawMonoMpx(ctx, w, h, th, { m, inp, hoverX }) {
   ctx.save(); ctx.setLineDash([5, 3]); ctx.strokeStyle = th.fail; ctx.lineWidth = 1.4; ctx.beginPath();
   for (let i = 0; i < n; i++) { if (i) ctx.lineTo(X(m.freqKhz[i]), Y(m.noiseDb[i])); else ctx.moveTo(X(m.freqKhz[i]), Y(m.noiseDb[i])); }
   ctx.stroke(); ctx.restore();
-  haloText(ctx, th, w < 380 ? 'AUDIO' : 'AUDIO 0-15 kHz', (X(0.03) + X(15)) / 2, T - 6, { align: 'center', px: 11, weight: '600', color: th.ink });
+  const dd = inp.distortion && inp.distortion.active ? inp.distortion : null;
+  const prods = dd && Array.isArray(m.products) ? m.products : [];
+  for (const pr of prods) { const x = X(pr.freqKhz); if (x >= L && x <= L + pw) drawProductMarker(ctx, th, x, Y(pr.levelDb), `IM${pr.order}`); }
+  drawDistortionBadge(ctx, th, { L, T, pw, ph }, dd, prods.length ? '\u25B2 intermodulation products' : null);
+  const ceil = m.bands && m.bands.programme ? m.bands.programme[1] : 15;
+  if (m.bands && m.bands.gap) { // unused band between the audio ceiling and the control tone
+    const [g0, g1] = m.bands.gap, gx0 = X(g0), gx1 = X(g1);
+    if (gx1 - gx0 > 3) {
+      ctx.save(); ctx.setLineDash([2, 3]); ctx.strokeStyle = th.inkSoft; ctx.lineWidth = 1; ctx.strokeRect(gx0 + 0.5, T + 0.5, gx1 - gx0 - 1, ph - 1); ctx.restore();
+      if (gx1 - gx0 > 46) haloText(ctx, th, 'gap', (gx0 + gx1) / 2, T + ph - 6, { align: 'center', px: 11, color: th.inkSoft });
+    }
+  }
+  haloText(ctx, th, w < 380 ? 'AUDIO' : audioBandLabel(m.audioBandwidthHz || ceil * 1000), (X(0.03) + X(ceil)) / 2, T - 6, { align: 'center', px: 11, weight: '600', color: th.ink });
   // markers: present = solid, absent or assumed = dashed, always named
   for (const k of m.markers) {
     const x = X(k.freqKhz), absent = !k.present, assumed = k.status === 'assumed' || k.status === 'illustrative';

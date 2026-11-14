@@ -12,6 +12,9 @@ import { telemetry, dataConfig } from '../telemetryTracker.js';
 import { squelch } from '../squelchTracker.js';
 import { digitalConfig } from '../digitalTracker.js';
 import { mpxMessage, modeText, SPEC_DB } from './mpx.js';
+import { rxState } from '../rxTracker.js';
+import { distortMpxSpectrum, resolveAudioBandwidthHz } from '../model/spectrum-views.js';
+import { drawDistortionBadge, drawProductMarker, distortionAria } from './distortionDraw.js';
 import { drawMonoMpx, isStereoMpx, monoInputs, monoSummary, monoNotes } from './spectraMono.js';
 export { drawMonoMpx, isStereoMpx, monoInputs, monoSummary, monoNotes };
 
@@ -125,7 +128,8 @@ export function rfInputs(scene, link, r, t, nBins = 240) {
 export function audioInputs(link, mpxState, t, nBins = AUDIO_BINS) {
   const iem = !!link && link.kind === 'iem';
   const stereoOn = iem && !!(link.mpx && link.mpx.enabled) && !(mpxState && mpxState.mode === 'mono');
-  return { kind: iem ? 'iem' : 'mic', stereo: stereoOn, nBins, fMaxHz: 20000, t, preEmphasisTauUs: 50, deEmphasised: true };
+  const abw = resolveAudioBandwidthHz({ link, kind: iem ? 'iem' : 'mic', stereo: stereoOn });
+  return { audioBandwidthHz: abw && Number.isFinite(abw.hz) ? abw.hz : undefined, kind: iem ? 'iem' : 'mic', stereo: stereoOn, nBins, fMaxHz: 20000, t, preEmphasisTauUs: 50, deEmphasised: true };
 }
 
 export const audioSummary = (a, inp) => (a
@@ -143,6 +147,12 @@ export function rfSummary(s, inp) {
 export const mpxSummary = (st) => (st
   ? `MPX baseband spectrum 0 to 60 kilohertz. ${modeText(st)}, pilot ${st.pilotLocked ? 'locked' : 'lost'}, carrier to noise ${sgn(st.cnrDb)} dB.`
   : 'MPX baseband spectrum');
+
+/** Which view the MPX slot shows: the user's override ('mpx' | 'digital'), else digital links get the digital panel. Pure. */
+export function slotMode(link, override) {
+  if (override === 'mpx' || override === 'digital') return override;
+  return link && link.modulation && link.modulation.type === 'digital' ? 'digital' : 'mpx';
+}
 
 // ---- drawing -----------------------------------------------------------------------------------
 
@@ -217,6 +227,9 @@ export function drawAudio(ctx, w, h, th, a, inp, hoverX) {
   if (fin(a.floorDb)) curve(ctx, f, [audioAxis.min, audioAxis.max], [a.floorDb, a.floorDb], { stroke: th.fail, dash: [5, 3] });
   haloText(ctx, th, inp.kind === 'iem' ? (inp.stereo ? 'music, L and R' : 'music, mono') : 'voice', f.L + 4, f.T + 12, { px: 11, weight: '600', color: th.inkSoft });
   haloText(ctx, th, 'simulated', f.L + f.pw - 4, f.T + f.ph - 5, { align: 'right', px: 11, color: th.inkSoft });
+  const dd = inp.distortion && inp.distortion.active ? inp.distortion : null;
+  if (dd && Array.isArray(a.harmonics)) for (const hm of a.harmonics) { const x = f.X(audioAxis.toX(hm.freqHz)); if (x >= f.L && x <= f.L + f.pw) drawProductMarker(ctx, th, x, f.Y(hm.levelDb), `${hm.k}f`); }
+  drawDistortionBadge(ctx, th, f, dd, dd && a.harmonics && a.harmonics.length ? '\u25B2 harmonics of the loudest tone' : null);
   hoverMark(ctx, th, f, h, w, hoverX, xs, rs.db, (x) => { const hz = audioAxis.fromX(x); return `${hzText(hz)} (${bandLabel(nearestBand(hz))} band)`; }, (v) => `${v.toFixed(0)} dB`);
 }
 
@@ -246,12 +259,19 @@ export function drawRf(ctx, w, h, th, s, inp, hoverX) {
   curve(ctx, f, [xMin, xMax], [s.noiseDbm, s.noiseDbm], { stroke: th.fail, dash: [5, 3] });
   haloText(ctx, th, `noise in RBW ${sgn(s.noiseDbm, 0)} dBm`, f.L + f.pw - 4, f.Y(s.noiseDbm) - 4, { align: 'right', px: 11, color: th.fail });
   haloText(ctx, th, `rx ${sgn(inp.rxLevelDbm)} dBm  margin ${sgn(s.marginToNoiseDb)} dB  BW ${fin(s.bwKhz) ? Math.round(s.bwKhz) : '-'} kHz`, f.L + 4, f.T + 12, { px: 11, weight: '600' });
+  const dd = inp.distortion && inp.distortion.active ? inp.distortion : null;
+  if (dd && fin(s.noiseDesensedDbm)) {
+    curve(ctx, f, [xMin, xMax], [s.noiseDesensedDbm, s.noiseDesensedDbm], { stroke: th.warnText, dash: [2, 3] });
+    haloText(ctx, th, `desensed +${dd.desenseDb.toFixed(1)} dB`, f.L + 4, f.Y(s.noiseDesensedDbm) - 4, { px: 11, color: th.warnText });
+  }
+  if (dd && s.regrowth) for (const off of s.regrowth.offsetsKhz) { const i = nearestIndex(xs, off); if (i >= 0) drawProductMarker(ctx, th, f.X(xs[i]), f.Y(s.levelsDbm[i]), 'IM3'); }
+  drawDistortionBadge(ctx, th, f, dd, dd && s.regrowth ? '\u25B2 IM3 shoulders, dotted = desensed noise' : dd ? 'dotted = desensed noise' : null);
   if (s.clipsAtFilter) haloText(ctx, th, 'CLIPS AT FILTER', f.L + f.pw / 2, f.T + 26, { align: 'center', px: 12, weight: '700', color: th.warnText });
   hoverMark(ctx, th, f, h, w, hoverX, xs, s.levelsDbm, (v) => `${v > 0 ? '+' : ''}${v.toFixed(0)} kHz`, (v) => `${v.toFixed(1)} dBm`);
 }
 
 /** MPX baseband spectrum: the drawing code moved unchanged from the MPX panel (js/view/mpx.js). */
-export function drawMpx(ctx, w, h, th, { state, link, hoverX }) {
+export function drawMpx(ctx, w, h, th, { state, link, hoverX, dist = null }) {
   if (!state) return;
   const L = 34, R = 8, T = 22, B = 22;
   const pw = w - L - R, ph = h - T - B;
@@ -262,7 +282,14 @@ export function drawMpx(ctx, w, h, th, { state, link, hoverX }) {
   const tel = link && link.telemetry && link.telemetry.enabled ? telemetry.get(link.id) : null;
   const dataKHz = tel ? dataConfig(link).subcarrierKHz : null;
   const maxKHz = dataKHz != null ? Math.max(60, dataKHz + 8) : 60;
-  const s = mpxSpectrum(state, { points: Math.max(120, Math.round(pw)), maxKHz, ...(dataKHz != null ? { dataKHz, dataLocked: !!(tel.data && tel.data.locked) } : {}) });
+  let s = mpxSpectrum(state, { points: Math.max(120, Math.round(pw)), maxKHz, ...(dataKHz != null ? { dataKHz, dataLocked: !!(tel.data && tel.data.locked) } : {}) });
+  const dd = dist && dist.active ? dist : null;
+  let prods = [];
+  if (dd) {
+    const lines = [{ name: 'p', freqKhz: 19, levelDb: Number.isFinite(state.pilotLevelDb) ? state.pilotLevelDb : -20 }];
+    if (dataKHz != null) lines.push({ name: 'd', freqKhz: dataKHz, levelDb: Number.isFinite(s.dataLevelDb) ? s.dataLevelDb : -30 });
+    try { const r = distortMpxSpectrum({ freqKhz: s.freqKHz, levelDb: s.levelDb, noiseDb: s.noiseDb }, dd, lines); s = { ...s, levelDb: r.levelDb }; prods = r.products || []; } catch (e) { /* draw the undistorted spectrum */ }
+  }
   const blend = state.blend ?? 0;
   ctx.fillStyle = th.paper2; ctx.fillRect(L, T, pw, ph);
   // L-R region shading follows the blend
@@ -319,6 +346,8 @@ export function drawMpx(ctx, w, h, th, { state, link, hoverX }) {
     }
     haloText(ctx, th, `stray carrier${ifr.hasPilot ? ' + pilot' : ' (no pilot)'}  C/I ${cirDb >= 0 ? '+' : '−'}${Math.abs(cirDb).toFixed(1)} dB`, L + pw - 4, T + ph - 6, { align: 'right', px: 11, weight: '600', color: th.warnText });
   }
+  for (const pr of prods) { const x = X(pr.freqKhz); if (x >= L && x <= L + pw) drawProductMarker(ctx, th, x, Y(pr.levelDb), `IM${pr.order}`); }
+  drawDistortionBadge(ctx, th, { L, T, pw, ph }, dd, dd && prods.length ? '\u25B2 intermodulation products' : null);
   haloText(ctx, th, 'noise', X(Math.min(57, spanKHz - 3)), Y(s.noiseDb[s.noiseDb.length - 1]) - 4, { align: 'center', px: 11, color: th.fail });
   if (hoverX != null && hoverX >= L && hoverX <= L + pw) {
     const k = ((hoverX - L) / pw) * spanKHz, i = nearestIndex(s.freqKHz, k);
@@ -357,13 +386,15 @@ export function mountSpectra({ container, store, now = () => performance.now() }
     tabs.append(tab);
     const panel = el('section', 'spectrum-panel', null, { id: `spectra-panel-${sp.id}`, role: 'tabpanel', 'aria-labelledby': `spectra-tab-${sp.id}` });
     const title = el('h3', null, sp.label);
+    let titleRow = title;
+    if (sp.id === 'mpx') { titleRow = el('div', 'spectrum-title-row'); titleRow.append(title); }
     const canvas = el('canvas', 'spectrum-canvas', null, { role: 'img', 'aria-label': sp.label, tabindex: '0' });
     const sum = el('p', 'spectrum-sum', '', { role: 'status', 'aria-live': 'off' });
     const about = el('details', 'spectrum-about'); about.append(el('summary', null, 'About this spectrum'));
     const aboutBody = el('p', null, ''); about.append(aboutBody);
-    panel.append(title, canvas, sum, about);
+    panel.append(titleRow, canvas, sum, about);
     grid.append(panel);
-    panels[sp.id] = { tab, panel, canvas, sum, aboutBody, hover: null, lastText: '', host: null };
+    panels[sp.id] = { tab, panel, canvas, sum, aboutBody, title, titleRow, hover: null, lastText: '', host: null };
   }
   function syncTabs() {
     const tabbed = container.classList.contains('spectra-tabbed');
@@ -372,6 +403,44 @@ export function mountSpectra({ container, store, now = () => performance.now() }
       p.tab.setAttribute('aria-selected', String(on)); p.tab.tabIndex = on ? 0 : -1;
       p.panel.hidden = tabbed && !on;
     }
+  }
+
+  // ---- MPX slot: stereo readouts under the MPX spectrum, or the digital link panel (auto by link mode, with a tab to override) ----
+  let slotOverride = null;
+  try { const v = localStorage.getItem('rf-slot.v1'); if (v === 'mpx' || v === 'digital') slotOverride = v; } catch { /* storage unavailable */ }
+  const mp = panels.mpx;
+  const mpxEl = document.getElementById('mpx'), digEl = document.getElementById('digital');
+  const mpxWrap = el('div', 'slot-extra slot-mpx'), digWrap = el('div', 'slot-extra slot-digital');
+  const digNote = el('p', 'hint', 'This link is analogue FM, so the digital link panel has nothing to show. Switch the link to Digital in the toolbar.');
+  if (mpxEl) mpxWrap.append(mpxEl);
+  if (digEl) digWrap.append(digEl);
+  digWrap.append(digNote);
+  mp.canvas.after(mpxWrap); mpxWrap.after(digWrap);
+  const sw = el('span', 'slot-switch', null, { role: 'group', 'aria-label': 'View in this slot' });
+  const swBtns = {};
+  for (const [id, label] of [['auto', 'Auto'], ['mpx', 'MPX'], ['digital', 'Digital']]) {
+    const b = el('button', null, label, { type: 'button' });
+    b.addEventListener('click', () => { slotOverride = id === 'auto' ? null : id; try { if (slotOverride) localStorage.setItem('rf-slot.v1', slotOverride); else localStorage.removeItem('rf-slot.v1'); } catch { /* ignore */ } invalidateAll(); });
+    sw.append(b); swBtns[id] = b;
+  }
+  mp.titleRow.append(sw);
+  let slotShown = '';
+  function syncSlot() {
+    const { link } = ctxInfo();
+    const mode = slotMode(link, slotOverride);
+    const stereo = isStereoMpx(link);
+    const key = mode + '|' + stereo + '|' + slotOverride;
+    for (const [id, b] of Object.entries(swBtns)) b.setAttribute('aria-pressed', String(id === 'auto' ? slotOverride === null : slotOverride === id));
+    if (key === slotShown) { digNote.hidden = !(digEl && digEl.hidden); return; }
+    slotShown = key;
+    const dig = mode === 'digital';
+    mp.canvas.hidden = dig; mp.sum.hidden = dig; mp.panel.querySelector('.spectrum-about').hidden = dig;
+    mpxWrap.hidden = dig || !stereo; digWrap.hidden = !dig;
+    mp.title.textContent = dig ? 'Digital link' : 'MPX spectrum';
+    mp.tab.textContent = dig ? 'Digital link' : 'MPX spectrum';
+    digNote.hidden = !(digEl && digEl.hidden);
+    if (digEl) digEl.dispatchEvent(new Event('slotshown')); // lets the digital canvases re-measure
+    if (mp.host) mp.host.invalidate();
   }
 
   let model = null, mpxTracker = null;
@@ -391,19 +460,23 @@ export function mountSpectra({ container, store, now = () => performance.now() }
   function compute(id, w = 300) {
     const { scene, link, r, mst } = ctxInfo();
     let res = null;
+    let dist = null; // overload distortion of the selected link (receiver front end; no scene source for Tx limiter overdrive yet)
+    if (link && model && model.distortionFromLink) { try { const d = model.distortionFromLink({ overload: (rxState.get(link.id) || {}).overload }); if (d && d.active) dist = d; } catch (e) { console.warn(e); } }
     if (id === 'audio') {
-      if (link && model && model.audioSpectrum) { const inp = audioInputs(link, mst, t); let a = null; try { a = model.audioSpectrum(inp); } catch (e) { console.warn(e); } res = { a, inp }; }
+      if (link && model && model.audioSpectrum) { const inp = audioInputs(link, mst, t); if (dist) inp.distortion = dist; let a = null; try { a = model.audioSpectrum(inp); } catch (e) { console.warn(e); } res = { a, inp, dist }; }
     } else if (id === 'rf') {
       if (link && model && model.rfSpectrum) {
         const inp = rfInputs(scene, link, r, t, Math.max(120, Math.min(400, Math.round(w - 52))));
+        if (inp && dist) inp.distortion = dist;
         let s = null; if (inp) { try { s = model.rfSpectrum(inp); } catch (e) { console.warn(e); } }
-        res = { s, inp };
+        res = { s, inp, dist };
       }
-    } else if (link && isStereoMpx(link)) { if (mst) res = { st: mst, link }; }
+    } else if (link && isStereoMpx(link)) { if (mst) res = { st: mst, link, dist }; }
     else if (link && model && model.monoBasebandSpectrum) {
       const inp = monoInputs(link, mst, r, t, Math.max(120, Math.min(400, Math.round(w - 42))));
+      if (dist) inp.distortion = dist;
       let m = null; try { m = model.monoBasebandSpectrum(inp); } catch (e) { console.warn(e); }
-      res = { m, inp };
+      res = { m, inp, dist };
     }
     cache[id] = res;
     return { res, link, mst };
@@ -419,7 +492,7 @@ export function mountSpectra({ container, store, now = () => performance.now() }
         if (!res) note(ctx, w, h, th, link ? 'RF spectrum model not loaded.' : 'No link selected.'); else drawRf(ctx, w, h, th, res.s, res.inp || { carrierMHz: 0 }, hv);
       } else {
         if (!link) note(ctx, w, h, th, 'No link selected.');
-        else if (isStereoMpx(link)) { if (!mst) note(ctx, w, h, th, 'Waiting for the MPX model.'); else drawMpx(ctx, w, h, th, { state: mst, link, hoverX: hv }); }
+        else if (isStereoMpx(link)) { if (!mst) note(ctx, w, h, th, 'Waiting for the MPX model.'); else drawMpx(ctx, w, h, th, { state: mst, link, hoverX: hv, dist: res && res.dist }); }
         else if (!res || !res.m) note(ctx, w, h, th, 'MPX baseband model not loaded.');
         else drawMonoMpx(ctx, w, h, th, { m: res.m, inp: res.inp, hoverX: hv });
       }
@@ -427,12 +500,14 @@ export function mountSpectra({ container, store, now = () => performance.now() }
     };
   }
   function updateText() {
+    syncSlot();
     for (const sp of SPECTRA) if (panels[sp.id].panel.hidden) compute(sp.id);
     const c = cache;
+    const da = (x) => (x && x.dist ? ' ' + distortionAria(x.dist) : '');
     const texts = {
-      audio: c.audio && c.audio.a ? audioSummary(c.audio.a, c.audio.inp) : 'Audio spectrum not available.',
-      rf: c.rf && c.rf.inp ? rfSummary(c.rf.s, c.rf.inp) : 'RF spectrum not available.',
-      mpx: c.mpx ? (c.mpx.inp ? monoSummary(c.mpx.m, c.mpx.inp) : mpxSummary(c.mpx.st)) : 'MPX baseband spectrum not shown: no link selected.',
+      audio: c.audio && c.audio.a ? audioSummary(c.audio.a, c.audio.inp) + da(c.audio) : 'Audio spectrum not available.',
+      rf: c.rf && c.rf.inp ? rfSummary(c.rf.s, c.rf.inp) + da(c.rf) : 'RF spectrum not available.',
+      mpx: c.mpx ? (c.mpx.inp ? monoSummary(c.mpx.m, c.mpx.inp) : mpxSummary(c.mpx.st)) + da(c.mpx) : 'MPX baseband spectrum not shown: no link selected.',
     };
     const notes = {
       audio: ['Standard or illustrative: the signal is simulated, not real audio. Levels are illustrative.', 'Frequency is on a logarithmic axis because hearing works in ratios: each octave is a doubling of frequency (31.5, 63, 125 Hz and so on up to 16 kHz, the standard ISO octave band centres), so the low notes get as much room as the high ones.', ...((c.audio && c.audio.a && c.audio.a.notes) || [])],

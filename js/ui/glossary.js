@@ -7,6 +7,7 @@
 export const GLOSSARY = Object.freeze({
   RF: { full: 'Radio frequency', meaning: 'The radio signal itself, as opposed to the audio it carries.' },
   IEM: { full: 'In-ear monitor', meaning: 'A wireless system that sends the performer a personal mix to earphones.' },
+  P2P: { full: 'Point to point', meaning: 'A fixed link between two directional antennas, often hundreds of metres or kilometres apart, such as a wireless audio snake.' },
   Tx: { full: 'Transmitter', meaning: 'The device that sends the radio signal (the microphone, or the IEM base unit).' },
   Rx: { full: 'Receiver', meaning: 'The device that picks the radio signal up (the mic receiver, or the IEM bodypack).' },
   dB: { full: 'Decibel', meaning: 'A ratio on a log scale. +3 dB is double the power, +10 dB is ten times, -6 dB roughly halves the range.' },

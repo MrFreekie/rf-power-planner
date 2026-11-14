@@ -138,6 +138,24 @@ const cardioid = (floorDb) => (a) => Math.max(floorDb, 20 * Math.log10(Math.max(
 const bodyAz = (a) => -9 * (1 - Math.cos(a * DEG)) / 2;
 const bodyEl = (e) => -6 * Math.pow(Math.sin(e * DEG), 2);
 
+/**
+ * Quarter-wave whip ground-plane choices -> approximate gain (dBi). APPROX / ASSUMED: free cable (braid as ground, poor) -1,
+ * small case or body 1, rack panel about a quarter wave radius or more 3, large ground plane (ideal infinite plane 5.15 dBi) 5.
+ */
+export const GROUND_PLANE_GAIN_DBI = Object.freeze({ none: -1, body: 1, rack: 3, large: 5 });
+export const ANTENNA_POLARISATIONS = ['vertical', 'horizontal', 'slant45', 'rhcp', 'lhcp']; // per-antenna polarisation ids
+export const LINEAR_POLARISATIONS = Object.freeze(['vertical', 'horizontal', 'slant45']);
+export const CIRCULAR_POLARISATIONS = Object.freeze(['rhcp', 'lhcp']);
+export const GROUND_PLANE_LABELS = Object.freeze({
+  none: 'None (free cable)', body: 'Small case or body', rack: 'Rack panel', large: 'Large ground plane',
+});
+
+/** Antenna contact / dampness loss options (ASSUMED, approximate; see rf.bodyCouplingLossDb). */
+export const ANTENNA_CONTACT_LOSS_DB = Object.freeze({ free: 0, clothing: 2.5, skin: 6, cupped: 8 });
+export const ANTENNA_DAMPNESS_LOSS_DB = Object.freeze({ dry: 0, damp: 1, wet: 3 });
+export const ANTENNA_CONTACT_LABELS = Object.freeze({ free: 'Free (in air)', clothing: 'Over clothing', skin: 'Skin contact', cupped: 'Hand cupped over antenna' });
+export const ANTENNA_DAMPNESS_LABELS = Object.freeze({ dry: 'Dry', damp: 'Damp clothing', wet: 'Sweaty or wet' });
+
 export const ANTENNAS = {
   dipole: { name: 'Dipole (1/2 wave)', gainDbi: 2.15, patternFn: 'dipole',
     pattern: { azDb: table(flat), elDb: table(dipoleEl) } }, // gain: theory 2.15 dBi
@@ -157,12 +175,19 @@ export const ANTENNAS = {
   // Normal-mode/axial helical (IEM). approx; circular polarisation not modelled here
   helical: { name: 'Helical', gainDbi: 5, patternFn: 'helical',
     pattern: { azDb: table(lobe(80, 15)), elDb: table(lobe(80, 15)) } }, // approx
+  // Yagi-Uda directional antenna for fixed point-to-point links (about 10 dBi, HPBW about 55 degrees, F/B about 18 dB). ASSUMED class figures (flag U).
+  yagi: { name: 'Yagi (directional, point-to-point)', gainDbi: 10, patternFn: 'yagi', confidence: { gainDbi: 'U' },
+    pattern: { azDb: table(lobe(55, 18)), elDb: table(lobe(60, 18)) } },
   // Cardioid antenna / pickup pattern (approx, 3 dBi forward gain)
   cardioid: { name: 'Cardioid antenna', gainDbi: 3, patternFn: 'cardioid',
     pattern: { azDb: table(cardioid(-25)), elDb: table(lobe(120, 15)) } }, // approx
   // Body-worn bodypack or handheld mic: lossy, human body shadow (approx -3 dBi)
   body: { name: 'Body-worn / handheld (body loss)', gainDbi: -3, patternFn: 'body',
     pattern: { azDb: table(bodyAz), elDb: table(bodyEl) } }, // approx, see PHYSICS.md
+  // Circularly polarised passive directional helical (a Sennheiser A 5000-CP class antenna: circular, about 450-960 MHz, 8 dBi minimum).
+  // Figures recalled from public product literature, flag I (check the datasheet); no endorsement. Pattern approximate.
+  'helical-cp': { name: 'Helical, circular polarisation (directional)', gainDbi: 8, patternFn: 'helical', circular: true, bandMHz: [450, 960],
+    confidence: { gainDbi: 'I', bandMHz: 'I' }, pattern: { azDb: table(lobe(70, 20)), elDb: table(lobe(70, 20)) } },
   custom: { name: 'Custom (user gain, omni)', gainDbi: 0, patternFn: 'custom',
     pattern: { azDb: table(flat), elDb: table(flat) } },
 };
@@ -583,3 +608,10 @@ export function interferenceRiseDb(freqMHz, venue, opts = {}) {
   }
   return { riseDb: 10 * Math.log10(1 + iLin / dbPow(noiseDbm)), eventRiseDb: eventRise, hitProbability: 1 - hit, noiseDbm, wifiDbm, btDbm };
 }
+
+/** Antenna types that are circularly polarised (ANTENNAS[type].circular). */
+export const isCircularType = (type) => !!(ANTENNAS[type] && ANTENNAS[type].circular);
+/** Polarisations allowed on an antenna type, for the dropdown: circular types rhcp/lhcp, every other type vertical/horizontal/slant45. */
+export const allowedPolarisations = (type) => (isCircularType(type) ? CIRCULAR_POLARISATIONS : LINEAR_POLARISATIONS);
+/** Default polarisation of an antenna type: 'rhcp' for circular types, 'vertical' otherwise. */
+export const defaultPolarisation = (type) => (isCircularType(type) ? 'rhcp' : 'vertical');
