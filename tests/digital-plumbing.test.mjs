@@ -31,7 +31,7 @@ const iemScene = () => {
 test('modulation defaults: existing and new links are analog-fm; setModulation validates input', () => {
   const l = createDefaultLink('iem');
   assert.equal(l.modulation.type, 'analog-fm');
-  assert.deepEqual(l.modulation.digital, { preset: 'iem-ofdm-like-adaptive', fixedOrder: null, overrides: {} });
+  assert.deepEqual(l.modulation.digital, { preset: 'mic-qpsk-fixed', fixedOrder: null, overrides: {} });
   const { st, id } = rig(iemScene());
   setModulation(st, id, { type: 'digital', preset: 'wideband-adaptive', fixedOrder: 64 });
   assert.deepEqual(st.getScene().links[0].modulation, { type: 'digital', digital: { preset: 'wideband-adaptive', fixedOrder: 64, overrides: {} } });

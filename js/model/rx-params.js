@@ -18,7 +18,7 @@
 export const IM3_SLOPE = 3;                // dB of IM3 level per dB of input level (3:1)
 export const IIP3_MINUS_P1DB_DB = 9.6;     // approx, memoryless cubic nonlinearity
 
-export const RX_PRESETS = Object.freeze({
+const UHF_RX_PRESETS = Object.freeze({
   // Professional-grade true-diversity wireless microphone receiver with a filtered front end.
   'mic-receiver-typical': Object.freeze({
     id: 'mic-receiver-typical',
@@ -68,6 +68,27 @@ export const RX_PRESETS = Object.freeze({
     hotMarginDb: 10             // approx: "hot" warning starts this far below P1dB
   })
 });
+
+// Band receivers from library.js BAND_PROFILES (docs/PHYSICS-BANDS.md): sensitivity = -174 + 10 log10(B) + NF + required CNR (within 1 dB).
+// Overload figures are approx (a digital ISM-band receiver chip is less tolerant of strong signals than a filtered UHF mic receiver).
+// Their noise bandwidth is the preset's channelBwKhz: cascadeNoise uses it unless rx.channelBwKHz is set.
+const bandPreset = (id, label, sensitivityDbm, channelBwKhz, requiredCnrDb, noiseFigureDb, extra) => Object.freeze({
+  id, label, illustrative: true, sensitivityDbm, channelBwKhz, requiredCnrDb, noiseFigureDb, agcRangeDb: 55, overloadHysteresisDb: 3, hotMarginDb: 10, ...extra,
+});
+export const BAND_RX_PRESETS = Object.freeze({
+  'rx-vhf-typical': bandPreset('rx-vhf-typical', 'VHF receiver, typical (illustrative)', -91, 200, 23, 7, { p1dBDbm: -18, iip3Dbm: -8, maxInputDbm: -10 }),
+  'rx-2g4-typical': bandPreset('rx-2g4-typical', '2.4 GHz receiver, typical (illustrative)', -90, 2000, 14, 7, { p1dBDbm: -20, iip3Dbm: -10, maxInputDbm: -10 }),
+  'rx-5g8-typical': bandPreset('rx-5g8-typical', '5.8 GHz receiver, typical (illustrative)', -88, 2000, 14, 9, { p1dBDbm: -20, iip3Dbm: -10, maxInputDbm: -10 }),
+});
+export const RX_PRESETS = Object.freeze({ ...UHF_RX_PRESETS, ...BAND_RX_PRESETS });
+
+/** Suggested receiver preset id for a link kind at a carrier: VHF below 300 MHz, 2.4 / 5.8 GHz bands, else the UHF presets. */
+export function rxPresetForFreq(kind, freqMHz) {
+  if (freqMHz < 300) return 'rx-vhf-typical';
+  if (freqMHz >= 4000) return 'rx-5g8-typical';
+  if (freqMHz >= 2000) return 'rx-2g4-typical';
+  return kind === 'iem' ? 'iem-bodypack-typical' : 'mic-receiver-typical';
+}
 
 export const RX_DEFAULTS = RX_PRESETS['iem-bodypack-typical'];
 
@@ -148,6 +169,19 @@ export const CASCADE_TYPICAL = Object.freeze({
 // noise (about 1 to 3 dB) and local interference sources dominate. Near dimmers, LED walls and switch-mode supplies the
 // local noise can be 10 dB or more higher.
 export const EXTERNAL_NOISE_FIGURE_600MHZ_DB = Object.freeze({ quiet: 1, outdoor: 3, urban: 5, 'noisy-venue': 12 });
+
+// In-band interference floor rise (dB) at 2.4 / 5.8 GHz from other users of the licence-exempt band (Wi-Fi, Bluetooth, ...).
+// Noise-floor rise at a Wi-Fi channel centre per venue level, from docs/PHYSICS-BANDS.md (library.js INTERFERENCE_MODEL: average Wi-Fi + Bluetooth
+// power in the receiver channel against its noise floor, rise = 10 log10(1 + I/N); approx). 5.8 GHz is quieter than 2.4 GHz (less Wi-Fi
+// airtime, no Bluetooth). Applies only at or above INTERFERENCE_MIN_MHZ; 'none' (or unset) = no rise, so older scenes keep their numbers.
+export const INTERFERENCE_LEVELS = Object.freeze(['none', 'quiet', 'typical', 'busy']);
+export const INTERFERENCE_RISE_DB = Object.freeze({
+  '2g4': Object.freeze({ none: 0, quiet: 2, typical: 9, busy: 20 }),
+  '5g8': Object.freeze({ none: 0, quiet: 0.6, typical: 4, busy: 12 }),
+});
+/** Interference band key of a carrier: '2g4' below 4 GHz, else '5g8'. */
+export const interferenceBandOf = (freqMHz) => (freqMHz < 4000 ? '2g4' : '5g8');
+export const INTERFERENCE_MIN_MHZ = 2000;
 
 /** Cascade noise figure in dB of ordered stages [{ gainDb, nfDb }] (signal-flow order). Empty list gives 0. */
 export function cascadeNfDb(stages) {

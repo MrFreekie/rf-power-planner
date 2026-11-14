@@ -11,6 +11,8 @@
 //  - Standard microwave texts (Pozar) for power splitters: ideal split loss 10 log10(N), insertion loss, isolation.
 //  - Coherence length of a modulated carrier: c / B (standard signal-theory relation).
 
+import { WALL_LOSS_BY_FREQ, wallLossDb as libraryWallLossDb } from './library.js';
+
 export const TRANSMISSION_REFERENCE_MHZ = 600;
 export const SPEED_OF_LIGHT_M_S = 299792458;
 
@@ -45,13 +47,29 @@ export const MATERIAL_TRANSMISSION = Object.freeze({
 // dB at 600 MHz and the reference thickness, by material id (ids match MATERIALS in library.js, plus variants).
 export const TRANSMISSION_LOSS_DB = Object.freeze(Object.fromEntries(Object.entries(MATERIAL_TRANSMISSION).map(([id, r]) => [id, r.lossDb600])));
 
+/**
+ * Frequency scale factor of a wall's loss relative to 600 MHz (1 at 600 MHz). Materials in library.js WALL_LOSS_BY_FREQ (points at
+ * 200, 600, 900, 2400, 5800 MHz, log-frequency interpolation, flat outside) use the ratio of the library values, whose equivalent
+ * exponents are 0.2-0.45 (a single 0.4-0.7 power law over-predicted at 5.8 GHz: 0.1 m concrete 31 dB, library 21 dB). Others
+ * use the row's freqExponent.
+ */
+export function wallFreqScale(id, freqMHz) {
+  const r = MATERIAL_TRANSMISSION[id];
+  if (!r) return 1;
+  if (WALL_LOSS_BY_FREQ[id]) {
+    const ref = libraryWallLossDb(id, TRANSMISSION_REFERENCE_MHZ);
+    return ref > 0 ? libraryWallLossDb(id, freqMHz) / ref : 1;
+  }
+  return Math.pow(freqMHz / TRANSMISSION_REFERENCE_MHZ, r.freqExponent);
+}
+
 /** Through-wall loss in dB for material id, thickness in m (default: reference thickness) and frequency in MHz. */
 export function transmissionLossDb(id, thicknessM, freqMHz = TRANSMISSION_REFERENCE_MHZ) {
   const r = MATERIAL_TRANSMISSION[id];
   if (!r) return 0;
   const t = Number.isFinite(thicknessM) && thicknessM >= 0 ? thicknessM : r.refThicknessM;
   const f = Number.isFinite(freqMHz) && freqMHz > 0 ? freqMHz : TRANSMISSION_REFERENCE_MHZ;
-  return (r.interfaceDb + r.absorptionDbPerM * t) * Math.pow(f / TRANSMISSION_REFERENCE_MHZ, r.freqExponent);
+  return (r.interfaceDb + r.absorptionDbPerM * t) * wallFreqScale(id, f);
 }
 
 // Crowd as a fading allowance (dB) for body-worn receivers in or behind an audience. Not a wall.

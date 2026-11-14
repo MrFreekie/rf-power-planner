@@ -1,7 +1,10 @@
 // Frequency Coordination panel. Pure helpers (describeResult, applyToScene, parseChannels) plus mountCoordination().
 // The generator itself is js/model/coordination.js (maths) with js/model/bands.js (region presets).
 import { coordinateFrequencies } from '../model/coordination.js';
-import { REGIONS, REGION_IDS, tvChannelsToBlocked, BANDS_DISCLAIMER } from '../model/bands.js';
+import {
+  REGIONS, REGION_IDS, tvChannelsToBlocked, BANDS_DISCLAIMER, BAND_GROUPS, BAND_GROUP_IDS, rangeGroup, WIFI_CHANNELS, BAND_III, DAB_BLOCKS,
+  bandIIIChannelsToBlocked, dabBlocksToBlocked,
+} from '../model/bands.js';
 
 export const LIMITS = Object.freeze({ maxPerKind: 16, maxTotal: 24 });
 
@@ -15,6 +18,25 @@ export function parseChannels(text) {
   }
   return out;
 }
+
+/** Parse "5A, 9c 10B" into valid DAB block ids (upper case) and the ignored words. */
+export function parseDabBlocks(text) {
+  const valid = [], ignored = [];
+  for (const t of String(text ?? '').split(/[\s,;]+/)) {
+    if (!t) continue;
+    const id = t.toUpperCase();
+    if (Object.prototype.hasOwnProperty.call(DAB_BLOCKS, id)) { if (!valid.includes(id)) valid.push(id); } else ignored.push(t);
+  }
+  return { valid, ignored };
+}
+
+export const isHopping = (group) => !!(BAND_GROUPS[group] && BAND_GROUPS[group].hopping);
+
+/** Ranges of a region that belong to a band group. */
+export const rangesFor = (regionId, group) => ((REGIONS[regionId] && REGIONS[regionId].ranges) || []).filter((r) => rangeGroup(r) === group);
+
+/** Band III TV channels the region defines: { first, last } or null. */
+export const bandIIIFor = (regionId) => (BAND_III[regionId] ? { first: BAND_III[regionId].firstChannel, last: BAND_III[regionId].lastChannel } : null);
 
 /** Clamp the requested counts: integers 0..maxPerKind each and maxTotal in all. */
 export function clampCounts(mics, iems) {
@@ -68,13 +90,52 @@ export function applyToScene(scene, result) {
   return { applied, unassigned: [...queues.mic, ...queues.iem] };
 }
 
-export function runCoordination({ regionId, rangeId, mics, iems, tvChannels, seed }) {
+/** Wi-Fi channel numbers valid for a hopping group, from free text. */
+export function parseWifiChannels(text, group) {
+  const plan = WIFI_CHANNELS[group];
+  if (!plan) return [];
+  const known = new Set(plan.channels.map((c) => c.channel));
+  const out = [];
+  for (const t of String(text ?? '').split(/[\s,;]+/)) {
+    const n = /^\d{1,3}$/.test(t) ? Number(t) : NaN;
+    if (known.has(n) && !out.includes(n)) out.push(n);
+  }
+  return out;
+}
+
+/** Chips for the Wi-Fi channel strip and the summary lines of an occupancy result. */
+export function describeOccupancy(result) {
+  const o = result && result.occupancy;
+  if (!o) return null;
+  const pct = Math.round((o.occupiedFraction || 0) * 100);
+  const lines = [
+    `${pct} percent of the ${o.band.spanMHz} MHz band is covered by Wi-Fi channels in use; ${Math.round(o.freeMHz * 10) / 10} MHz is free, in a largest free block of ${Math.round(o.largestFreeMHz * 10) / 10} MHz.`,
+  ];
+  if (Number.isFinite(o.perSystemFreeMHz)) lines.push(`With ${o.systems} hopping system${o.systems === 1 ? '' : 's'} sharing it, about ${Math.round(o.perSystemFreeMHz * 10) / 10} MHz of free spectrum each.`);
+  if (o.nonOverlapping && o.nonOverlapping.length) lines.push(`Wi-Fi channels that do not overlap each other: ${o.nonOverlapping.join(', ')}.`);
+  return { chips: o.wifi.map((w) => ({ channel: w.channel, centerMHz: w.centerMHz, inUse: !!w.inUse })), lines, links: o.links || [] };
+}
+
+export function runCoordination({ regionId, rangeId, mics, iems, tvChannels, seed, bandGroup = 'uhf', bandIII, dabBlocks, wifiChannels }) {
   const c = clampCounts(mics, iems);
-  const req = { regionId, mics: c.mics, iems: c.iems, seed };
+  const req = { regionId, mics: c.mics, iems: c.iems, seed, bandGroup };
   if (rangeId) req.rangeIds = [rangeId];
   const ch = parseChannels(tvChannels);
-  if (ch.length) req.blocked = tvChannelsToBlocked(regionId, ch);
-  return { result: coordinateFrequencies(req), counts: c, channels: ch };
+  const blocked = [];
+  const notes = [];
+  if (bandGroup === 'uhf' && ch.length) blocked.push(...tvChannelsToBlocked(regionId, ch));
+  let b3 = [], dab = [];
+  if (bandGroup === 'vhf') {
+    b3 = parseChannels(bandIII);
+    const parsed = parseDabBlocks(dabBlocks);
+    dab = parsed.valid;
+    if (parsed.ignored.length) notes.push(`Ignored unknown DAB block${parsed.ignored.length > 1 ? 's' : ''}: ${parsed.ignored.join(', ')}.`);
+    blocked.push(...bandIIIChannelsToBlocked(regionId, b3), ...dabBlocksToBlocked(dab));
+  }
+  if (blocked.length) req.blocked = blocked;
+  let wifi = [];
+  if (isHopping(bandGroup)) { wifi = parseWifiChannels(wifiChannels, bandGroup); req.wifiChannels = wifi; }
+  return { result: coordinateFrequencies(req), counts: c, channels: bandGroup === 'uhf' ? ch : bandGroup === 'vhf' ? b3 : wifi, dab, wifi, bandGroup, notes };
 }
 
 /** mountCoordination({ container, store }) - container is a <details>. */
@@ -89,30 +150,51 @@ export function mountCoordination({ container, store }) {
   const el = (tag, props = {}, ...kids) => { const e = document.createElement(tag); Object.assign(e, props); e.append(...kids); return e; };
   const field = (label, control, title) => { const l = el('label', { className: 'ob-field', title: title || '' }, label + ' ', control); return l; };
 
-  const intro = el('p', { className: 'hint', textContent: 'Picks carrier frequencies for several microphones and IEMs so that third-order intermodulation products (2f1-f2, f1+f2-f3) do not land on a channel in use. Planning estimate only: check local licensing and the TV channels in use at the venue.' });
+  const intro = el('p', { className: 'hint', textContent: 'Picks carrier frequencies for several microphones and IEMs so that third-order intermodulation products (2f1-f2, f1+f2-f3) do not land on a channel in use (VHF and UHF). The 2.4 and 5.8 GHz bands are different: those systems hop between channels on their own, so no frequencies are assigned and you get a channel occupancy and Wi-Fi overlap report instead. Planning estimate only: check local licensing and what is on air at the venue.' });
   const region = el('select', { id: 'coord-region' });
   for (const id of REGION_IDS) region.append(el('option', { value: id, textContent: REGIONS[id].name }));
+  const group = el('select', { id: 'coord-group' });
+  for (const id of BAND_GROUP_IDS) group.append(el('option', { value: id, textContent: BAND_GROUPS[id].name + (BAND_GROUPS[id].hopping ? ' (hopping)' : '') }));
+  group.value = 'uhf';
   const range = el('select', { id: 'coord-range' });
   const fillRanges = () => {
     range.textContent = '';
     range.append(el('option', { value: '', textContent: 'All bands' }));
-    for (const r of REGIONS[region.value].ranges) range.append(el('option', { value: r.id, textContent: `${r.fromMHz}-${r.toMHz} MHz` }));
+    for (const r of rangesFor(region.value, group.value)) range.append(el('option', { value: r.id, textContent: `${r.fromMHz}-${r.toMHz} MHz` }));
+    const b3 = bandIIIFor(region.value);
+    b3in.placeholder = b3 ? `Band III ${b3.first}-${b3.last}, e.g. ${b3.first + 1}, ${b3.first + 4}` : 'none for this region';
   };
-  region.addEventListener('change', fillRanges);
-  fillRanges();
   const mics = el('input', { id: 'coord-mics', type: 'number', min: 0, max: LIMITS.maxPerKind, step: 1, value: 4 });
   const iems = el('input', { id: 'coord-iems', type: 'number', min: 0, max: LIMITS.maxPerKind, step: 1, value: 2 });
   const tv = el('input', { id: 'coord-tv', type: 'text', placeholder: 'e.g. 24, 27', size: 10 });
+  const b3in = el('input', { id: 'coord-b3', type: 'text', size: 14 });
+  const dabin = el('input', { id: 'coord-dab', type: 'text', placeholder: 'e.g. 5A, 9C', size: 10 });
+  const wifiin = el('input', { id: 'coord-wifi', type: 'text', placeholder: 'e.g. 1, 6, 11', size: 10 });
+  const tvF = field('TV channels in use', tv, 'Local TV channel numbers to avoid, separated by commas');
+  const b3F = field('Band III TV channels in use', b3in, 'VHF TV channels at the venue to avoid, separated by commas');
+  const dabF = field('DAB blocks in use', dabin, 'DAB digital radio blocks at the venue to avoid, e.g. 5A, 9C');
+  const wifiF = field('Wi-Fi channels in use', wifiin, 'Wi-Fi channel numbers seen at the venue, separated by commas');
+  const syncGroup = () => {
+    const g = group.value;
+    tvF.hidden = g !== 'uhf'; b3F.hidden = dabF.hidden = g !== 'vhf'; wifiF.hidden = !isHopping(g);
+    gen.textContent = isHopping(g) ? 'Check occupancy' : 'Generate';
+    gen.title = isHopping(g) ? 'Report Wi-Fi channel occupancy in this band' : 'Find an intermod-free set of frequencies';
+    fillRanges();
+  };
   const form = el('form', { className: 'ob-row' },
     field('Region', region, 'Band preset with approximate power limits'),
+    field('Band group', group, 'VHF, UHF, 2.4 GHz or 5.8 GHz. 2.4 and 5.8 GHz systems hop, so they get an occupancy report instead of assigned frequencies'),
     field('Band', range, 'Limit the search to one band of the region'),
     field('Mics', mics, 'Number of microphone transmitters'),
     field('IEMs', iems, 'Number of in-ear-monitor transmitters'),
-    field('TV channels in use', tv, 'Local TV channel numbers to avoid, separated by commas'));
+    tvF, b3F, dabF, wifiF);
   const gen = el('button', { type: 'submit', id: 'coord-generate', textContent: 'Generate', title: 'Find an intermod-free set of frequencies' });
   const again = el('button', { type: 'button', id: 'coord-again', textContent: 'Try another set', title: 'Search again with a different seed', disabled: true });
   const apply = el('button', { type: 'button', id: 'coord-apply', textContent: 'Apply to scene', title: 'Write these frequencies to the transmitters in the scene (one Undo step)', disabled: true });
   form.append(gen, again, apply);
+  region.addEventListener('change', fillRanges);
+  group.addEventListener('change', syncGroup);
+  syncGroup();
   const status = el('p', { className: 'hint', role: 'status' });
   const out = el('div', { className: 'ob-coord-out' });
   const disclaimer = el('p', { className: 'hint', textContent: BANDS_DISCLAIMER });
@@ -124,8 +206,31 @@ export function mountCoordination({ container, store }) {
     out.textContent = '';
     const r = run.result;
     last = r;
-    apply.disabled = !r.frequencies.some((f) => f.freqMHz !== null);
+    const occ = r.mode === 'occupancy';
+    apply.hidden = occ;
+    apply.disabled = occ || !r.frequencies.some((f) => f.freqMHz !== null);
+    again.hidden = occ;
     again.disabled = false;
+    if (occ) {
+      const d = describeOccupancy(r);
+      out.append(el('p', { className: 'ob-coord-sum', textContent: `${BAND_GROUPS[r.bandGroup].name}: channel occupancy (score ${r.score} of 100 = free share of the band)` }));
+      const strip = el('ul', { className: 'ob-wifi' });
+      strip.setAttribute('aria-label', 'Wi-Fi channels');
+      for (const c of d.chips) {
+        const li = el('li', { className: 'ob-wifi-ch', textContent: `${c.channel}${c.inUse ? ' \u25cf' : ''}` });
+        li.dataset.inUse = String(c.inUse);
+        li.title = `Wi-Fi channel ${c.channel}, centre ${c.centerMHz} MHz${c.inUse ? ', in use' : ', free'}`;
+        li.setAttribute('aria-label', li.title);
+        strip.append(li);
+      }
+      out.append(strip, el('p', { className: 'hint', textContent: 'Channels marked with a dot are in use. Each Wi-Fi channel is 20 MHz wide, so neighbouring channel numbers overlap.' }));
+      for (const line of d.lines) out.append(el('p', { className: 'hint', textContent: line }));
+      out.append(el('p', { className: 'hint', textContent: 'Hopping systems (digital mics and IEMs in this band) move between channels many times a second and avoid busy ones automatically, so there is no single frequency to apply to a transmitter. Use this to see how crowded the band is.' }));
+      const bad = d.links.filter((l) => l.overlapsInUse);
+      if (bad.length) out.append(el('p', { className: 'hint', textContent: `${bad.length} link${bad.length > 1 ? 's' : ''} in the scene sit${bad.length > 1 ? '' : 's'} on a Wi-Fi channel marked in use.` }));
+      for (const n of [...(r.notes || []), ...(run.notes || [])]) out.append(el('p', { className: 'hint', textContent: n }));
+      return;
+    }
     if (r.failure) {
       const msg = el('p', { className: 'hint', textContent: r.failure.message });
       msg.dataset.bad = 'true';
@@ -147,7 +252,7 @@ export function mountCoordination({ container, store }) {
       table.append(head, tb);
       out.append(table);
     }
-    for (const n of r.notes || []) out.append(el('p', { className: 'hint', textContent: n }));
+    for (const n of [...(r.notes || []), ...(run.notes || [])]) out.append(el('p', { className: 'hint', textContent: n }));
     if (run.counts.mics + run.counts.iems === 0) status.textContent = 'Set at least one microphone or IEM.';
   }
 
@@ -158,9 +263,10 @@ export function mountCoordination({ container, store }) {
     // let the "Searching" text paint before the (synchronous) search runs
     setTimeout(() => {
       try {
-        const run = runCoordination({ regionId: region.value, rangeId: range.value, mics: mics.value, iems: iems.value, tvChannels: tv.value, seed });
+        const run = runCoordination({ regionId: region.value, rangeId: range.value, mics: mics.value, iems: iems.value, tvChannels: tv.value, seed, bandGroup: group.value, bandIII: b3in.value, dabBlocks: dabin.value, wifiChannels: wifiin.value });
         show(run);
-        status.textContent = run.channels.length ? `Avoiding TV channel${run.channels.length > 1 ? 's' : ''} ${run.channels.join(', ')}.` : '';
+        const what = { uhf: 'TV channel', vhf: 'Band III TV channel', '2g4': 'Wi-Fi channel', '5g8': 'Wi-Fi channel' }[run.bandGroup];
+        status.textContent = run.channels.length ? `${isHopping(run.bandGroup) ? 'Marked in use' : 'Avoiding'}: ${what}${run.channels.length > 1 ? 's' : ''} ${run.channels.join(', ')}.` : '';
       } catch (err) {
         console.error(err);
         status.textContent = `Could not coordinate: ${err.message}`;

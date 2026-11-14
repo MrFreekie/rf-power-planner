@@ -5,7 +5,8 @@ import { berUncoded, constellation, digitalLinkState, amcStep, postFecBer } from
 
 const L = (x) => 10 * Math.log10(x);
 const orders = [2, 4, 16, 64, 256];
-const ids = ['iem-ofdm-like-adaptive', 'mic-qpsk-fixed', 'wideband-adaptive'];
+// The default (first) preset is fixed QPSK, the assumed typical constellation; the higher-order QAM presets are illustrative.
+const ids = ['mic-qpsk-fixed', 'iem-ofdm-like-adaptive', 'wideband-adaptive'];
 
 test('modulation table and constellation sanity', () => {
   for (const o of orders) {
@@ -62,6 +63,10 @@ test('FEC cliff: sharp within a few dB, floor and monotonic', () => {
 test('presets: structure and threshold ordering', () => {
   assert.deepEqual(Object.keys(DIGITAL_PRESETS), ids);
   assert.equal(DIGITAL_DEFAULTS, DIGITAL_PRESETS[ids[0]]);
+  assert.equal(DIGITAL_DEFAULTS.fixedOrder, 4);
+  assert.deepEqual([...DIGITAL_DEFAULTS.allowedModulations], [4]);
+  assert.match(DIGITAL_DEFAULTS.label, /QPSK.*assumed typical/);
+  for (const id of ids.slice(1)) assert.match(DIGITAL_PRESETS[id].label, /illustrative, not typical of live-audio gear/);
   for (const id of ids) {
     const p = DIGITAL_PRESETS[id];
     assert.equal(p.id, id);

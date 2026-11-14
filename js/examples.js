@@ -28,6 +28,22 @@ function twoRay(scene, link) {
   link.rx.diversity.antennaB = { pos: { x: 11, y: 6.5, z: 1.4 }, antenna: null, chain: null, orientation: null }; // antenna null = same as antenna A, chain null = same cable run as A
 }
 
+
+/** Same stage, same 10 m link, same omni antennas and 5 m of RG58 on the receive side: only the carrier frequency differs. */
+function sameStage(scene, link, freqMHz) {
+  scene.environment.floor = 'wood';
+  scene.environment.polarisation = 'vertical';
+  link.freqMHz = freqMHz;
+  link.tx.antenna = omni();
+  link.rx.antenna = omni();
+  link.tx.pos = { x: 1, y: 4, z: 1.5 };
+  link.rx.pos = { x: 11, y: 4, z: 1.0 };
+  link.rx.diversity.antennaB.pos = { x: 11, y: 3.4, z: 1.0 };
+  link.chain = [createChainItem('cable', { cableType: 'rg58', lengthM: 5 })];
+}
+
+const SAME_STAGE_WALK = { to: { x: 1, y: 4, z: 1.5 }, speedMps: 0.8, pingPong: true };
+
 const ACROSS = { to: { x: 0.5, y: 6.5, z: 1.75 }, speedMps: 0.8, pingPong: true };
 
 function outdoorIem(scene, link) {
@@ -479,7 +495,7 @@ export const EXAMPLES = [
   {
     id: 'drum-riser',
     title: 'Drum riser on a stage: a stage on a stage',
-    note: 'A 1.2 m deck carries a 0.4 m drum riser, and the IEM bodypack is worn on the riser while the transmit antenna stands on the deck. Heights are measured from the local floor, so the bodypack is 1.0 m above the riser top. The floor bounce now reflects from the riser instead of the deck: that ray is about 14.6 dB weaker than over a bare deck (-41.6 dB against -26.9 dB relative to the direct ray), while the total level barely moves (-35.9 dBm against -36.1 dBm).',
+    note: 'A 1.2 m deck carries a 0.4 m drum riser, and the IEM bodypack is worn on the riser while the transmit antenna stands on the deck. Heights are measured from the local floor, so the bodypack is 1.0 m above the riser top. The floor bounce now reflects from the riser instead of the deck: that ray is about 16.3 dB weaker than over a bare deck (-43.2 dB against -27.0 dB relative to the direct ray), while the total level barely moves (-36.0 dBm against -36.1 dBm).',
     build: () => ({
       scene: make('iem', (s, l) => {
         s.stage = { width: 12, depth: 8, heightM: 1.2 };
@@ -510,6 +526,42 @@ export const EXAMPLES = [
         l.chain = [createChainItem('cable', { cableType: 'rg58', lengthM: 10 })];
         s.platforms = [createPlatform({ id: newId('plat'), name: 'Front-of-house riser', x: 4.5, y: 5.4, width: 3, depth: 0.6, topM: 2.9, material: 'wood' })];
       }),
+    }),
+  },
+  {
+    id: 'band-vhf',
+    title: 'Same stage at VHF (200 MHz)',
+    note: 'The same 10 m link, with the same omni antennas and 5 m of RG58, at 200 MHz. Free-space loss is 38.5 dB (effective 39.0 dB with the floor bounce) and the cable costs only 1.1 dB, so the margin is 68.9 dB. Compare the UHF and 2.4 GHz versions of this stage.',
+    build: () => ({ scene: make('mic', (s, l) => sameStage(s, l, 200)), walk: SAME_STAGE_WALK }),
+  },
+  {
+    id: 'band-uhf',
+    title: 'Same stage at UHF (600 MHz)',
+    note: 'The same link at 600 MHz: free-space loss rises to 48.0 dB (effective 46.0 dB) and the cable costs 2.1 dB, so the margin is 60.8 dB. Doubling the frequency twice more would add another 12 dB of free-space loss, with antennas of equal gain.',
+    build: () => ({ scene: make('mic', (s, l) => sameStage(s, l, 600)), walk: SAME_STAGE_WALK }),
+  },
+  {
+    id: 'band-2g4',
+    title: 'Same stage at 2.4 GHz',
+    note: 'The same link at 2.4 GHz: free-space loss is 60.1 dB (effective 58.4 dB), 21.6 dB more than at 200 MHz, and the cable costs 5.4 dB, so the margin is 45.2 dB. The shorter wavelength also makes the multipath pattern finer as the mic moves, and real 2.4 GHz systems often add antenna gain to recover some of the loss.',
+    build: () => ({ scene: make('mic', (s, l) => sameStage(s, l, 2400)), walk: SAME_STAGE_WALK }),
+  },
+  {
+    id: 'wifi-busy-2g4',
+    title: '2.4 GHz link in a busy Wi-Fi venue',
+    note: 'A 2.4 GHz link 104 m across a venue with busy Wi-Fi, 10 dB fade margin and a 10 dBm transmitter. Busy Wi-Fi raises the noise floor by about 20 dB at 2.4 GHz (to -87.6 dBm), which turns an 11.2 dB margin into -8.8 dB: a fail. At 5.8 GHz the same venue would add only about 12 dB. Set the interference option to None and the same link passes; the signal level has not changed, only the noise floor.',
+    build: () => ({
+      scene: make('mic', (s, l) => {
+        sameStage(s, l, 2400);
+        s.stage = { width: 120, depth: 24 };
+        l.tx.powerDbm = 10;
+        l.tx.pos = { x: 8, y: 12, z: 1.5 };
+        l.rx.pos = { x: 112, y: 12, z: 1.0 };
+        l.rx.diversity.antennaB.pos = { x: 112, y: 11.4, z: 1.0 };
+        s.environment.fadeMarginDb = 10;
+        s.environment.interference = 'busy';
+      }),
+      walk: { to: { x: 8, y: 12, z: 1.5 }, speedMps: 2, pingPong: true },
     }),
   },
 ];

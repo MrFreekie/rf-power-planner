@@ -64,7 +64,8 @@ test('wall transmission fallback table equals zones-params; thickness hook', asy
   for (const id of ['drywall', 'brick', 'concrete', 'glass', 'wood', 'drapes', 'metal', 'grass']) {
     const w = { material: id };
     near(wallTransmissionLossDb(w, 600), ZPm.MATERIAL_TRANSMISSION[id].lossDb600, 1e-9, id);
-    near(wallTransmissionLossDb(w, 900), ZPm.MATERIAL_TRANSMISSION[id].lossDb600 * Math.pow(1.5, ZPm.MATERIAL_TRANSMISSION[id].freqExponent), 1e-9, id);
+    const lib = await import('../js/model/library.js');
+    near(wallTransmissionLossDb(w, 900), lib.wallLossDb(id, 900), 1e-9, id); // library table value at 900 MHz
   }
   const base = wallTransmissionLossDb({ material: 'brick' }, 600);
   near(wallTransmissionLossDb({ material: 'brick', thicknessFactor: 2 }, 600), 2 * base, 1e-9);

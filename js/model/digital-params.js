@@ -80,28 +80,11 @@ function preset(p) {
 }
 
 export const DIGITAL_PRESETS = frozen({
-  // Multi-carrier-like link, adaptive between QPSK, 16-QAM and 64-QAM.
-  'iem-ofdm-like-adaptive': preset({
-    id: 'iem-ofdm-like-adaptive',
-    label: 'Digital IEM, OFDM-like adaptive (illustrative)',
-    channelBwKHz: 400,
-    symbolRateKSps: 300,
-    noiseFigureDb: 10,            // approx
-    code: '2/3',
-    allowedModulations: frozen([4, 16, 64]),
-    amcThresholdsDb: { 4: 8.2, 16: 14.6, 64: 20.2 }, // approx
-    amcHysteresisDb: 2,
-    implementationLossDb: 2.5,
-    fadeMarginDb: 1.5,
-    latencyMs: 2,                 // approx
-    concealment: frozen({ strategy: 'repeat-then-mute', frameMs: 1, repeatFrames: 30 }),
-    degradedFer: 1e-3,
-    concealFer: 0.05
-  }),
-  // Fixed QPSK, single-order link: simplest, no adaptation. Falls off a cliff.
+  // DEFAULT. Fixed QPSK (4-QAM): the assumed typical constellation for digital wireless mic / IEM links. Vendors do not publish
+  // theirs, so this is an assumption (QPSK is robust and common in narrow channels), not a measured fact. No adaptation: falls off a cliff.
   'mic-qpsk-fixed': preset({
     id: 'mic-qpsk-fixed',
-    label: 'Digital mic, fixed QPSK (illustrative)',
+    label: 'Digital mic / IEM, fixed QPSK (assumed typical constellation)',
     channelBwKHz: 200,
     symbolRateKSps: 150,          // roll-off about 0.33: Rs / B = 0.75
     noiseFigureDb: 8,             // approx
@@ -118,10 +101,28 @@ export const DIGITAL_PRESETS = frozen({
     degradedFer: 1e-3,
     concealFer: 0.05
   }),
-  // Wide channel with the full ladder down from 256-QAM.
+  // Multi-carrier-like link, adaptive between QPSK, 16-QAM and 64-QAM. Illustrative: higher-order QAM is not typical of live-audio gear.
+  'iem-ofdm-like-adaptive': preset({
+    id: 'iem-ofdm-like-adaptive',
+    label: 'Digital IEM, OFDM-like adaptive QPSK/16/64-QAM (illustrative, not typical of live-audio gear)',
+    channelBwKHz: 400,
+    symbolRateKSps: 300,
+    noiseFigureDb: 10,            // approx
+    code: '2/3',
+    allowedModulations: frozen([4, 16, 64]),
+    amcThresholdsDb: { 4: 8.2, 16: 14.6, 64: 20.2 }, // approx
+    amcHysteresisDb: 2,
+    implementationLossDb: 2.5,
+    fadeMarginDb: 1.5,
+    latencyMs: 2,                 // approx
+    concealment: frozen({ strategy: 'repeat-then-mute', frameMs: 1, repeatFrames: 30 }),
+    degradedFer: 1e-3,
+    concealFer: 0.05
+  }),
+  // Wide channel with the full ladder down from 256-QAM. Illustrative: not typical of live-audio gear.
   'wideband-adaptive': preset({
     id: 'wideband-adaptive',
-    label: 'Wideband adaptive (illustrative)',
+    label: 'Wideband adaptive up to 256-QAM (illustrative, not typical of live-audio gear)',
     channelBwKHz: 1000,
     symbolRateKSps: 800,
     noiseFigureDb: 8,             // approx
@@ -138,4 +139,5 @@ export const DIGITAL_PRESETS = frozen({
   })
 });
 
-export const DIGITAL_DEFAULTS = DIGITAL_PRESETS[Object.keys(DIGITAL_PRESETS)[0]]; // first preset: adaptive, so a merge never forces a fixed order
+export const DEFAULT_DIGITAL_PRESET = 'mic-qpsk-fixed';
+export const DIGITAL_DEFAULTS = DIGITAL_PRESETS[DEFAULT_DIGITAL_PRESET]; // fixed QPSK, the assumed typical constellation (its fixedOrder 4 is explicit in the preset)

@@ -21,6 +21,8 @@ import { registerSnapshot, makeSnapshotCanvas } from './snapshots.js';
 import { updatePlatform, movePoint, moveBranch, moveImdTransmitter, setAntennaBOrientation } from '../actions.js';
 import { effectiveAntennaB } from '../model/diversity.js';
 import { initA11y, announce } from './a11y.js';
+import { resizeFromCorner, rotationFromPointer } from './platformGeom.js';
+import { dispX, dispY, describePos } from '../ui/coords.js';
 
 const LOBE_STEP = 6; // degrees
 
@@ -48,7 +50,8 @@ export function createPlanView(canvas, store) {
     vp.fitRect(-1.0, -1.2, st.width + 1.0, st.depth + 1.8, w, h, 6);
     const { c, ctx } = makeSnapshotCanvas(w, h);
     const ripOn = rip.settings.on; rip.settings.on = false; // clean sheet: no animated rings in the print
-    try { draw(ctx, w, h, readTheme(canvas)); } finally { rip.settings.on = ripOn; vp.pxPerM = save.px; vp.origin.x = save.ox; vp.origin.y = save.oy; userView = save.user; handles = save.hs; }
+    isSnap = true;
+    try { draw(ctx, w, h, readTheme(canvas)); } finally { isSnap = false; rip.settings.on = ripOn; vp.pxPerM = save.px; vp.origin.x = save.ox; vp.origin.y = save.oy; userView = save.user; handles = save.hs; }
     return c;
   });
 
@@ -73,12 +76,14 @@ export function createPlanView(canvas, store) {
     });
   }
 
+  let isSnap = false;
   function draw(ctx, w, h, th) {
     const scene = store.getScene(), sel = store.getSelection();
     const st = scene.stage, link0 = activeLink(scene, sel);
     handles = [];
     ctx.fillStyle = th.paper; ctx.fillRect(0, 0, w, h);
-    drawGrid(ctx, vp, w, h, th, { xName: 'x (m)', yName: 'y (m)' });
+    // stage coordinates: x = 0 on the centre line, y = 0 on the front (audience-side) edge, y up the screen
+    drawGrid(ctx, vp, w, h, th, { xName: 'x (m, 0 = centre line)', yName: 'y (m, 0 = front edge)', xOrigin: st.width / 2, yOrigin: st.depth, yFlip: true });
 
     // stage floor
     const a = vp.worldToScreen(0, 0), b = vp.worldToScreen(st.width, st.depth);
@@ -86,7 +91,14 @@ export function createPlanView(canvas, store) {
     strokeHatchRect(ctx, a.x, a.y, b.x - a.x, b.y - a.y, th.hatch, 9);
     ctx.strokeStyle = th.ink; ctx.lineWidth = 1.6; ctx.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
     haloText(ctx, th, `STAGE ${fmtLen(st.width, scene.units)} × ${fmtLen(st.depth, scene.units)}${st.heightM > 0 ? `, deck ${fmtLen(st.heightM, scene.units)}` : ''}`, (a.x + b.x) / 2, a.y - 7, { align: 'center', color: th.inkSoft });
-    haloText(ctx, th, '▼ AUDIENCE (+y)', (a.x + b.x) / 2, b.y + 32, { align: 'center', color: th.inkSoft });
+    haloText(ctx, th, '▼ AUDIENCE (y < 0)', (a.x + b.x) / 2, b.y + 32, { align: 'center', color: th.inkSoft });
+    // origin markers: dashed centre line (x = 0) with a CL tag, and the front edge (y = 0) tag
+    { const cx = (a.x + b.x) / 2;
+      ctx.save(); ctx.setLineDash([8, 4, 2, 4]); ctx.strokeStyle = th.inkSoft; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(cx, a.y - 2); ctx.lineTo(cx, b.y + 7); ctx.stroke(); ctx.restore();
+      haloText(ctx, th, 'CL x=0', cx, b.y + 19, { align: 'center', color: th.ink, px: 11, weight: '600' });
+      if (w >= 420) haloText(ctx, th, 'FRONT EDGE y=0', a.x, b.y + 19, { align: 'left', color: th.ink, px: 11, weight: '600' });
+      else haloText(ctx, th, 'y=0', a.x, b.y + 19, { align: 'left', color: th.ink, px: 11, weight: '600' }); }
 
     // raised platforms above the stage fill, under everything else
     drawPlatforms(ctx, th, vp, scene, sel, handles, scene.units.length);
@@ -129,18 +141,19 @@ export function createPlanView(canvas, store) {
     // legend + scale
     drawScaleBar(ctx, vp, h, th);
     drawAxesLegend(ctx, th, w, h);
+    if (cursor && !isSnap) { const wp = vp.screenToWorld(cursor.x, cursor.y); haloText(ctx, th, `cursor  x ${fmtLen(dispX(scene, wp.x), scene.units)}  y ${fmtLen(dispY(scene, wp.y), scene.units)}`, w >= 520 ? w - 8 : w / 2, w >= 520 ? h - 8 : 30, { align: w >= 520 ? 'right' : 'center', color: th.ink, px: 12 }); }
 
     const rl = link0 ? solveCached(scene, link0) : null, selF = findItem(scene, sel);
-    const desc = `Plan view of a ${fmtLen(st.width, scene.units)} by ${fmtLen(st.depth, scene.units)} stage with ${scene.links.length} link(s) and ${(scene.reflectors || []).length} reflector(s). ${link0 && rl ? `${link0.name}: ${fmtLen(rl.distanceM, scene.units)}, ${rl.status.toUpperCase()}, margin ${fmtDb(rl.marginDb)}. ` : ''}Selected: ${selF ? `${selF.item.name}${selF.item.pos ? ` at x ${selF.item.pos.x.toFixed(2)}, y ${selF.item.pos.y.toFixed(2)}` : ''}` : 'none'}. Arrow keys move the selection, Shift for big steps, Alt+arrows or R rotate an antenna, [ and ] change the selection, plus and minus zoom, 0 fits the stage.`;
+    const desc = `Plan view of a ${fmtLen(st.width, scene.units)} by ${fmtLen(st.depth, scene.units)} stage. Coordinates: x is 0 at the centre line and grows to the right, y is 0 at the front edge and grows upstage, so the audience side is negative. The plan has ${scene.links.length} link(s) and ${(scene.reflectors || []).length} reflector(s). ${link0 && rl ? `${link0.name}: ${fmtLen(rl.distanceM, scene.units)}, ${rl.status.toUpperCase()}, margin ${fmtDb(rl.marginDb)}. ` : ''}Selected: ${selF ? `${selF.item.name}${selF.item.pos ? ` at ${describePos(scene, selF.item.pos)}` : ''}` : 'none'}. Arrow keys move the selection, Shift for big steps, Alt+arrows or R rotate an antenna, [ and ] change the selection, plus and minus zoom, 0 fits the stage.`;
     if (desc !== lastDesc) { lastDesc = desc; canvas.setAttribute('aria-description', desc); canvas.setAttribute('role', 'application'); canvas.setAttribute('aria-roledescription', 'interactive plan diagram'); }
   }
 
   function drawAxesLegend(ctx, th, w, h) {
-    const x = w - 60, y = h - 48; // x to the right, y down (toward the audience)
+    const x = w - 60, y = h - 22; // x to the right, y UP the screen (upstage, away from the audience)
     ctx.strokeStyle = th.inkSoft; ctx.lineWidth = 1.2;
-    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 26, y); ctx.moveTo(x, y); ctx.lineTo(x, y + 26); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 26, y); ctx.moveTo(x, y); ctx.lineTo(x, y - 26); ctx.stroke();
     haloText(ctx, th, 'x', x + 31, y + 4, { color: th.inkSoft, px: 11 });
-    haloText(ctx, th, 'y', x - 3, y + 40, { color: th.inkSoft, px: 11, align: 'right' });
+    haloText(ctx, th, 'y', x - 3, y - 30, { color: th.inkSoft, px: 11, align: 'right' });
   }
 
   function wallLabel(r) {
@@ -289,19 +302,27 @@ export function createPlanView(canvas, store) {
         const [a, b] = hd.seg, dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy || 1;
         const t = clamp(((sx - a.x) * dx + (sy - a.y) * dy) / l2, 0, 1);
         d = Math.hypot(sx - (a.x + t * dx), sy - (a.y + t * dy)) + 3; // slightly lower priority than point handles
-      } else if (hd.rect) { // platform body: inside the rectangle, lowest priority
-        d = sx >= hd.rect[0] && sx <= hd.rect[2] && sy >= hd.rect[1] && sy <= hd.rect[3] ? 30 : Infinity;
+      } else if (hd.poly) { // platform body: inside the (rotated) polygon, lowest priority
+        d = inPoly(hd.poly, sx, sy) ? 30 : Infinity;
       } else d = Math.hypot(sx - hd.sx, sy - hd.sy);
-      const lim = (hd.rect ? 30 : hd.seg ? 9 : hd.r) * k;
+      const lim = (hd.poly ? 30 : hd.seg ? 9 : hd.r) * k;
       if (d <= lim && d - (hd.pri ? 4 : 0) < bd) { best = hd; bd = d - (hd.pri ? 4 : 0); }
     }
     return best;
   }
 
+  function inPoly(poly, x, y) {
+    let c = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const a = poly[i], b = poly[j];
+      if ((a.y > y) !== (b.y > y) && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) c = !c;
+    }
+    return c;
+  }
   const bounds = (st) => ({ x0: -3, x1: st.width + 3, y0: -3, y1: st.depth + 10 });
   function dragStart(hd, w0) {
     const key = `plan-drag-${++dragCounter}`;
-    if (hd.kind === 'platBody' || hd.kind === 'platCorner') {
+    if (hd.kind === 'platBody' || hd.kind === 'platCorner' || hd.kind === 'platRot') {
       const pl = (store.getScene().platforms || []).find((q) => q.id === hd.itemId);
       return { key, plat: pl && { ...pl }, startPtr: w0 ? { x: w0.x, y: w0.y } : { x: hd.wx, y: hd.wy } };
     }
@@ -309,17 +330,19 @@ export function createPlanView(canvas, store) {
     return { key, p1: r && { ...r.p1 }, p2: r && { ...r.p2 }, startW: { x: hd.wx, y: hd.wy } };
   }
   function dragMove(hd, ptr, target, state) {
+    if (hd.kind === 'platRot' && state.plat) {
+      const deg = rotationFromPointer(state.plat, ptr, shiftDown ? 15 : 1);
+      updatePlatform(store, hd.itemId, { rotationDeg: deg }, { coalesce: state.key });
+      return;
+    }
     if ((hd.kind === 'platBody' || hd.kind === 'platCorner') && state.plat) {
       const snap = (v) => (shiftDown ? round2(v) : Math.round(v * 10) / 10);
       const P0 = state.plat;
       if (hd.kind === 'platBody') {
         updatePlatform(store, hd.itemId, { x: snap(P0.x + ptr.x - state.startPtr.x), y: snap(P0.y + ptr.y - state.startPtr.y) }, { coalesce: state.key });
       } else {
-        const cx = [P0.x, P0.x + P0.width, P0.x + P0.width, P0.x][hd.corner], cy = [P0.y, P0.y, P0.y + P0.depth, P0.y + P0.depth][hd.corner];
-        const fx = cx === P0.x ? P0.x + P0.width : P0.x, fy = cy === P0.y ? P0.y + P0.depth : P0.y; // the opposite corner stays put
-        const nx = snap(ptr.x), ny = snap(ptr.y);
-        const x0 = Math.min(fx, nx), x1 = Math.max(fx, nx), y0 = Math.min(fy, ny), y1 = Math.max(fy, ny);
-        updatePlatform(store, hd.itemId, { x: round2(x0), y: round2(y0), width: round2(Math.max(0.2, x1 - x0)), depth: round2(Math.max(0.2, y1 - y0)) }, { coalesce: state.key });
+        const r = resizeFromCorner(P0, hd.corner, { x: snap(ptr.x), y: snap(ptr.y) }, { minSize: 0.2 });
+        updatePlatform(store, hd.itemId, { x: round2(r.x), y: round2(r.y), width: round2(r.width), depth: round2(r.depth) }, { coalesce: state.key });
       }
       return;
     }
@@ -376,11 +399,19 @@ export function createPlanView(canvas, store) {
       else if (g.type === 'platform') { g.item.x = round2(g.item.x + dx * step); g.item.y = round2(g.item.y + dy * step); }
     }, { coalesce: `plan-nudge-${id}` });
     const g = findItem(store.getScene(), id);
-    if (g && g.item.pos) announce(`${g.item.name} at x ${g.item.pos.x.toFixed(2)} m, y ${g.item.pos.y.toFixed(2)} m`, { key: 'move', delay: 350 });
+    if (g && g.item.pos) announce(`${g.item.name} at ${describePos(store.getScene(), g.item.pos)}`, { key: 'move', delay: 350 });
   }
   function rotate(dAz, dEl, big) {
     const id = store.getSelection(); const f = findItem(store.getScene(), id);
     if (!f) { cycle(1); return; }
+    if (f.type === 'platform') {
+      if (!dAz) return;
+      const cur = Number.isFinite(f.item.rotationDeg) ? f.item.rotationDeg : 0;
+      updatePlatform(store, id, { rotationDeg: cur + dAz * (big ? 15 : 5) }, { coalesce: `plan-rot-${id}` });
+      const g2 = findItem(store.getScene(), id), r2 = Number.isFinite(g2.item.rotationDeg) ? g2.item.rotationDeg : 0;
+      announce(`${g2.item.name} rotated to ${Math.round(((r2 % 360) + 360) % 360)} degrees`, { key: 'rot', delay: 350 });
+      return;
+    }
     if (f.type !== 'tx' && f.type !== 'rx') return;
     if (!dAz) return;
     const step = big ? 15 : 5;
@@ -401,6 +432,11 @@ export function createPlanView(canvas, store) {
     onView: () => { userView = true; host.invalidate(); },
     fit, nudge, rotate, cycle, escape: () => store.select(null),
   });
+  // pointer readout in stage coordinates (hover and drag)
+  let cursor = null;
+  const onCurMove = (e) => { const r = canvas.getBoundingClientRect(); cursor = { x: e.clientX - r.left, y: e.clientY - r.top }; host.invalidate(); };
+  const onCurLeave = () => { cursor = null; host.invalidate(); };
+  canvas.addEventListener('pointermove', onCurMove); canvas.addEventListener('pointerleave', onCurLeave); canvas.addEventListener('pointercancel', onCurLeave);
   const unsubSq = squelch.subscribe(() => host.invalidate());
   const unsubRx = rxState.subscribe(() => host.invalidate());
   const unsubCov = coverage.subscribe(() => host.invalidate());
@@ -415,6 +451,6 @@ export function createPlanView(canvas, store) {
 
   return {
     viewport: vp, fit, invalidate: host.invalidate,
-    destroy() { window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKey); unregSnap(); detachRip(); detach(); unsub?.(); unsubSq?.(); unsubRx?.(); unsubCov?.(); unsubImd?.(); unsubView?.(); host.destroy(); },
+    destroy() { canvas.removeEventListener('pointermove', onCurMove); canvas.removeEventListener('pointerleave', onCurLeave); canvas.removeEventListener('pointercancel', onCurLeave); window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKey); unregSnap(); detachRip(); detach(); unsub?.(); unsubSq?.(); unsubRx?.(); unsubCov?.(); unsubImd?.(); unsubView?.(); host.destroy(); },
   };
 }

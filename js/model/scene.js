@@ -9,7 +9,7 @@ const POLARISATIONS = ['vertical', 'horizontal'];
 const LINK_KINDS = ['mic', 'iem'];
 const ANTENNA_TYPES = ['dipole', 'paddle', 'helical', 'cardioid', 'omni', 'logperiodic', 'body', 'custom'];
 const AUDIO_SOURCES = ['speech', 'tone', 'pink', 'stereo-demo', 'off'];
-export const RX_PRESET_IDS = ['mic-receiver-typical', 'iem-bodypack-typical', 'budget-receiver'];
+export const RX_PRESET_IDS = ['mic-receiver-typical', 'iem-bodypack-typical', 'budget-receiver', 'rx-vhf-typical', 'rx-2g4-typical', 'rx-5g8-typical'];
 export const DIVERSITY_MODES = ['switching', 'true', 'ratio'];
 export const defaultRxPreset = (kind) => (kind === 'iem' ? 'iem-bodypack-typical' : 'mic-receiver-typical');
 /**
@@ -23,15 +23,15 @@ export const defaultDiversity = (pos, _antennaA) => ({
 });
 import { MATERIAL_TRANSMISSION } from './zones-params.js';
 import { SURFACES, MATERIALS } from './library.js';
-import { EXTERNAL_NOISE_FIGURE_600MHZ_DB } from './rx-params.js';
+import { EXTERNAL_NOISE_FIGURE_600MHZ_DB, INTERFERENCE_LEVELS } from './rx-params.js';
 
 // Stage and platform limits. Item pos.z everywhere stays the height above the LOCAL floor (deck or platform top).
 export const STAGE_LIMITS = Object.freeze({ size: [0.5, 500], heightM: [0, 20] });
-export const PLATFORM_LIMITS = Object.freeze({ max: 50, size: [0.1, 500], coord: [-500, 1000], topM: [0.05, 30] });
+export const PLATFORM_LIMITS = Object.freeze({ max: 50, size: [0.1, 500], coord: [-500, 1000], topM: [0.05, 30], rotationDeg: [-180, 180] });
 /** Material ids a platform top may use: floor surfaces and wall materials of the library. */
 export const PLATFORM_MATERIALS = Object.freeze([...new Set([...Object.keys(SURFACES), ...Object.keys(MATERIALS)])]);
 
-/** A raised platform: an axis-aligned rectangle whose top surface is topM metres above the ground. */
+/** A raised platform: a rectangle whose top surface is topM metres above the ground. (x, y) = min corner of the UNROTATED box; optional rotationDeg (-180..180, azimuth convention, about the centre; unset = 0, see floor.js). */
 export function createPlatform(overrides = {}) {
   return { id: newId('plat'), name: 'Riser', x: 0, y: 0, width: 2, depth: 2, topM: 0.4, material: 'wood', ...overrides };
 }
@@ -54,7 +54,7 @@ export const defaultTelemetry = () => ({
 });
 export const defaultModulation = () => ({
   type: 'analog-fm',
-  digital: { preset: 'iem-ofdm-like-adaptive', fixedOrder: null, overrides: {} },
+  digital: { preset: 'mic-qpsk-fixed', fixedOrder: null, overrides: {} },
 });
 export const IMD_PRESET_IDS = ['mic-rack-typical', 'iem-combiner-no-isolation', 'iem-combiner-isolated', 'pim-corroded-connector'];
 export const IMD_COMBINER_TYPES = ['none', 'hybrid', 'isolated'];
@@ -293,6 +293,8 @@ export function validateScene(scene) {
     if (!isNum(env.bodyLossDb)) errors.push('environment.bodyLossDb must be a number');
     const xn = env.externalNoise;
     if (xn !== undefined && !(typeof xn === 'string' && Object.prototype.hasOwnProperty.call(EXTERNAL_NOISE_FIGURE_600MHZ_DB, xn)) && !(isNum(xn) && xn >= 0)) errors.push('environment.externalNoise must be a preset name or a number >= 0');
+    const itf = env.interference;
+    if (itf !== undefined && !(typeof itf === 'string' && INTERFERENCE_LEVELS.includes(itf))) errors.push(`environment.interference must be one of ${INTERFERENCE_LEVELS.join(', ')}`);
   }
   const ids = new Set();
   const checkId = (id, path) => {
@@ -312,6 +314,7 @@ export function validateScene(scene) {
       if (!isNum(pl.width) || pl.width < s0 || pl.width > s1 || !isNum(pl.depth) || pl.depth < s0 || pl.depth > s1) errors.push(`${p}.width and ${p}.depth must be between ${s0} and ${s1} m`);
       if (!isNum(pl.topM) || pl.topM < t0 || pl.topM > t1) errors.push(`${p}.topM must be between ${t0} and ${t1} m`);
       if (!PLATFORM_MATERIALS.includes(pl.material)) errors.push(`${p}.material invalid: ${pl.material}`);
+      if (pl.rotationDeg !== undefined && !(isNum(pl.rotationDeg) && pl.rotationDeg >= PLATFORM_LIMITS.rotationDeg[0] && pl.rotationDeg <= PLATFORM_LIMITS.rotationDeg[1])) errors.push(`${p}.rotationDeg must be a number between ${PLATFORM_LIMITS.rotationDeg[0]} and ${PLATFORM_LIMITS.rotationDeg[1]}`);
       if (pl.name !== undefined && typeof pl.name !== 'string') errors.push(`${p}.name must be a string`);
     });
   }
@@ -538,10 +541,18 @@ export function migrateScene(raw) {
       }
     }
   }
+  // environment.interference is optional: unset = 'none' (older scenes unchanged); null is treated as unset.
+  if (isObj(s.environment) && s.environment.interference === null) delete s.environment.interference;
   if (s.imd === undefined) s.imd = createDefaultImd();
   if (isObj(s.imd) && Array.isArray(s.imd.transmitters)) for (const t of s.imd.transmitters) if (isObj(t) && (typeof t.id !== 'string' || !t.id)) t.id = newId('imdtx');
   if (isObj(s.stage) && s.stage.heightM === undefined) s.stage.heightM = 0;
   if (s.platforms === undefined) s.platforms = [];
+  // platform rotationDeg is optional (unset = 0): null is dropped, a finite value is wrapped into (-180, 180], anything else dropped.
+  if (Array.isArray(s.platforms)) for (const pl of s.platforms) {
+    if (!isObj(pl) || pl.rotationDeg === undefined) continue;
+    if (!isNum(pl.rotationDeg)) delete pl.rotationDeg;
+    else if (pl.rotationDeg < -180 || pl.rotationDeg > 180) { const w = ((((pl.rotationDeg + 180) % 360) + 360) % 360) - 180; pl.rotationDeg = w === -180 ? 180 : w; }
+  }
   if (s.zones === undefined) s.zones = [];
   for (const z of s.zones) if (isObj(z) && z.passAreaFraction === undefined) z.passAreaFraction = DEFAULT_PASS_AREA_FRACTION;
   if (s.coverage === undefined) s.coverage = { mode: 'power' };

@@ -13,7 +13,8 @@ import { imd } from './imdTracker.js';
 import { buildShareLink, decodeScene, parseHash } from './share.js';
 import { buildReportData } from './reportData.js';
 import { DIGITAL_PRESETS } from './model/digital-params.js';
-import { startWalk, stopWalk, isWalking } from './walk.js';
+import { startWalk, startMultiWalk, stopWalk, isWalking } from './walk.js';
+import { planWalkAll } from './ui/walkall.js';
 import { downloadScene, loadSceneFromFile } from './io.js';
 import { squelch, history } from './squelchTracker.js';
 import { mpx } from './mpxTracker.js';
@@ -105,7 +106,23 @@ $('file-load').addEventListener('change', async (e) => {
   store.setScene(res.scene);
   store.select(null);
 });
-function renderWalk() { $('btn-walk').setAttribute('aria-pressed', String(isWalking())); $('btn-walk').textContent = isWalking() ? 'Stop walk' : 'Walk'; }
+let walkAll = false; // true while the running walk is the shared 'Walk all' one
+function renderWalk() {
+  if (!isWalking()) walkAll = false;
+  $('btn-walk').setAttribute('aria-pressed', String(isWalking() && !walkAll));
+  $('btn-walk').textContent = isWalking() ? 'Stop walk' : 'Walk';
+  $('btn-walk-all').setAttribute('aria-pressed', String(isWalking() && walkAll));
+  $('btn-walk-all').textContent = isWalking() && walkAll ? 'Stop all' : 'Walk all';
+}
+$('btn-walk-all').addEventListener('click', () => {
+  if (isWalking()) { stopWalk(); renderWalk(); return; }
+  const plan = planWalkAll(store.getScene());
+  const speed = parseFloat($('walk-speed').value);
+  const ctl = plan.items.length ? startMultiWalk(store, plan.items, { offset: plan.offset, speedMps: Number.isFinite(speed) && speed > 0 ? speed : undefined, onStop: renderWalk }) : null;
+  if (!ctl) { showStatus('Nothing to walk: there is no microphone link or Intermod transmitter.', 4000); return; }
+  walkAll = true;
+  renderWalk();
+});
 $('btn-walk').addEventListener('click', () => {
   if (isWalking()) { stopWalk(); return; }
   const speed = parseFloat($('walk-speed').value);

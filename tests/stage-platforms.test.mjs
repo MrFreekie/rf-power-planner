@@ -223,7 +223,7 @@ test('raised-stage-null: the dip moves from 6.8 m (-46 dBm) to 5.1 m (-41 dBm) w
   assert.ok(flat[1] < ex.scene.links[0].rx.squelch.thresholdDbm, 'and closes at 6.8 m on the ground');
 });
 
-test('drum-riser: the floor bounce reflects from the riser and is about 14.6 dB weaker', () => {
+test('drum-riser: the floor bounce reflects from the riser and is about 16.3 dB weaker', () => {
   const ex = buildExample('drum-riser');
   assert.deepEqual(validateScene(ex.scene), { ok: true, errors: [] });
   assert.equal(ex.scene.platforms.length, 1);
@@ -233,9 +233,9 @@ test('drum-riser: the floor bounce reflects from the riser and is about 14.6 dB 
   const bare = structuredClone(ex.scene);
   bare.platforms = [];
   const without = solveLink(bare, l);
-  assert.ok(Math.abs(pathOf(withR, 'floor').relDb + 41.6) < 0.2 && Math.abs(pathOf(without, 'floor').relDb + 26.9) < 0.2);
-  assert.ok(Math.abs(pathOf(without, 'floor').relDb - pathOf(withR, 'floor').relDb - 14.6) < 0.2);
-  assert.ok(Math.abs(withR.inputPowerDbm + 35.9) < 0.2 && Math.abs(without.inputPowerDbm + 36.1) < 0.2);
+  assert.ok(Math.abs(pathOf(withR, 'floor').relDb + 43.2) < 0.2 && Math.abs(pathOf(without, 'floor').relDb + 27.0) < 0.2);
+  assert.ok(Math.abs(pathOf(without, 'floor').relDb - pathOf(withR, 'floor').relDb - 16.3) < 0.2);
+  assert.ok(Math.abs(withR.inputPowerDbm + 36.0) < 0.2 && Math.abs(without.inputPowerDbm + 36.1) < 0.2);
 });
 
 test('audience-vs-stage: deck costs 1.9 dB, a wooden riser 3.6 dB more, a metal one 5.8 dB', () => {

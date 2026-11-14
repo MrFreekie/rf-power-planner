@@ -31,3 +31,40 @@ export function noiseOptions(stored, freqMHz) {
 }
 
 export const noiseHint = () => 'External RF noise (TV, radios, electronics) raises the noise floor at the receive antenna, so it lowers the SNR and margin. It is stronger at low frequencies and fades with frequency. Old scenes without this setting are treated as Off.';
+
+// ---- interference floor (2.4 / 5.8 GHz) and receiver preset offer ------------------------------------------------------------------
+import { INTERFERENCE_LEVELS, INTERFERENCE_RISE_DB, INTERFERENCE_MIN_MHZ, interferenceBandOf, RX_PRESETS, rxPresetForFreq } from '../model/rx-params.js';
+
+const LEVEL_LABELS = { none: 'None', quiet: 'Quiet', typical: 'Typical', busy: 'Busy' };
+const BAND_NAMES = { '2g4': '2.4 GHz', '5g8': '5.8 GHz' };
+const r1 = (v) => String(Math.round(v * 10) / 10);
+
+/** The interference select only applies at 2 GHz and above. */
+export const interferenceApplies = (freqMHz) => Number.isFinite(freqMHz) && freqMHz >= INTERFERENCE_MIN_MHZ;
+export const interferenceValue = (v) => (INTERFERENCE_LEVELS.includes(v) ? v : 'none');
+
+/** [[value, label]] for the Interference select; the labels carry the dB rise for the band of this carrier. */
+export function interferenceOptions(freqMHz) {
+  const band = interferenceBandOf(freqMHz);
+  return INTERFERENCE_LEVELS.map((id) => [id, `${LEVEL_LABELS[id]} (+${r1(INTERFERENCE_RISE_DB[band][id])} dB)`]);
+}
+
+/** One-line hint for the current choice. */
+export function interferenceHint(stored, freqMHz) {
+  if (!interferenceApplies(freqMHz)) return 'Only used for 2.4 and 5.8 GHz links.';
+  const band = interferenceBandOf(freqMHz), v = interferenceValue(stored);
+  const rise = INTERFERENCE_RISE_DB[band][v];
+  return `${BAND_NAMES[band]} band, ${LEVEL_LABELS[v].toLowerCase()}: the noise floor rises by about ${r1(rise)} dB (Wi-Fi and Bluetooth share this band), so the margin falls by the same amount. The signal level does not change.`;
+}
+
+/** Offer (never force) the matching receiver preset when the carrier moves to or from VHF, 2.4 GHz or 5.8 GHz. Returns { id, label, buttonText } or null. */
+export function rxPresetOffer(kind, freqMHz, currentId) {
+  if (!Number.isFinite(freqMHz) || freqMHz <= 0) return null;
+  const want = rxPresetForFreq(kind, freqMHz);
+  const cur = currentId || (kind === 'iem' ? 'iem-bodypack-typical' : 'mic-receiver-typical');
+  if (want === cur) return null;
+  const isBand = (id) => id.startsWith('rx-');
+  if (!isBand(want) && !isBand(cur)) return null; // UHF mic <-> IEM presets are the user's own choice
+  const name = { 'rx-vhf-typical': 'VHF', 'rx-2g4-typical': '2.4 GHz', 'rx-5g8-typical': '5.8 GHz' }[want] || 'UHF';
+  return { id: want, label: (RX_PRESETS[want] || {}).label || want, buttonText: `Use ${name} receiver preset`, text: `This carrier is in the ${name} range, but the receiver preset is "${(RX_PRESETS[cur] || {}).label || cur}".` };
+}

@@ -1,6 +1,7 @@
 // Coverage panel: heat-map toggles, combine mode, zone table (min / mean / % pass / worst point),
 // zone editing buttons and a suggestion list with Apply buttons. The overlay itself is drawn by plan.js.
 import { activeLink } from './util.js';
+import { dispX, dispY } from '../ui/coords.js';
 import { coverage } from '../coverageTracker.js';
 import { covView, setCovView } from './coverageUi.js';
 import { suggestFix } from '../model/coverage.js';
@@ -106,7 +107,7 @@ export function mountCoverage({ container, store }) {
       chip.dataset.state = st ? (st.pass ? 'open' : 'closed') : 'none'; res.append(chip);
       tr.append(el('td', null, z.name), el('td', 'num', st ? fmtDbm(st.minDbm) : '-'), el('td', 'num', st ? fmtDbm(st.meanDbm) : '-'),
         el('td', 'num', st ? `${Math.round(st.passFraction * 100)}%` : '-'),
-        el('td', null, st && st.worstPoint ? `${st.worstPoint.x.toFixed(1)}, ${st.worstPoint.y.toFixed(1)}` : '-'), res);
+        el('td', null, st && st.worstPoint ? `${dispX(scene, st.worstPoint.x).toFixed(1)}, ${dispY(scene, st.worstPoint.y).toFixed(1)}` : '-'), res);
       tbody.append(tr);
       if (st && !st.pass && link && link.kind === 'iem') {
         const tr2 = el('tr', 'cv-sugrow'); const td = el('td'); td.colSpan = 6;

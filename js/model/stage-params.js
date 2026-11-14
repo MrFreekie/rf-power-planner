@@ -64,6 +64,21 @@ export const PLATFORM_BODY = Object.freeze({
     id: 'concrete', label: 'Concrete podium', illustrative: true,
     interfaceDb: 2.5, absorptionDbPerM: 55, freqExponent: 0.6, maxLossDb: 60, faceMaterial: 'concrete',
     note: 'approx: matches MATERIAL_TRANSMISSION concrete in zones-params.js'
+  }),
+  brick: Object.freeze({
+    id: 'brick', label: 'Brick block', illustrative: true,
+    interfaceDb: 1.5, absorptionDbPerM: 35, freqExponent: 0.7, maxLossDb: 40, faceMaterial: 'brick',
+    note: 'approx: matches MATERIAL_TRANSMISSION brick in zones-params.js (5 dB at 0.1 m)'
+  }),
+  drywall: Object.freeze({
+    id: 'drywall', label: 'Plasterboard-clad frame', illustrative: true,
+    interfaceDb: 1, absorptionDbPerM: 20, freqExponent: 0.4, maxLossDb: 15, faceMaterial: 'drywall',
+    note: 'approx: board skins on a frame'
+  }),
+  drapes: Object.freeze({
+    id: 'drapes', label: 'Draped / skirted frame', illustrative: true,
+    interfaceDb: 1, absorptionDbPerM: 20, freqExponent: 0.3, maxLossDb: 6, faceMaterial: 'drapes',
+    note: 'approx: cloth skirt, little blocking'
   })
 });
 export const PLATFORM_BODY_DEFAULT = 'stage-deck-wood-frame';
@@ -123,7 +138,10 @@ export const SURFACE_PLATFORM_BODY = Object.freeze({
   glass: 'stage-deck-wood-frame',
   metal: 'steel-truss-deck',
   concrete: 'concrete',
-  grass: 'solid-riser'
+  grass: 'solid-riser',
+  brick: 'brick',
+  drywall: 'drywall',
+  drapes: 'drapes'
 });
 
 // Obstruction table by floor material in the form the floor model reads: interface loss and dB per metre of chord at 600 MHz.
@@ -135,5 +153,5 @@ export const PLATFORM_OBSTRUCTION = Object.freeze(Object.fromEntries(Object.entr
 // Riser-face reflector material by floor surface id, as an id of MATERIALS in the library. `carpet` is not a MATERIALS id
 // (it is a floor surface only); a carpeted or skirted face absorbs rather than reflects, so it maps to `drapes`.
 export const SURFACE_RISER_FACE_MATERIAL = Object.freeze({
-  wood: 'wood', carpet: 'drapes', glass: 'glass', metal: 'metal', concrete: 'concrete', grass: 'grass'
+  wood: 'wood', carpet: 'drapes', glass: 'glass', metal: 'metal', concrete: 'concrete', grass: 'grass', brick: 'brick', drywall: 'drywall', drapes: 'drapes'
 });

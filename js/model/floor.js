@@ -1,8 +1,15 @@
 // Stage deck height and raised platforms. Pure module (no DOM).
 //
 // scene.stage = { width, depth, heightM }   deck height above the venue ground (default 0), rectangle x 0..width, y 0..depth.
-// scene.platforms = [{ id, name, x, y, width, depth, topM, material }]   axis-aligned rectangles, topM = top surface height
+// scene.platforms = [{ id, name, x, y, width, depth, topM, material, rotationDeg? }]   rectangles, topM = top surface height
 //   ABOVE GROUND (may sit on the deck: stage 1.2 and a drum riser with topM 1.6).
+// ROTATION CONVENTION: (x, y) is the min-x / min-y CORNER of the UNROTATED box; the box spans x..x+width, y..y+depth. rotationDeg
+//   (optional, -180..180, unset = 0) rotates the rectangle about its CENTRE (x + width/2, y + depth/2), as an azimuth: 0 = +y,
+//   positive = clockwise seen from above (the antenna convention), so the box's +y side points at azimuth rotationDeg.
+//   A local direction (lx, ly) maps to the world direction (lx cos t + ly sin t, -lx sin t + ly cos t); the inverse
+//   (world -> local, used for every inside test, ray chord and face) is lx = dx cos t - dy sin t, ly = dx sin t + dy cos t,
+//   with (dx, dy) measured from the centre. Rotation 0 takes the original code path (no arithmetic on the numbers), so
+//   unrotated scenes give bit-identical results. The deck is never rotated.
 // Item positions (tx, rx, antennas, branches, imd transmitters, antennaB) keep pos.z = HEIGHT ABOVE THE LOCAL FLOOR.
 // Absolute height of an item = floorHeightAt(scene, x, y) + pos.z.
 
@@ -18,6 +25,30 @@ function inRect(x, y, x0, y0, w, d) {
   return x >= x0 - EPS && x <= x0 + w + EPS && y >= y0 - EPS && y <= y0 + d + EPS;
 }
 
+/** Rotation of a platform in degrees (finite number, else 0). */
+export const platformRotationDeg = (p) => (p && Number.isFinite(p.rotationDeg) ? p.rotationDeg : 0);
+
+/** World -> local frame of a rotated rectangle: { x, y } measured from the unrotated corner. Rotation 0 returns the point unchanged. */
+function toLocal(rot, cx, cy, x, y) {
+  if (!rot) return { x, y };
+  const t = (rot * Math.PI) / 180, c = Math.cos(t), s = Math.sin(t), dx = x - cx, dy = y - cy;
+  return { x: cx + dx * c - dy * s, y: cy + dx * s + dy * c };
+}
+/** Local -> world (inverse of toLocal). */
+function toWorld(rot, cx, cy, x, y) {
+  if (!rot) return { x, y };
+  const t = (rot * Math.PI) / 180, c = Math.cos(t), s = Math.sin(t), dx = x - cx, dy = y - cy;
+  return { x: cx + dx * c + dy * s, y: cy - dx * s + dy * c };
+}
+
+/** True when (x, y) lies inside platform p (rotation honoured). */
+export function pointInPlatform(p, x, y) {
+  const rot = platformRotationDeg(p);
+  if (!rot) return inRect(x, y, p.x, p.y, p.width, p.depth);
+  const q = toLocal(rot, p.x + p.width / 2, p.y + p.depth / 2, x, y);
+  return inRect(q.x, q.y, p.x, p.y, p.width, p.depth);
+}
+
 /** Local floor height above ground at (x, y): the highest of the deck (inside its rectangle) and every platform containing the point; else 0. */
 export function floorHeightAt(scene, x, y) {
   if (!hasFloorFeatures(scene)) return 0;
@@ -25,7 +56,7 @@ export function floorHeightAt(scene, x, y) {
   const st = scene.stage;
   if (st && st.heightM > 0 && inRect(x, y, 0, 0, st.width, st.depth)) h = st.heightM;
   for (const p of scene.platforms || []) {
-    if (p && p.topM > h && inRect(x, y, p.x, p.y, p.width, p.depth)) h = p.topM;
+    if (p && p.topM > h && pointInPlatform(p, x, y)) h = p.topM;
   }
   return h;
 }
@@ -38,7 +69,7 @@ export function floorSurfaceAt(scene, x, y) {
   const st = scene.stage;
   if (st && st.heightM > 0 && inRect(x, y, 0, 0, st.width, st.depth)) h = st.heightM;
   for (const p of scene.platforms || []) {
-    if (p && p.topM > h && inRect(x, y, p.x, p.y, p.width, p.depth)) { h = p.topM; mat = p.material || base; }
+    if (p && p.topM > h && pointInPlatform(p, x, y)) { h = p.topM; mat = p.material || base; }
   }
   return mat;
 }
@@ -84,17 +115,28 @@ export function withAbsoluteHeights(scene) {
 }
 
 /**
- * platformBoxes(scene) -> [{ id, kind: 'platform' | 'deck', x0, y0, x1, y1, zBottom: 0, zTop, material }]
+ * platformBoxes(scene) -> [{ id, kind: 'platform' | 'deck', x0, y0, x1, y1, zBottom: 0, zTop, material, rotationDeg, cx, cy, lx0, ly0, lx1, ly1, corners }]
  * Solid bodies that obstruct radio paths: every platform from ground (0) to topM, and the deck from 0 to stage.heightM.
+ * x0..y1 = the WORLD axis-aligned bounding box (equal to the box itself when rotationDeg is 0); lx0..ly1 = the unrotated local
+ * bounds, (cx, cy) the rotation centre, corners = the 4 world corners in order (lx0,ly0), (lx1,ly0), (lx1,ly1), (lx0,ly1).
  */
 export function platformBoxes(scene) {
   if (!hasFloorFeatures(scene)) return [];
   const out = [];
   const st = scene.stage;
   const mat = scene.environment ? scene.environment.floor : undefined;
-  if (st && st.heightM > 0) out.push({ id: 'stage-deck', kind: 'deck', x0: 0, y0: 0, x1: st.width, y1: st.depth, zBottom: 0, zTop: st.heightM, material: mat });
+  const box = (id, kind, x, y, w, d, zTop, material, rot) => {
+    const cx = x + w / 2, cy = y + d / 2;
+    const corners = [[x, y], [x + w, y], [x + w, y + d], [x, y + d]].map(([px, py]) => toWorld(rot, cx, cy, px, py));
+    const xs = corners.map((c) => c.x), ys = corners.map((c) => c.y);
+    return {
+      id, kind, x0: rot ? Math.min(...xs) : x, y0: rot ? Math.min(...ys) : y, x1: rot ? Math.max(...xs) : x + w, y1: rot ? Math.max(...ys) : y + d,
+      zBottom: 0, zTop, material, rotationDeg: rot, cx, cy, lx0: x, ly0: y, lx1: x + w, ly1: y + d, corners,
+    };
+  };
+  if (st && st.heightM > 0) out.push(box('stage-deck', 'deck', 0, 0, st.width, st.depth, st.heightM, mat, 0));
   for (const p of scene.platforms || []) {
-    if (p && p.topM > 0) out.push({ id: p.id, kind: 'platform', x0: p.x, y0: p.y, x1: p.x + p.width, y1: p.y + p.depth, zBottom: 0, zTop: p.topM, material: p.material || mat });
+    if (p && p.topM > 0) out.push(box(p.id, 'platform', p.x, p.y, p.width, p.depth, p.topM, p.material || mat, platformRotationDeg(p)));
   }
   return out;
 }
@@ -114,13 +156,18 @@ export function risersOf(scene) {
   if (hit) return hit;
   const out = [];
   for (const b of platformBoxes(scene)) {
+    // Faces are built in the local (unrotated) frame, then rotated to world; the outward offset direction rotates with them.
+    const rot = b.rotationDeg || 0;
+    const W = (x, y) => toWorld(rot, b.cx, b.cy, x, y);
+    const t = (rot * Math.PI) / 180, c = Math.cos(t), sn = Math.sin(t);
     const faces = [
-      ['s', { x: b.x0, y: b.y0 }, { x: b.x1, y: b.y0 }, 0, -1],
-      ['n', { x: b.x0, y: b.y1 }, { x: b.x1, y: b.y1 }, 0, 1],
-      ['w', { x: b.x0, y: b.y0 }, { x: b.x0, y: b.y1 }, -1, 0],
-      ['e', { x: b.x1, y: b.y0 }, { x: b.x1, y: b.y1 }, 1, 0],
+      ['s', W(b.lx0, b.ly0), W(b.lx1, b.ly0), 0, -1],
+      ['n', W(b.lx0, b.ly1), W(b.lx1, b.ly1), 0, 1],
+      ['w', W(b.lx0, b.ly0), W(b.lx0, b.ly1), -1, 0],
+      ['e', W(b.lx1, b.ly0), W(b.lx1, b.ly1), 1, 0],
     ];
-    for (const [k, p1, p2, ox, oy] of faces) {
+    for (const [k, p1, p2, lox, loy] of faces) {
+      const ox = rot ? lox * c + loy * sn : lox, oy = rot ? -lox * sn + loy * c : loy; // local direction -> world direction
       const mx = (p1.x + p2.x) / 2 + ox * 1e-3, my = (p1.y + p2.y) / 2 + oy * 1e-3;
       const zMin = floorHeightAt(scene, mx, my);
       if (!(b.zTop > zMin)) continue;
@@ -198,7 +245,14 @@ export function chordsThrough(scene, A, B, freqMHz = 600) {
   const spans = [];
   for (const b of boxes) {
     let t0 = 0, t1 = 1;
-    const slabs = [[A.x, dx, b.x0, b.x1], [A.y, dy, b.y0, b.y1], [A.z || 0, dz, b.zBottom, b.zTop - 1e-6]];
+    // Rotated box: express the ray in the box's local frame (exact), then the usual slab test against the unrotated bounds.
+    let ax = A.x, ay = A.y, ddx = dx, ddy = dy;
+    if (b.rotationDeg) {
+      const t = (b.rotationDeg * Math.PI) / 180, c = Math.cos(t), s = Math.sin(t);
+      const a0 = toLocal(b.rotationDeg, b.cx, b.cy, A.x, A.y);
+      ax = a0.x; ay = a0.y; ddx = dx * c - dy * s; ddy = dx * s + dy * c;
+    }
+    const slabs = [[ax, ddx, b.lx0, b.lx1], [ay, ddy, b.ly0, b.ly1], [A.z || 0, dz, b.zBottom, b.zTop - 1e-6]];
     let ok = true;
     for (const [a, d, lo, hi] of slabs) {
       if (Math.abs(d) < 1e-15) { if (a < lo || a > hi) { ok = false; break; } continue; }

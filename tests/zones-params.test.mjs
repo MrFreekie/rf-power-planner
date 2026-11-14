@@ -25,7 +25,8 @@ test('loss ordering at 600 MHz (reference thickness)', () => {
 
 test('frequency and thickness scaling', () => {
   assert.equal(transmissionLossDb('brick', 0.1, 600), 5);
-  assert.ok(Math.abs(transmissionLossDb('brick', 0.1, 2400) - 5 * Math.pow(4, 0.7)) < 1e-9);
+  assert.ok(Math.abs(transmissionLossDb('brick', 0.1, 2400) - 8) < 1e-9, 'library value 8 dB at 2.4 GHz (was 5 x 4^0.7 = 13.2)');
+  assert.ok(Math.abs(transmissionLossDb('concrete', 0.1, 5800) - 21) < 1e-9, 'concrete 0.1 m at 5.8 GHz: 21 dB (the old 0.6 power law gave 31)');
   assert.ok(Math.abs(transmissionLossDb('brick', 0.2, 600) - 8.5) < 1e-9);          // 1.5 + 35 x 0.2: affine in thickness
   assert.ok(Math.abs(transmissionLossDb('brick', 0, 600) - 1.5) < 1e-9);            // interface loss only
   assert.ok(transmissionLossDb('brick', 0.05, 600) > 0.5 * transmissionLossDb('brick', 0.1, 600));

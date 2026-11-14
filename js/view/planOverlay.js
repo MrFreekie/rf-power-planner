@@ -1,6 +1,7 @@
 // Plan-view overlays for multi-antenna zones: coverage heat map (offscreen, re-blitted), zone polygons,
 // branch antenna icons with cable tags, legend and label collision avoidance.
 import { haloText, setFont, strokeHatchRect } from './util.js';
+import { platformCorners, rotationHandleWorld } from './platformGeom.js';
 import { classify, parseColor, covView } from './coverageUi.js';
 import { chainLossDb } from '../model/rf.js';
 import { CABLES } from '../model/library.js';
@@ -262,24 +263,36 @@ export function drawPlatforms(ctx, th, vp, scene, sel, handles, lengthUnit = 'm'
   if (!plats.length && !deckH) return;
   const maxTop = Math.max(deckH, ...plats.map((p) => p.topM), 0.1);
   for (const p of plats) {
-    const a = vp.worldToScreen(p.x, p.y), b = vp.worldToScreen(p.x + p.width, p.y + p.depth);
-    const w = b.x - a.x, h = b.y - a.y, selected = sel === p.id;
+    const wc = platformCorners(p), pc = wc.map((c) => vp.worldToScreen(c.x, c.y)), selected = sel === p.id;
+    const cen = vp.worldToScreen(p.x + p.width / 2, p.y + p.depth / 2);
+    const xs = pc.map((q) => q.x), ys = pc.map((q) => q.y);
+    const bx = Math.min(...xs), by = Math.min(...ys), bw = Math.max(...xs) - bx, bh = Math.max(...ys) - by;
+    const path = () => { ctx.beginPath(); pc.forEach((q, i) => (i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y))); ctx.closePath(); };
     ctx.save();
-    ctx.fillStyle = `rgba(${th.inkRgb},${(0.05 + 0.2 * (p.topM / maxTop)).toFixed(3)})`; ctx.fillRect(a.x, a.y, w, h);
-    strokeHatchRect(ctx, a.x, a.y, w, h, th.inkSoft, 6);
-    ctx.strokeStyle = th.ink; ctx.lineWidth = selected ? 2.6 : 1.5; ctx.strokeRect(a.x, a.y, w, h);
+    path(); ctx.fillStyle = `rgba(${th.inkRgb},${(0.05 + 0.2 * (p.topM / maxTop)).toFixed(3)})`; ctx.fill();
+    ctx.save(); path(); ctx.clip(); strokeHatchRect(ctx, bx, by, bw, bh, th.inkSoft, 6); ctx.restore();
+    path(); ctx.strokeStyle = th.ink; ctx.lineWidth = selected ? 2.6 : 1.5; ctx.lineJoin = 'miter'; ctx.stroke();
     ctx.restore();
+    const wpx = Math.min(Math.hypot(pc[1].x - pc[0].x, pc[1].y - pc[0].y), Math.hypot(pc[2].x - pc[1].x, pc[2].y - pc[1].y));
     const label = `${p.name}: top ${formatLength(p.topM, lengthUnit)}`;
     setFont(ctx, th, 11, '600');
-    if (w > ctx.measureText(label).width + 6 || selected) haloText(ctx, th, label, a.x + w / 2, a.y + h / 2 + 4, { align: 'center', px: 11, weight: '600' });
-    else if (w > 24) haloText(ctx, th, formatLength(p.topM, lengthUnit), a.x + w / 2, a.y + h / 2 + 4, { align: 'center', px: 10, weight: '600' });
-    handles.push({ kind: 'platBody', itemId: p.id, rect: [a.x, a.y, b.x, b.y], sx: a.x + w / 2, sy: a.y + h / 2, r: 0, wx: p.x, wy: p.y });
-    [[p.x, p.y], [p.x + p.width, p.y], [p.x + p.width, p.y + p.depth], [p.x, p.y + p.depth]].forEach(([wx, wy], i) => {
-      const s2 = vp.worldToScreen(wx, wy);
+    if (Math.hypot(pc[1].x - pc[0].x, pc[1].y - pc[0].y) > ctx.measureText(label).width + 6 || selected) haloText(ctx, th, label, cen.x, cen.y + 4, { align: 'center', px: 11, weight: '600' });
+    else if (wpx > 24) haloText(ctx, th, formatLength(p.topM, lengthUnit), cen.x, cen.y + 4, { align: 'center', px: 10, weight: '600' });
+    handles.push({ kind: 'platBody', itemId: p.id, poly: pc, sx: cen.x, sy: cen.y, r: 0, wx: p.x, wy: p.y });
+    pc.forEach((s2, i) => {
       ctx.fillStyle = selected ? th.ink : th.paper; ctx.strokeStyle = th.ink; ctx.lineWidth = 1.2;
       ctx.fillRect(s2.x - 3.5, s2.y - 3.5, 7, 7); ctx.strokeRect(s2.x - 3.5, s2.y - 3.5, 7, 7);
-      handles.push({ kind: 'platCorner', corner: i, itemId: p.id, sx: s2.x, sy: s2.y, r: 10, pri: 1, wx, wy });
+      handles.push({ kind: 'platCorner', corner: i, itemId: p.id, sx: s2.x, sy: s2.y, r: 10, pri: 1, wx: wc[i].x, wy: wc[i].y });
     });
+    if (selected) { // rotation handle beyond the middle of the front (local +y) edge, like the antenna aiming handle
+      const e = vp.worldToScreen(...Object.values(rotationHandleWorld(p, 0)));
+      const L = Math.hypot(e.x - cen.x, e.y - cen.y) || 1, tip = { x: e.x + (e.x - cen.x) / L * 20, y: e.y + (e.y - cen.y) / L * 20 };
+      ctx.strokeStyle = th.inkSoft; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.lineTo(tip.x, tip.y); ctx.stroke();
+      ctx.fillStyle = th.paper; ctx.strokeStyle = th.ink; ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.arc(tip.x, tip.y, 5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.arc(tip.x, tip.y, 2, 0, Math.PI * 2); ctx.fillStyle = th.ink; ctx.fill();
+      handles.push({ kind: 'platRot', itemId: p.id, sx: tip.x, sy: tip.y, r: 12, pri: 2 });
+    }
   }
 }
 

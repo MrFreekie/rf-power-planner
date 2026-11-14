@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { RX_PRESETS, RX_DEFAULTS, DIVERSITY_PRESETS, SPACING_RULES, IM3_SLOPE, IIP3_MINUS_P1DB_DB } from '../js/model/rx-params.js';
 
-const rxIds = ['mic-receiver-typical', 'iem-bodypack-typical', 'budget-receiver'];
+const rxIds = ['mic-receiver-typical', 'iem-bodypack-typical', 'budget-receiver', 'rx-vhf-typical', 'rx-2g4-typical', 'rx-5g8-typical'];
 
 // Bessel J0 by power series (accurate for |x| < 8).
 function j0(x) { let t = 1, s = 1; for (let k = 1; k < 40; k++) { t *= -(x * x) / (4 * k * k); s += t; } return s; }
@@ -94,7 +94,7 @@ test('required CNR is implied by sensitivity and NF', () => {
   for (const id of rxIds) {
     const p = RX_PRESETS[id];
     assert.ok(Math.abs(impliedRequiredCnrDb(p.sensitivityDbm, p.noiseFigureDb, p.channelBwKhz) - p.requiredCnrDb) < 0.1, id);
-    assert.ok(p.requiredCnrDb >= CASCADE_TYPICAL.requiredCnrDb.min - 1 && p.requiredCnrDb <= CASCADE_TYPICAL.requiredCnrDb.max);
+    if (!id.startsWith('rx-2g4') && !id.startsWith('rx-5g8')) assert.ok(p.requiredCnrDb >= CASCADE_TYPICAL.requiredCnrDb.min - 1 && p.requiredCnrDb <= CASCADE_TYPICAL.requiredCnrDb.max); // the analog-FM range; the digital ISM presets need only 14 dB
   }
 });
 

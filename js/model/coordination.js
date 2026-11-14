@@ -18,7 +18,7 @@
 
 import { productFrequencies } from './imd.js';
 import { coordinationRules } from './imd-params.js';
-import { REGIONS, regionBand, powerLimitFor, BANDS_DISCLAIMER } from './bands.js';
+import { REGIONS, BAND_GROUPS, WIFI_CHANNELS, regionBand, powerLimitFor, groupOfFreq, rangeGroup, BANDS_DISCLAIMER } from './bands.js';
 
 export const COORDINATION_DEFAULTS = Object.freeze({
   channelBwKHz: 200,
@@ -235,6 +235,70 @@ const scoreOf = (minProd, minSp, guard, spacing) => {
   return Math.round(100 * Math.max(0, Math.min(1, a, b)) * 10) / 10;
 };
 
+
+// ---------------------------------------------------------------- hopping bands (2.4 / 5.8 GHz): occupancy, not intermod-free carriers
+
+/**
+ * bandOccupancy({ group: '2g4'|'5g8', wifiChannels?: number[] (Wi-Fi channels in use nearby), wifiWidthMHz?, transmitters?: [{id, freqMHz?}] })
+ *   -> { group, band:{fromMHz,toMHz,spanMHz}, wifi:[{channel, centerMHz, fromMHz, toMHz, inUse}], nonOverlapping[], occupiedMHz, freeMHz,
+ *        occupiedFraction, largestFreeMHz, systems, perSystemFreeMHz, links:[{id, freqMHz, wifiChannel, overlapsInUse}] }
+ * Each in-use Wi-Fi channel occupies centre +- widthMHz/2 (20 MHz default), clipped to the band; occupied = union length of those
+ * spans. Frequency-hopping systems spread over the free part, so perSystemFreeMHz = free / systems is a rough share, not a rule.
+ */
+export function bandOccupancy({ group = '2g4', wifiChannels = [], wifiWidthMHz, transmitters = [] } = {}) {
+  const g = BAND_GROUPS[group];
+  const plan = WIFI_CHANNELS[group];
+  if (!g || !plan) return null;
+  const width = Number.isFinite(wifiWidthMHz) && wifiWidthMHz > 0 ? wifiWidthMHz : plan.widthMHz;
+  const used = new Set((wifiChannels || []).map(Number));
+  const wifi = plan.channels.map((c) => ({ channel: c.channel, centerMHz: c.centerMHz, fromMHz: c.centerMHz - width / 2, toMHz: c.centerMHz + width / 2, inUse: used.has(c.channel) }));
+  const spans = wifi.filter((w) => w.inUse).map((w) => [Math.max(w.fromMHz, g.fromMHz), Math.min(w.toMHz, g.toMHz)]).filter(([a, b]) => b > a).sort((a, b) => a[0] - b[0]);
+  const merged = [];
+  for (const sp of spans) {
+    const last = merged[merged.length - 1];
+    if (last && sp[0] <= last[1]) last[1] = Math.max(last[1], sp[1]); else merged.push([sp[0], sp[1]]);
+  }
+  const span = g.toMHz - g.fromMHz;
+  const occupiedMHz = merged.reduce((a, [x, y]) => a + (y - x), 0);
+  let largest = 0, cursor = g.fromMHz;
+  for (const [a, b] of merged) { largest = Math.max(largest, a - cursor); cursor = b; }
+  largest = Math.max(largest, g.toMHz - cursor);
+  const systems = transmitters.length;
+  const freeMHz = span - occupiedMHz;
+  return {
+    group, band: { fromMHz: g.fromMHz, toMHz: g.toMHz, spanMHz: span }, wifi, nonOverlapping: plan.nonOverlapping.slice(), widthMHz: width,
+    occupiedMHz, freeMHz, occupiedFraction: occupiedMHz / span, largestFreeMHz: largest, systems, perSystemFreeMHz: systems ? freeMHz / systems : freeMHz,
+    links: transmitters.map((t) => {
+      const f = Number.isFinite(t.freqMHz) ? t.freqMHz : null;
+      const inside = f === null ? [] : wifi.filter((w) => f >= w.fromMHz && f <= w.toMHz);
+      const hit = inside.length ? inside.reduce((a, b) => (Math.abs(f - b.centerMHz) < Math.abs(f - a.centerMHz) ? b : a)) : null; // nearest centre
+      const inUseHit = f === null ? null : wifi.find((w) => w.inUse && f >= w.fromMHz && f <= w.toMHz) || null;
+      return { id: t.id, freqMHz: f, wifiChannel: hit ? hit.channel : null, overlapsInUse: !!inUseHit };
+    }),
+  };
+}
+
+/** Result of coordinateFrequencies for a hopping band: no frequencies are assigned, the occupancy report is the answer. */
+function hoppingResult(base, tx, req, region, group) {
+  const occ = bandOccupancy({ group, wifiChannels: req.wifiChannels, wifiWidthMHz: req.wifiWidthMHz, transmitters: tx });
+  const notes = [
+    `${BAND_GROUPS[group].name}: systems here hop or select channels on their own, so no frequencies are assigned and no intermod-free set is searched. This is a channel occupancy and Wi-Fi overlap report.`,
+  ];
+  if (occ.occupiedFraction >= 0.5) notes.push(`Wi-Fi in use covers ${(occ.occupiedFraction * 100).toFixed(0)}% of the band; expect more retries and dropouts. Move Wi-Fi to the non-overlapping channels (${occ.nonOverlapping.join(', ')}) away from the audio links where possible.`);
+  const overl = occ.links.filter((l) => l.overlapsInUse);
+  if (overl.length) notes.push(`${overl.length} link(s) sit inside an in-use Wi-Fi channel.`);
+  notes.push('Planning estimate only: check local licensing, power limits and what is on air at the venue.');
+  const frequencies = tx.map((t, i) => ({
+    id: t.id, name: t.name, kind: t.kind, freqMHz: occ.links[i].freqMHz, locked: t.locked, powerLimit: region && occ.links[i].freqMHz !== null ? powerLimitFor(region.id, occ.links[i].freqMHz) : null,
+    ...(t.txId !== undefined ? { txId: t.txId } : {}), ...(t.source ? { source: t.source } : {}),
+  }));
+  return {
+    ...base, ok: true, mode: 'occupancy', hopping: true, bandGroup: group, occupancy: occ, frequencies,
+    assignments: Object.fromEntries(frequencies.filter((f) => f.freqMHz !== null).map((f) => [f.id, f.freqMHz])),
+    score: Math.round((1 - occ.occupiedFraction) * 1000) / 10, notes,
+  };
+}
+
 // ---------------------------------------------------------------- public API
 
 /**
@@ -245,6 +309,9 @@ const scoreOf = (minProd, minSp, guard, spacing) => {
  *   regionId              'uk' | 'eu' | 'us' (bands.js): supplies the band, raster, spacing, default blocked ranges
  *   band, iemBand         { startMHz, endMHz, rasterKHz? } or an array of them; iemBand defaults to band. Without band, regionId's ranges.
  *   rangeIds              limit a region to some of its range ids
+ *   bandGroup             'uhf' (default) | 'vhf' | '2g4' | '5g8' (bands.js BAND_GROUPS). 2g4 / 5g8 are hopping bands: the result is an occupancy
+ *                         report (mode 'occupancy', `occupancy`, req.wifiChannels = Wi-Fi channels in use), nothing is assigned. Unset: taken from the
+ *                         transmitters' freqMHz when every one is >= 2000 MHz (or all < 300 MHz for vhf), else 'uhf' (the original behaviour)
  *   blocked               [{ fromMHz, toMHz, label? }] extra blocked ranges (TV channels in use, see tvChannelsToBlocked)
  *   minSpacingKHz (300), guardKHz (400), channelBwKHz (200), rasterKHz (25), edgeGuardKHz (channelBw / 2)
  *   seed (1), attemptsPerLevel (4), budget
@@ -273,18 +340,31 @@ export function coordinateFrequencies(req = {}) {
   const base = {
     ok: false, partial: false, frequencies: [], assignments: {}, guardKHz, minSpacingKHz: spacing, marginKHz: null,
     minProductDistanceKHz: null, minChannelSpacingKHz: null, score: 0, conflicts: [], spacingViolations: [], fifthOrderHits: 0,
-    failure: null, notes, disclaimer: BANDS_DISCLAIMER, seed, regionId: region ? region.id : null,
+    failure: null, notes, disclaimer: BANDS_DISCLAIMER, seed, regionId: region ? region.id : null, mode: 'intermod', hopping: false,
   };
   const fail = (reason, message, extra = {}, frequencies = []) => ({
     ...base, partial: frequencies.some((f) => f.freqMHz !== null), frequencies, failure: { reason, message, ...extra },
   });
   if (!tx.length) return fail('no-transmitters', 'Nothing to coordinate: give a number of microphones and IEMs, or a transmitter list.');
 
+  // band group: 'uhf' keeps the original behaviour; a hopping group (2.4 / 5.8 GHz) reports occupancy instead of assigning carriers
+  let group = BAND_GROUPS[req.bandGroup] ? req.bandGroup : null;
+  if (!group && !req.band && !req.iemBand && !req.rangeIds) {
+    const gs = new Set(tx.map((t) => (t.freqMHz !== null ? groupOfFreq(t.freqMHz) : null)));
+    if (gs.size === 1 && !gs.has(null) && !gs.has('uhf')) group = [...gs][0];
+  }
+  if (!group && req.rangeIds && region) { // ids decide: use the group of the first listed range
+    const first = region.ranges.find((x) => req.rangeIds.includes(x.id));
+    if (first) group = rangeGroup(first);
+  }
+  group = group || 'uhf';
+  if (BAND_GROUPS[group].hopping) return hoppingResult(base, tx, req, region, group);
+
   // bands
   const bandOf = (kind) => {
     const given = kind === 'iem' && req.iemBand ? req.iemBand : req.band;
     if (given) return asArray(given);
-    if (region) return regionBand(region.id, req.rangeIds, kind);
+    if (region) return regionBand(region.id, req.rangeIds, kind, group);
     return [];
   };
   const kinds = ['mic', 'iem'].filter((k) => tx.some((t) => t.kind === k && !t.locked));

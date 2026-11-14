@@ -45,6 +45,8 @@ export const GLOSSARY = Object.freeze({
   PLL: { full: 'Phase-locked loop', meaning: 'The circuit that holds a transmitter or receiver precisely on its frequency.' },
   UHF: { full: 'Ultra high frequency', meaning: 'Radio from 300 MHz to 3 GHz, where most wireless microphones work.' },
   VHF: { full: 'Very high frequency', meaning: 'Radio from 30 to 300 MHz, used by some older wireless microphones.' },
+  ISM: { full: 'Industrial, scientific and medical band', meaning: 'Licence-exempt radio bands (such as 2.4 and 5.8 GHz) shared by Wi-Fi, Bluetooth, microwave ovens and many wireless audio systems.' },
+  DAB: { full: 'Digital audio broadcasting', meaning: 'Digital radio, which in Europe sits in the VHF Band III TV band (blocks such as 5A to 10D) and must be avoided there.' },
   TV: { full: 'Television', meaning: 'Television channels share the UHF band with wireless microphones, which is why some channels are unavailable.' },
   LOS: { full: 'Line of sight', meaning: 'A clear straight path between transmitter and receiver antennas.' },
   TE: { full: 'Transverse electric', meaning: 'Horizontal polarisation: the electric field is parallel to the reflecting surface.' },

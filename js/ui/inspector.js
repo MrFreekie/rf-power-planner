@@ -18,7 +18,8 @@ import { setImdPreset, setImdCombiner, setImdPim, addImdTransmitter, removeImdTr
 const IMD_PRESETS = [['mic-rack-typical', 'Mic rack, typical'], ['iem-combiner-no-isolation', 'IEM combiner, no isolation'],
   ['iem-combiner-isolated', 'IEM combiner, isolated'], ['pim-corroded-connector', 'PIM: corroded connector']];
 import { createChainItem } from '../model/scene.js';
-import { noiseOptions, noiseValue, noiseFromChoice, noiseHint } from './noise.js';
+import { dispAxis, internalAxis, dispRange, COORD_HINT } from './coords.js';
+import { noiseOptions, noiseValue, noiseFromChoice, noiseHint, interferenceApplies, interferenceOptions, interferenceValue, interferenceHint, rxPresetOffer } from './noise.js';
 import {
   setPath, setLinkField, setLinkKind, setUnits, addChainItem, removeChainItem, moveChainItem,
   addReflector, removeReflector,
@@ -188,12 +189,13 @@ export function mountInspector({ container, store }) {
   const numLink = (key, label, path, min, max, step, unit, extra = {}) => numberField({
     key, label, min, max, step, unit, get: (c) => getIn(c.link, path), set: (c, v, o) => linkSet(path)(c, v, o), ...extra,
   });
-  const lenLink = (key, label, path, minM, maxM) => numberField({
+  // axis 'x' | 'y' shows the value in stage coordinates (see ui/coords.js); the stored value is unchanged
+  const lenLink = (key, label, path, minM, maxM, axis = null) => numberField({
     key, label, decimals: 2,
-    min: (c) => lengthToUi(minM, c.lu), max: (c) => lengthToUi(maxM, c.lu), step: (c) => (c.lu === 'ft' ? 0.5 : 0.1),
+    min: (c) => lengthToUi(dispRange(c.scene, axis, minM, maxM)[0], c.lu), max: (c) => lengthToUi(dispRange(c.scene, axis, minM, maxM)[1], c.lu), step: (c) => (c.lu === 'ft' ? 0.5 : 0.1),
     unit: (c) => c.lu,
-    get: (c) => lengthToUi(getIn(c.link, path), c.lu),
-    set: (c, v, o) => linkSet(path)(c, lengthFromUi(v, c.lu), o),
+    get: (c) => lengthToUi(dispAxis(c.scene, axis, getIn(c.link, path)), c.lu),
+    set: (c, v, o) => linkSet(path)(c, internalAxis(c.scene, axis, lengthFromUi(v, c.lu)), o),
   });
   const numEnv = (key, label, field, min, max, step) => numberField({
     key, label, min, max, step, unit: 'dB',
@@ -225,14 +227,14 @@ export function mountInspector({ container, store }) {
   function posFields(who) {
     const frag = document.createDocumentFragment();
     frag.append(
-      lenLink(`${who}-x`, 'Position x (stage right)', `${who}.pos.x`, -50, 100),
-      lenLink(`${who}-y`, 'Position y (toward audience)', `${who}.pos.y`, -50, 100),
+      lenLink(`${who}-x`, 'Position x (0 = centre line)', `${who}.pos.x`, -50, 100, 'x'),
+      lenLink(`${who}-y`, 'Position y (0 = front edge)', `${who}.pos.y`, -50, 100, 'y'),
       lenLink(`${who}-z`, 'Height above floor', `${who}.pos.z`, 0, 50),
     );
     const hint = el('p', 'hint');
     updaters.push((cc) => {
       const pos = cc.link[who].pos, fl = floorHeightAt(cc.scene, pos.x, pos.y);
-      hint.textContent = `Floor beneath: ${lengthToUi(fl, cc.lu).toFixed(2)} ${cc.lu}. Absolute height above the ground: ${lengthToUi(fl + pos.z, cc.lu).toFixed(2)} ${cc.lu}.`;
+      hint.textContent = `${COORD_HINT} Floor beneath: ${lengthToUi(fl, cc.lu).toFixed(2)} ${cc.lu}. Absolute height above the ground: ${lengthToUi(fl + pos.z, cc.lu).toFixed(2)} ${cc.lu}.`;
     });
     frag.append(hint);
     return frag;
@@ -256,7 +258,7 @@ export function mountInspector({ container, store }) {
     container.append(heading, who);
 
     // Stage and platforms
-    const sb = section('stage', 'Stage', 'Item heights are measured from the floor beneath them: the deck, or the top of the platform they stand on.');
+    const sb = section('stage', 'Stage', `Item heights are measured from the floor beneath them: the deck, or the top of the platform they stand on. ${COORD_HINT}`);
     const stageNum = (key, label, field, min, max) => numberField({
       key, label, decimals: 2, min: (cc) => lengthToUi(min, cc.lu), max: (cc) => lengthToUi(max, cc.lu), step: (cc) => (cc.lu === 'ft' ? 0.5 : 0.1), unit: (cc) => cc.lu,
       get: (cc) => lengthToUi(cc.scene.stage[field] ?? 0, cc.lu), set: (cc, v, o) => setStage(store, { [field]: lengthFromUi(v, cc.lu) }, o),
@@ -336,6 +338,7 @@ export function mountInspector({ container, store }) {
         get: (cc) => cc.link.rx.rxPreset || (cc.link.kind === 'iem' ? 'iem-bodypack-typical' : 'mic-receiver-typical'),
         set: (cc, v) => setNested(cc, 'rx.rxPreset', v),
       }),
+      presetOffer(),
       numberField({
         key: 'rx-maxin', label: 'Max input', min: -60, max: 20, step: 1, unit: 'dBm', decimals: 1,
         get: (cc) => cc.link.rx.overload?.maxInputDbm ?? rxConfig(cc.link).maxInputDbm, set: (cc, v, o) => setNested(cc, 'rx.overload.maxInputDbm', v, o),
@@ -354,13 +357,13 @@ export function mountInspector({ container, store }) {
         get: (cc) => cc.link.rx.diversity?.mode || 'switching', set: (cc, v) => setNested(cc, 'rx.diversity.mode', v),
       }),
       ...['x', 'y', 'z'].map((ax) => numberField({
-        key: `rx-b-${ax}`, label: `Antenna B ${ax}${ax === 'z' ? ' (height)' : ''}`, decimals: 2,
-        min: (cc) => lengthToUi(ax === 'z' ? 0 : -50, cc.lu), max: (cc) => lengthToUi(ax === 'z' ? 50 : 100, cc.lu), step: (cc) => (cc.lu === 'ft' ? 0.5 : 0.1), unit: (cc) => cc.lu,
+        key: `rx-b-${ax}`, label: `Antenna B ${ax}${ax === 'z' ? ' (height)' : ax === 'x' ? ' (0 = centre line)' : ' (0 = front edge)'}`, decimals: 2,
+        min: (cc) => lengthToUi(dispRange(cc.scene, ax, ax === 'z' ? 0 : -50, ax === 'z' ? 50 : 100)[0], cc.lu), max: (cc) => lengthToUi(dispRange(cc.scene, ax, ax === 'z' ? 0 : -50, ax === 'z' ? 50 : 100)[1], cc.lu), step: (cc) => (cc.lu === 'ft' ? 0.5 : 0.1), unit: (cc) => cc.lu,
         visible: (cc) => !!cc.link.rx.diversity?.enabled,
-        get: (cc) => lengthToUi(cc.link.rx.diversity?.antennaB?.pos?.[ax] ?? cc.link.rx.pos[ax], cc.lu),
+        get: (cc) => lengthToUi(dispAxis(cc.scene, ax, cc.link.rx.diversity?.antennaB?.pos?.[ax] ?? cc.link.rx.pos[ax]), cc.lu),
         set: (cc, v, o) => {
           const cur = cc.link.rx.diversity?.antennaB?.pos || cc.link.rx.pos;
-          setNested(cc, 'rx.diversity.antennaB.pos', { x: cur.x, y: cur.y, z: cur.z, [ax]: lengthFromUi(v, cc.lu) }, o);
+          setNested(cc, 'rx.diversity.antennaB.pos', { x: cur.x, y: cur.y, z: cur.z, [ax]: internalAxis(cc.scene, ax, lengthFromUi(v, cc.lu)) }, o);
         },
       })),
       selectField({
@@ -449,7 +452,7 @@ export function mountInspector({ container, store }) {
     const eb = section('env', 'Environment');
     eb.append(
       selectField({
-        key: 'env-floor', label: 'Floor', options: Object.entries(SURFACES).map(([id, s]) => [id, s.name]),
+        key: 'env-floor', label: 'Stage surface', options: Object.entries(SURFACES).map(([id, s]) => [id, s.name]),
         get: (cc) => cc.scene.environment.floor, set: (cc, v) => setPath(store, 'environment.floor', v),
       }),
       selectField({
@@ -464,16 +467,28 @@ export function mountInspector({ container, store }) {
         key: 'env-noise', label: 'External RF noise', options: (cc) => noiseOptions(cc.scene.environment.externalNoise, cc.link.freqMHz),
         get: (cc) => noiseValue(cc.scene.environment.externalNoise), set: (cc, v) => { const n = noiseFromChoice(v); if (n !== undefined) setPath(store, 'environment.externalNoise', n); },
       }),
+      selectField({
+        key: 'env-interf', label: 'Interference (2.4 / 5.8 GHz)', options: (cc) => interferenceOptions(cc.link.freqMHz), visible: (cc) => interferenceApplies(cc.link.freqMHz),
+        get: (cc) => interferenceValue(cc.scene.environment.interference), set: (cc, v) => setPath(store, 'environment.interference', v),
+      }),
       numEnv('env-fade', 'Fade margin', 'fadeMarginDb', 0, 40, 0.5),
       numEnv('env-body', 'Environment body loss', 'bodyLossDb', 0, 40, 0.5),
     );
     eb.append(el('p', 'hint', 'Body loss values stack: environment + Rx body loss + body-worn antenna are summed.'));
     eb.append(el('p', 'hint', noiseHint()));
+    eb.append(el('p', 'hint', 'Stage surface is the material of the stage floor: it sets how strongly the floor reflects the signal (platforms have their own material).'));
+    const interfHint = el('p', 'hint');
+    updaters.push((cc) => { interfHint.hidden = !interferenceApplies(cc.link.freqMHz); interfHint.textContent = interferenceHint(cc.scene.environment.interference, cc.link.freqMHz); });
+    eb.append(interfHint);
 
     // Chain
     const endNote = link.kind === 'iem' ? 'Order: transmitter, then these items, then the Tx antenna.' : 'Order: Rx antenna, then these items, then the receiver.';
     const cb = section('chain', link.kind === 'iem' ? 'Cable chain' : 'Cable A (antenna A to receiver)', endNote);
     buildChain(cb, c);
+    if (link.kind === 'iem') {
+      const rxb = section('rxchain', 'Bodypack-side chain (optional)', 'Order: bodypack antenna, then these items, then the bodypack. Leave empty for a bodypack with its own antenna on the unit.');
+      buildChain(rxb, c, 'rx');
+    }
     const hasB = link.kind !== 'iem' && !!(link.rx.diversity && link.rx.diversity.enabled && link.rx.diversity.antennaB);
     if (hasB) {
       const bb = section('chainB', 'Cable B (antenna B to receiver)', 'Order: antenna B, then these items, then the receiver.');
@@ -584,9 +599,9 @@ export function mountInspector({ container, store }) {
     if (!p0) return;
     const id = p0.id;
     const P = (cc) => (cc.scene.platforms || []).find((q) => q.id === id);
-    const len = (key, label, field, min, max) => numberField({
-      key: `plat-${key}`, label, decimals: 2, min: (cc) => lengthToUi(min, cc.lu), max: (cc) => lengthToUi(max, cc.lu), step: (cc) => (cc.lu === 'ft' ? 0.5 : 0.1), unit: (cc) => cc.lu,
-      get: (cc) => lengthToUi(P(cc)?.[field] ?? 0, cc.lu), set: (cc, v, o) => updatePlatform(store, id, { [field]: lengthFromUi(v, cc.lu) }, o),
+    const len = (key, label, field, min, max, axis = null) => numberField({
+      key: `plat-${key}`, label, decimals: 2, min: (cc) => lengthToUi(dispRange(cc.scene, axis, min, max)[0], cc.lu), max: (cc) => lengthToUi(dispRange(cc.scene, axis, min, max)[1], cc.lu), step: (cc) => (cc.lu === 'ft' ? 0.5 : 0.1), unit: (cc) => cc.lu,
+      get: (cc) => lengthToUi(dispAxis(cc.scene, axis, P(cc)?.[field] ?? 0), cc.lu), set: (cc, v, o) => updatePlatform(store, id, { [field]: internalAxis(cc.scene, axis, lengthFromUi(v, cc.lu)) }, o),
     });
     const form = el('div', 'refl-form');
     form.append(
@@ -595,10 +610,15 @@ export function mountInspector({ container, store }) {
         key: 'plat-mat', label: 'Material', options: PLATFORM_MATERIALS.map((m) => [m, (SURFACES[m] || MATERIALS[m] || {}).name || m]),
         get: (cc) => P(cc)?.material, set: (cc, v) => updatePlatform(store, id, { material: v }),
       }),
-      len('x', 'Position x', 'x', -500, 1000), len('y', 'Position y', 'y', -500, 1000),
+      numberField({
+        key: 'plat-rot', label: 'Rotation', decimals: 1, min: -180, max: 180, step: 5, unit: 'degrees',
+        get: (cc) => P(cc)?.rotationDeg ?? 0, set: (cc, v, o) => updatePlatform(store, id, { rotationDeg: v }, o),
+      }),
+      len('x', 'Left edge x (0 = centre line)', 'x', -500, 1000, 'x'), len('y', 'Back edge y (0 = front edge)', 'y', -500, 1000, 'y'),
       len('w', 'Width', 'width', 0.1, 500), len('d', 'Depth', 'depth', 0.1, 500),
       len('top', 'Top height above the ground', 'topM', 0.05, 30),
     );
+    form.append(el('p', 'hint', 'Material sets how much signal passes through the platform and how it reflects. Rotation turns it about its centre (0 = front edge facing the audience, clockwise from above); the position fields name its unrotated corner.'));
     const rise = el('p', 'hint');
     updaters.push((cc) => {
       const p = P(cc); if (!p) { rise.textContent = ''; return; }
@@ -609,10 +629,28 @@ export function mountInspector({ container, store }) {
     body.append(form);
   }
 
+  /** Inline offer (never automatic) to switch the receiver preset when the carrier moves into VHF, 2.4 GHz or 5.8 GHz or back. */
+  function presetOffer() {
+    const row = el('div', 'hint insp-offer');
+    const txt = el('span');
+    const btn = button('', 'rx-preset-offer', () => {
+      const cc = getCtx();
+      const o = cc.link && rxPresetOffer(cc.link.kind, cc.link.freqMHz, cc.link.rx.rxPreset);
+      if (o) setNested(cc, 'rx.rxPreset', o.id);
+    });
+    row.append(txt, ' ', btn);
+    updaters.push((cc) => {
+      const o = rxPresetOffer(cc.link.kind, cc.link.freqMHz, cc.link.rx.rxPreset);
+      row.hidden = !o;
+      if (o) { txt.textContent = o.text; btn.textContent = o.buttonText; }
+    });
+    return row;
+  }
+
   function buildChain(body, c, target = 'main') {
     const link = c.link;
-    const chainOf = (l) => (target === 'antennaB' ? ((l.rx.diversity && l.rx.diversity.antennaB && l.rx.diversity.antennaB.chain) || []) : l.chain);
-    const base = target === 'antennaB' ? 'rx.diversity.antennaB.chain' : 'chain';
+    const chainOf = (l) => (target === 'antennaB' ? ((l.rx.diversity && l.rx.diversity.antennaB && l.rx.diversity.antennaB.chain) || []) : target === 'rx' ? (l.rx.chain || []) : l.chain);
+    const base = target === 'antennaB' ? 'rx.diversity.antennaB.chain' : target === 'rx' ? 'rx.chain' : 'chain';
     const tOpt = { target };
     const list = el('ol', 'chain-list');
     chainOf(link).forEach((item, i) => {
@@ -703,7 +741,7 @@ export function mountInspector({ container, store }) {
     updaters.push((c2) => {
       let sum = 0;
       for (const it of chainOf(c2.link)) sum += safeLoss(it, c2.link.freqMHz);
-      total.textContent = `${target === 'antennaB' ? 'Cable B' : 'Cable A'} total: ${lossText(sum)}`;
+      total.textContent = `${target === 'antennaB' ? 'Cable B' : target === 'rx' ? 'Bodypack side' : 'Cable A'} total: ${lossText(sum)}`;
     });
     body.append(total);
 
@@ -771,11 +809,11 @@ export function mountInspector({ container, store }) {
     const rid = c.scene.reflectors[idx].id;
     const R = (cc) => cc.scene.reflectors[idx];
     const form = el('div', 'refl-form');
-    const lenR = (key, label, sub, min, max) => numberField({
+    const lenR = (key, label, sub, min, max, axis = null) => numberField({
       key: `refl-${key}`, label, decimals: 2,
-      min: (cc) => lengthToUi(min, cc.lu), max: (cc) => lengthToUi(max, cc.lu), step: (cc) => (cc.lu === 'ft' ? 0.5 : 0.1), unit: (cc) => cc.lu,
-      get: (cc) => lengthToUi(getIn(R(cc), sub) ?? 0, cc.lu),
-      set: (cc, v, o) => setPath(store, `${base}.${sub}`, lengthFromUi(v, cc.lu), o),
+      min: (cc) => lengthToUi(dispRange(cc.scene, axis, min, max)[0], cc.lu), max: (cc) => lengthToUi(dispRange(cc.scene, axis, min, max)[1], cc.lu), step: (cc) => (cc.lu === 'ft' ? 0.5 : 0.1), unit: (cc) => cc.lu,
+      get: (cc) => lengthToUi(dispAxis(cc.scene, axis, getIn(R(cc), sub) ?? 0), cc.lu),
+      set: (cc, v, o) => setPath(store, `${base}.${sub}`, internalAxis(cc.scene, axis, lengthFromUi(v, cc.lu)), o),
     });
     form.append(
       textField({ key: 'refl-name', label: 'Name', get: (cc) => R(cc)?.name, set: (cc, v, o) => setPath(store, `${base}.name`, v, o) }),
@@ -783,8 +821,8 @@ export function mountInspector({ container, store }) {
         key: 'refl-mat', label: 'Material', options: Object.entries(MATERIALS).map(([id, m]) => [id, m.name]),
         get: (cc) => R(cc)?.material, set: (cc, v) => setPath(store, `${base}.material`, v),
       }),
-      lenR('p1x', 'Start x', 'p1.x', -50, 100), lenR('p1y', 'Start y', 'p1.y', -50, 100),
-      lenR('p2x', 'End x', 'p2.x', -50, 100), lenR('p2y', 'End y', 'p2.y', -50, 100),
+      lenR('p1x', 'Start x (0 = centre line)', 'p1.x', -50, 100, 'x'), lenR('p1y', 'Start y (0 = front edge)', 'p1.y', -50, 100, 'y'),
+      lenR('p2x', 'End x', 'p2.x', -50, 100, 'x'), lenR('p2y', 'End y', 'p2.y', -50, 100, 'y'),
       numberField({
         key: 'refl-thick', label: 'Wall thickness', min: 0, max: 1, step: 0.01, unit: 'm (loss scales with it)', decimals: 2,
         get: (cc) => R(cc)?.thicknessM ?? 0.1, set: (cc, v, o) => setPath(store, `${base}.thicknessM`, v, o),
@@ -810,6 +848,7 @@ export function mountInspector({ container, store }) {
     return JSON.stringify([
       c.found?.type ?? null, c.sel ?? null, c.link.id, c.link.kind,
       c.link.chain.map((x, i) => `${x.id || i}:${x.kind}`),
+      c.link.kind === 'iem' ? (c.link.rx.chain || []).map((x, i) => `${x.id || i}:${x.kind}`) : null,
       c.link.kind !== 'iem' && c.link.rx.diversity && c.link.rx.diversity.enabled && c.link.rx.diversity.antennaB ? (Array.isArray(c.link.rx.diversity.antennaB.chain) ? c.link.rx.diversity.antennaB.chain.map((x, i) => `${x.id || i}:${x.kind}`) : 'same') : null,
       c.scene.reflectors.map((r) => `${r.id}:${r.name}`),
       (c.scene.platforms || []).map((p) => `${p.id}:${p.name}`),

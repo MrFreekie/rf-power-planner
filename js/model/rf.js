@@ -18,10 +18,10 @@
 //  * arrivalBearing = direction from the Rx antenna toward the last point on the path.
 //  * Body loss applied = environment.bodyLossDb + rx.bodyLossDb.
 
-import { CABLES, ANTENNAS, SURFACES, MATERIALS } from './library.js';
+import { CABLES, ANTENNAS, SURFACES, MATERIALS, cableDbPer100m as libraryCableDbPer100m, surfaceAt, materialAt } from './library.js';
 import { formatLength } from './units.js';
 import { hasFloorFeatures, floorHeightAt, floorSurfaceAt, absolutePos, allReflectors, chordsThrough, floorZoneFraction } from './floor.js';
-import { RX_PRESETS, RX_DEFAULTS, EXTERNAL_NOISE_FIGURE_600MHZ_DB, cascadeIip3Dbm as stagesIip3Dbm } from './rx-params.js';
+import { RX_PRESETS, RX_DEFAULTS, EXTERNAL_NOISE_FIGURE_600MHZ_DB, INTERFERENCE_RISE_DB, INTERFERENCE_LEVELS, INTERFERENCE_MIN_MHZ, interferenceBandOf, cascadeIip3Dbm as stagesIip3Dbm } from './rx-params.js';
 
 let ZP = {};
 try { ZP = await import('./zones-params.js'); } catch { ZP = {}; }
@@ -182,13 +182,13 @@ const FALLBACK = { epsR: 5, sigma: 0.01 }; // concrete-like, used for unknown id
 
 /** Floor reflection coefficient. grazingDeg measured from the floor plane. */
 export function floorReflection(floorId, polarisation, grazingDeg, freqMHz) {
-  const m = SURFACES[floorId] || FALLBACK;
+  const m = SURFACES[floorId] ? surfaceAt(floorId, freqMHz) : FALLBACK; // conductivity scaled with frequency (ITU-R P.2040)
   return absorb(fresnel(m.epsR, m.sigma, grazingDeg, freqMHz, polarisation === 'horizontal' ? 'TE' : 'TM'), m);
 }
 
 /** Wall reflection coefficient. incidenceDeg measured from the wall normal. */
 export function reflectorCoefficient(materialId, incidenceDeg, polarisation, freqMHz) {
-  const m = MATERIALS[materialId] || FALLBACK;
+  const m = MATERIALS[materialId] ? materialAt(materialId, freqMHz) : FALLBACK;
   // Vertical E on a vertical wall is perpendicular to the plane of incidence -> TE.
   return absorb(fresnel(m.epsR, m.sigma, 90 - incidenceDeg, freqMHz, polarisation === 'horizontal' ? 'TM' : 'TE'), m);
 }
@@ -368,7 +368,8 @@ function wallTransmissionLossRaw(w, freqMHz) {
     if (ref !== null) {
       const refMHz = e.refMHz || 600;
       const k = Number.isFinite(e.freqExponent) ? e.freqExponent : 0.5;
-      return ref * Math.pow(freqMHz / refMHz, k) * thick(e.refThicknessM);
+      const scale = ZP.wallFreqScale && refMHz === 600 ? ZP.wallFreqScale(w.material, freqMHz) : Math.pow(freqMHz / refMHz, k);
+      return ref * scale * thick(e.refThicknessM);
     }
   }
   const fb = TRANSMISSION_FALLBACK[w.material] || [10, 0.5];
@@ -418,21 +419,11 @@ export function pathWallLoss(scene, points, freqMHz) {
 
 // ---------------------------------------------------------------- cables and chains
 
-/** Cable loss (dB, positive) at freqMHz for lengthM, log-log interpolated (extrapolated by end slopes). */
+/** Cable loss (dB, positive) at freqMHz for lengthM: library table (100 MHz-6 GHz) log-log interpolated, sqrt(f) scaling outside it. */
 export function cableLossDb(cableType, lengthM, freqMHz) {
   const cab = CABLES[cableType];
   if (!cab) throw new Error(`Unknown cable type: ${cableType}`);
-  return (lengthM / 100) * cableDbPer100m(cab.attenDbPer100m, freqMHz);
-}
-
-function cableDbPer100m(table, f) {
-  const pts = [...table].sort((a, b) => a[0] - b[0]);
-  if (pts.length === 1) return pts[0][1];
-  let i = 0;
-  while (i < pts.length - 2 && f > pts[i + 1][0]) i++;
-  const [f0, a0] = pts[i], [f1, a1] = pts[i + 1];
-  const slope = (Math.log10(a1) - Math.log10(a0)) / (Math.log10(f1) - Math.log10(f0));
-  return Math.pow(10, Math.log10(a0) + slope * (Math.log10(f) - Math.log10(f0)));
+  return (lengthM / 100) * libraryCableDbPer100m(cableType, freqMHz);
 }
 
 /** Net loss (positive dB) of one chain item; boosters return negative loss (gain). */
@@ -500,6 +491,17 @@ export function externalNoiseNfDb(env, freqMHz) {
 }
 
 /**
+ * Interference floor rise (dB) from environment.interference ('none'|'quiet'|'typical'|'busy', unset = none). Only for
+ * freqMHz >= 2000 (licence-exempt 2.4 / 5.8 GHz bands shared with Wi-Fi etc.); 0 below. It is a separate additive in-band noise
+ * power: N_total = N_floor x 10^(rise/10), i.e. the floor moves up by `rise` dB (noise-plus-interference, treated as noise).
+ */
+export function interferenceRiseDb(env, freqMHz) {
+  const v = env && env.interference;
+  if (!(freqMHz >= INTERFERENCE_MIN_MHZ) || typeof v !== 'string' || !INTERFERENCE_LEVELS.includes(v)) return 0;
+  return INTERFERENCE_RISE_DB[interferenceBandOf(freqMHz)][v];
+}
+
+/**
  * cascadeChainIip3Dbm(chain, rxIip3Dbm, freqMHz) -> IIP3 of "chain then receiver" referred to the chain input (the antenna
  * terminals for a receive chain), dBm. One implementation shared by imd.js and overload.js: builds the stages and calls
  * cascadeIip3Dbm of rx-params.js (1/IIP3 = sum G_before_k / IIP3_k). Boosters use item.iip3Dbm, else item.oip3Dbm - gain,
@@ -534,7 +536,7 @@ export function cascadeChainIip3Dbm(chain, rxIip3Dbm, freqMHz = 600) {
  * noise floor + requiredSnr.
  */
 export function cascadeNoise(link, chain, freqMHz, iem = false, env = {}) {
-  const bw = Number.isFinite(link.rx.channelBwKHz) ? link.rx.channelBwKHz : 200;
+  const bw = Number.isFinite(link.rx.channelBwKHz) ? link.rx.channelBwKHz : ((RX_PRESETS[link.rx.rxPreset] || {}).channelBwKhz ?? 200); // the preset's noise bandwidth (200 kHz for the UHF presets)
   const kTB = BOLTZMANN_DBM_HZ + 10 * Math.log10(bw * 1000);
   const rxNf = receiverNoiseFigureDb(link.rx);
   const list = (chain || []).map((it) => ({ label: chainLabel(it), ...chainItemNoise(it, freqMHz) }));
@@ -553,10 +555,12 @@ export function cascadeNoise(link, chain, freqMHz, iem = false, env = {}) {
   else if (preset && Number.isFinite(preset.requiredCnrDb) && link.rx.sensitivityDbm === preset.sensitivityDbm) { required = preset.requiredCnrDb; requiredSource = 'preset'; }
   else { required = link.rx.sensitivityDbm - (kTB + rxNf); requiredSource = 'sensitivity'; }
   const ext = externalNoiseNfDb(env, freqMHz);
-  const noiseFloorDbm = ext > 0 && !iem
+  const rise = iem ? 0 : interferenceRiseDb(env, freqMHz);
+  const noiseFloorDbm = (ext > 0 && !iem
     ? kTB + 10 * Math.log10(Math.pow(10, systemNfDb / 10) + Math.pow(10, ext / 10) - 1)
-    : kTB + systemNfDb;
+    : kTB + systemNfDb) + rise;
   return {
+    interferenceRiseDb: rise,
     stages, systemNfDb, noiseFloorDbm, kTBDbm: kTB, receiverNfDb: rxNf, bandwidthKHz: bw, requiredSnrDb: required, requiredSource,
     externalNoiseNfDb: ext, sensitivityAtAntennaDbm: noiseFloorDbm + required, marginAtAntennaDb: null,
   };
@@ -675,6 +679,7 @@ export function solveLink(scene, link) {
   // optional rx.chain -> bodypack, plus the noise the Tx-side chain radiates (cascadeNoiseIem). marginDb = margin at the
   // receive antenna terminals over the system sensitivity (noise floor + required SNR).
   const cascade = iem ? cascadeNoiseIem(link, chain, rxChain, f, env, rxPowerDbm - txOutDbm) : cascadeNoise(link, chain, f, false, env);
+  if (cascade.interferenceRiseDb > 0) { step(`Interference floor +${cascade.interferenceRiseDb.toFixed(0)} dB (${env.interference}, note)`, 0); wf[wf.length - 1].note = true; }
   step(`System NF ${cascade.systemNfDb.toFixed(1)} dB (cascade, note)`, 0); wf[wf.length - 1].note = true;
   cascade.marginAtAntennaDb = rxPowerDbm - cascade.sensitivityAtAntennaDbm;
   const marginDb = cascade.marginAtAntennaDb;

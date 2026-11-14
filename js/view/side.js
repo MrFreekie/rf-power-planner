@@ -2,6 +2,7 @@
 // Horizontal axis s = metres along the line from Tx (s = 0); vertical = z (up). Viewport world = (s, -z).
 // Shows floor, reflectors crossing the slice, direct / floor-bounce rays, and draggable height handles.
 import { createViewport } from './viewport.js';
+import { chordSpan } from './platformGeom.js';
 import {
   createCanvasHost, activeLink, findItem, selectableIds, solveCached, fmtLen, fmtDb, statusColor,
   drawGrid, drawScaleBar, haloText, strokeHatchRect, clamp, round2, DEG, readTheme,
@@ -105,7 +106,9 @@ export function createSideView(canvas, store) {
     // deck and platforms as raised blocks where the slice crosses them
     for (const bx of platformBoxes(scene)) {
       let t0 = -Infinity, t1 = Infinity, ok = true;
-      for (const [o, d, lo, hi] of [[S.x, u.x, bx.x0, bx.x1], [S.y, u.y, bx.y0, bx.y1]]) {
+      const rp = bx.rotationDeg && (scene.platforms || []).find((q) => q.id === bx.id);
+      if (rp) { const sp = chordSpan(rp, S, u); if (sp) [t0, t1] = sp; else ok = false; } // rotated platform: its chord, not the bounding slab
+      else for (const [o, d, lo, hi] of [[S.x, u.x, bx.x0, bx.x1], [S.y, u.y, bx.y0, bx.y1]]) {
         if (Math.abs(d) < 1e-9) { if (o < lo || o > hi) ok = false; continue; }
         const a = (lo - o) / d, b = (hi - o) / d;
         t0 = Math.max(t0, Math.min(a, b)); t1 = Math.min(t1, Math.max(a, b));

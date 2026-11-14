@@ -163,38 +163,46 @@ export function haloText(ctx, th, text, x, y, { align = 'left', baseline = 'alph
  * Metre grid over the visible area. yLabel(v) maps world y to the displayed number (side view: -y = z).
  * Major lines every 5 steps; labels on the top and left edges.
  */
-export function drawGrid(ctx, vp, w, h, th, { yLabel = (v) => v, xName = '', yName = '' } = {}) {
+export function drawGrid(ctx, vp, w, h, th, { yLabel = (v) => v, xName = '', yName = '', xOrigin = 0, yOrigin = 0, yFlip = false } = {}) {
+  // Display value k*step sits at world x = xOrigin + k*step, and at world y = yOrigin - k*step (yFlip) or yOrigin + k*step.
+  // Plan: xOrigin = stage centre line, yOrigin = front edge, yFlip. Side view: origins 0 and yLabel maps -z to z.
   const step = niceGridStep(vp.pxPerM, 48);
   const b = vp.visibleBounds(w, h);
   const dec = step < 0.1 ? 2 : step < 1 ? 1 : 0;
+  const yWorld = (k) => (yFlip ? yOrigin - k : yOrigin + k);
+  const range = (axis) => {
+    if (axis === 'x') return [Math.floor((Math.min(b.x0, b.x1) - xOrigin) / step), Math.ceil((Math.max(b.x0, b.x1) - xOrigin) / step)];
+    const lo = Math.min(b.y0, b.y1), hi = Math.max(b.y0, b.y1);
+    return yFlip ? [Math.floor((yOrigin - hi) / step), Math.ceil((yOrigin - lo) / step)] : [Math.floor((lo - yOrigin) / step), Math.ceil((hi - yOrigin) / step)];
+  };
   const lines = (axis) => {
-    const lo = axis === 'x' ? b.x0 : Math.min(b.y0, b.y1), hi = axis === 'x' ? b.x1 : Math.max(b.y0, b.y1);
-    const i0 = Math.floor(lo / step), i1 = Math.ceil(hi / step);
+    const [i0, i1] = range(axis);
     if (i1 - i0 > 400) return;
     for (let i = i0; i <= i1; i++) {
       const major = i % 5 === 0;
       ctx.strokeStyle = major ? th.gridMajor : th.grid;
       ctx.lineWidth = major ? 1 : 0.7;
       ctx.beginPath();
-      if (axis === 'x') { const p = vp.worldToScreen(i * step, 0).x; ctx.moveTo(Math.round(p) + 0.5, 0); ctx.lineTo(Math.round(p) + 0.5, h); }
-      else { const p = vp.worldToScreen(0, i * step).y; ctx.moveTo(0, Math.round(p) + 0.5); ctx.lineTo(w, Math.round(p) + 0.5); }
+      if (axis === 'x') { const p = vp.worldToScreen(xOrigin + i * step, 0).x; ctx.moveTo(Math.round(p) + 0.5, 0); ctx.lineTo(Math.round(p) + 0.5, h); }
+      else { const p = vp.worldToScreen(0, yWorld(i * step)).y; ctx.moveTo(0, Math.round(p) + 0.5); ctx.lineTo(w, Math.round(p) + 0.5); }
       ctx.stroke();
     }
   };
   lines('x'); lines('y');
-  // labels on every 5th... or every line if there is room
+  // labels on every 5th line, or every line if there is room
   const labelEvery = step * vp.pxPerM >= 56 ? 1 : 5;
   const stepLabel = (axis) => {
-    const lo = axis === 'x' ? b.x0 : Math.min(b.y0, b.y1), hi = axis === 'x' ? b.x1 : Math.max(b.y0, b.y1);
-    for (let i = Math.floor(lo / step); i <= Math.ceil(hi / step); i++) {
+    const [i0, i1] = range(axis);
+    for (let i = i0; i <= i1; i++) {
       if (i % labelEvery !== 0) continue;
       const v = i * step;
+      const txt = (Math.abs(v) < 1e-9 ? 0 : v);
       if (axis === 'x') {
-        const p = vp.worldToScreen(v, 0).x;
-        if (p > 18 && p < w - 6) haloText(ctx, th, v.toFixed(dec), p, 13, { align: 'center', color: th.inkSoft, px: 11 });
+        const p = vp.worldToScreen(xOrigin + v, 0).x;
+        if (p > 18 && p < w - 6) haloText(ctx, th, txt.toFixed(dec), p, 13, { align: 'center', color: th.inkSoft, px: 11 });
       } else {
-        const p = vp.worldToScreen(0, v).y;
-        if (p > 22 && p < h - 6) haloText(ctx, th, yLabel(v).toFixed(dec), 4, p - 3, { color: th.inkSoft, px: 11 });
+        const p = vp.worldToScreen(0, yWorld(v)).y;
+        if (p > 22 && p < h - 6) haloText(ctx, th, (yFlip ? txt : yLabel(yWorld(v))).toFixed(dec), 4, p - 3, { color: th.inkSoft, px: 11 });
       }
     }
   };

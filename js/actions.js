@@ -50,7 +50,12 @@ export function setLinkField(store, linkId, path, value, o = {}) {
  * The chain an edit targets: the link chain ('main', default) or, on a mic link whose antenna B has its own cable run,
  * the antenna B chain ('antennaB'). Returns null when the target does not exist (antenna B shares the main chain).
  */
-function targetChain(link, target) {
+function targetChain(link, target, create = false) {
+  if (target === 'rx') { // IEM bodypack side: items between the bodypack antenna and the bodypack (link.rx.chain, created on first add)
+    if (link.kind !== 'iem' || !link.rx) return null;
+    if (!Array.isArray(link.rx.chain) && create) link.rx.chain = [];
+    return Array.isArray(link.rx.chain) ? link.rx.chain : null;
+  }
   if (target === 'antennaB') {
     const ab = link.rx && link.rx.diversity && link.rx.diversity.antennaB;
     return ab && Array.isArray(ab.chain) ? ab.chain : null;
@@ -67,7 +72,7 @@ export function addChainItem(store, linkId, item, index, opts = {}) {
   let ok = false;
   store.update((d) => {
     const link = findLink(d, linkId);
-    const chain = link && targetChain(link, opts.target);
+    const chain = link && targetChain(link, opts.target, true);
     if (!chain) return;
     const i = Number.isInteger(index) ? Math.max(0, Math.min(chain.length, index)) : chain.length;
     chain.splice(i, 0, made);
@@ -196,7 +201,7 @@ export function setModulation(store, linkId, partial = {}) {
   return store.update((d) => {
     const link = d.links.find((l) => l.id === linkId);
     if (!link) return;
-    if (!link.modulation) link.modulation = { type: 'analog-fm', digital: { preset: 'iem-ofdm-like-adaptive', fixedOrder: null, overrides: {} } };
+    if (!link.modulation) link.modulation = { type: 'analog-fm', digital: { preset: 'mic-qpsk-fixed', fixedOrder: null, overrides: {} } };
     const m = link.modulation;
     if (MOD_TYPES.includes(partial.type)) m.type = partial.type;
     if (typeof partial.preset === 'string' && partial.preset) m.digital.preset = partial.preset;
@@ -522,6 +527,10 @@ export function updatePlatform(store, id, partial = {}, o = {}) {
     for (const k of ['x', 'y']) if (fin(partial[k])) p[k] = clampTo(partial[k], PLATFORM_LIMITS.coord);
     for (const k of ['width', 'depth']) if (fin(partial[k])) p[k] = clampTo(partial[k], PLATFORM_LIMITS.size);
     if (fin(partial.topM)) p.topM = clampTo(partial.topM, PLATFORM_LIMITS.topM);
+    if (fin(partial.rotationDeg)) { // wrapped into (-180, 180]; 0 is stored as unset so unrotated platforms stay identical to old saves
+      const w = ((((partial.rotationDeg + 180) % 360) + 360) % 360) - 180, r = w === -180 ? 180 : w;
+      if (r === 0) delete p.rotationDeg; else p.rotationDeg = r;
+    }
   }, opts(o));
 }
 

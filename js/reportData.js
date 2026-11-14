@@ -8,6 +8,7 @@
 //   { link: LinkResult, squelch: squelch.get(id), rx: rxState.get(id), digital: digital.get(id), telemetry: telemetry.get(id),
 //     coverage: coverage.get(id), imd: imd.get(), now: Date | ISO string }
 import { solveLink } from './model/rf.js';
+import { dispX, dispY } from './ui/coords.js';
 import { formatPower, formatLength, formatDb } from './model/units.js';
 
 export const DISCLAIMER = 'Planning estimates only. The models are simplified and the parameters are generic; real propagation, hardware and local regulations vary. Verify critical coverage and frequency coordination with measurements on site.';
@@ -55,11 +56,12 @@ export function buildReportData(scene, linkId, results = {}) {
   // assumptions
   const A = out.assumptions;
   A.push(env.model === 'free-space' ? 'Propagation: free space (no ground or wall reflections).' : `Propagation: two-ray with ${env.floor} floor, ${env.polarisation} polarisation, plus single-bounce reflections from ${(scene.reflectors || []).length} wall(s); paths are summed coherently.`);
+  A.push('Coordinates: x = 0 on the stage centre line (positive to the right on the plan); y = 0 on the front (audience-side) edge, positive upstage, negative in front of the stage. Antenna azimuth is 0 toward the audience.');
   const plats = Array.isArray(scene.platforms) ? scene.platforms : [];
   A.push(`Item heights are measured above the local floor (${deck > 0 ? `the stage deck, ${formatLength(deck, u.length)} above ground, or ` : 'the stage floor or '}the top of the platform an item stands on); the ground is the reference for reflections.`);
   out.platforms = plats.map((p) => ({
     name: p.name, x: p.x, y: p.y, width: p.width, depth: p.depth, topM: p.topM, material: p.material,
-    text: `${p.name}: ${formatLength(p.width, u.length)} by ${formatLength(p.depth, u.length)} at (${p.x}, ${p.y}), top ${formatLength(p.topM, u.length)} above ground, ${p.material}.`,
+    text: `${p.name}: ${formatLength(p.width, u.length)} by ${formatLength(p.depth, u.length)} with its left edge at x ${formatLength(dispX(scene, p.x), u.length)} and back edge at y ${formatLength(dispY(scene, p.y), u.length)}, top ${formatLength(p.topM, u.length)} above ground, ${p.material}.`,
   }));
   if (plats.length) A.push(`${plats.length} raised platform(s) change the floor height and add reflecting surfaces; see the platform table.`);
   A.push(`Carrier frequency ${link.freqMHz} MHz; distances in metres internally, displayed in ${u.length}; powers displayed in ${u.power}.`);

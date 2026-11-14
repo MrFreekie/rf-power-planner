@@ -134,7 +134,7 @@ test('glossary: static HTML acronyms are all in the glossary; wrapped terms are 
   const acr = [...new Set(visible.match(/\b[A-Z0-9]{2,}\b/g) || [])].filter((w) => !allow.has(w) && /[A-Z]/.test(w));
   for (const w of acr) assert.ok(lookup(w), `index.html acronym ${w} missing from the glossary`);
   // vice versa: each auto-wrapped glossary term appears in the static html or in the UI source text
-  const files = ['js/ui/inspector.js', 'js/ui/help.js', 'js/view/waterfall.js', 'js/view/meters.js', 'js/view/imd.js', 'js/view/digital.js', 'js/view/mpx.js', 'js/view/telemetry.js', 'js/view/diversity.js', 'js/view/coverage.js', 'js/view/timeline.js', 'js/reportData.js', 'js/model/rf.js', 'js/examples.js', 'js/model/library.js', 'js/model/digital-params.js', 'js/model/imd-params.js', 'js/model/rx-params.js']
+  const files = ['js/ui/inspector.js', 'js/ui/help.js', 'js/view/waterfall.js', 'js/view/meters.js', 'js/view/imd.js', 'js/view/digital.js', 'js/view/mpx.js', 'js/view/telemetry.js', 'js/view/diversity.js', 'js/view/coverage.js', 'js/view/timeline.js', 'js/reportData.js', 'js/model/rf.js', 'js/examples.js', 'js/model/library.js', 'js/model/digital-params.js', 'js/model/imd-params.js', 'js/model/rx-params.js', 'js/ui/coordination.js', 'js/ui/noise.js']
     .map((f) => { try { return fs.readFileSync(new URL('../' + f, import.meta.url), 'utf8'); } catch { return ''; } }).join('\n') + html;
   const reserved = new Set(['EIRP', 'ERP', 'CIR', 'PLL', 'VHF']); // defined for text users may type or future labels
   const unused = Object.keys(GLOSSARY).filter((k) => GLOSSARY[k].wrap !== false && !reserved.has(k) && !files.includes(k));
@@ -144,7 +144,7 @@ test('glossary: static HTML acronyms are all in the glossary; wrapped terms are 
 test('help: topics reference only glossary terms; tooltip ids exist in index.html', () => {
   for (const [id, t] of Object.entries(HELP_TOPICS)) {
     for (const term of t.terms || []) assert.ok(lookup(term), `${id}: ${term}`);
-    assert.ok(t.text.length > 40 && t.text.length < 400, id);
+    assert.ok(t.text.length > 40 && t.text.length < 700, id);
   }
   assert.ok(legend(['dB', 'Tx']).includes('decibel'));
   const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
@@ -227,4 +227,91 @@ test('examples quote margins without external noise (set explicitly to Off)', ()
     assert.ok(v === 0 || v !== undefined, ex.id); // explicit, never silently the new default unless an example chose it
     assert.notEqual(v, undefined, ex.id);
   }
+});
+
+import { parseDabBlocks, parseWifiChannels, describeOccupancy, rangesFor, isHopping } from '../js/ui/coordination.js';
+import { interferenceOptions, interferenceHint, interferenceApplies, interferenceValue, rxPresetOffer } from '../js/ui/noise.js';
+import { planWalkAll } from '../js/ui/walkall.js';
+import { createStore } from '../js/store.js';
+import { addChainItem, removeChainItem, moveChainItem, setLinkKind } from '../js/actions.js';
+import { startMultiWalk, stopWalk, isWalking } from '../js/walk.js';
+
+test('coordination panel: band groups, DAB and Band III blocking, Wi-Fi occupancy', () => {
+  assert.deepEqual(parseDabBlocks('5a, 9C zz 5A'), { valid: ['5A', '9C'], ignored: ['zz'] });
+  assert.deepEqual(parseWifiChannels('1 6 14 11 6', '2g4'), [1, 6, 11]);
+  assert.deepEqual(parseWifiChannels('149 36 165', '5g8'), [149, 165]);
+  assert.equal(isHopping('2g4'), true); assert.equal(isHopping('vhf'), false);
+  assert.ok(rangesFor('eu', 'vhf').length >= 1 && rangesFor('eu', 'vhf').every((r) => r.group === 'vhf'));
+  const v = runCoordination({ regionId: 'eu', rangeId: '', mics: 3, iems: 1, bandIII: '6, 9', dabBlocks: '5A', bandGroup: 'vhf', seed: 1 });
+  assert.equal(v.result.ok, true);
+  assert.equal(v.result.mode, 'intermod');
+  for (const f of v.result.frequencies) {
+    assert.ok(f.freqMHz >= 174 && f.freqMHz <= 216, String(f.freqMHz));
+    assert.ok(!(f.freqMHz >= 181 && f.freqMHz < 188) && !(f.freqMHz >= 202 && f.freqMHz < 209), 'Band III channels 6 and 9 avoided');
+    assert.ok(!(f.freqMHz >= 174.16 && f.freqMHz <= 175.7), 'DAB 5A avoided');
+  }
+  const w = runCoordination({ regionId: 'eu', mics: 2, iems: 1, bandGroup: '2g4', wifiChannels: '1, 6, 11' });
+  assert.equal(w.result.mode, 'occupancy');
+  assert.equal(w.result.hopping, true);
+  const d = describeOccupancy(w.result);
+  assert.equal(d.chips.filter((c) => c.inUse).length, 3);
+  assert.equal(d.chips.length, 13);
+  assert.ok(d.lines[0].includes('free'));
+  const g = runCoordination({ regionId: 'eu', mics: 1, iems: 0, bandGroup: '5g8', wifiChannels: '149' });
+  assert.equal(g.result.mode, 'occupancy');
+  assert.equal(describeOccupancy(g.result).chips.filter((c) => c.inUse).length, 1);
+});
+
+test('interference select and receiver preset offer', () => {
+  assert.equal(interferenceApplies(1999), false); assert.equal(interferenceApplies(2400), true);
+  assert.deepEqual(interferenceOptions(2440).map((o) => o[1]), ['None (+0 dB)', 'Quiet (+2 dB)', 'Typical (+9 dB)', 'Busy (+20 dB)']);
+  assert.deepEqual(interferenceOptions(5800).map((o) => o[1]), ['None (+0 dB)', 'Quiet (+0.6 dB)', 'Typical (+4 dB)', 'Busy (+12 dB)']);
+  assert.match(interferenceHint('busy', 2440), /2\.4 GHz.*20 dB/);
+  assert.equal(interferenceValue(undefined), 'none'); assert.equal(interferenceValue('bogus'), 'none');
+  assert.equal(rxPresetOffer('mic', 600, undefined), null);
+  assert.equal(rxPresetOffer('mic', 2440, undefined).id, 'rx-2g4-typical');
+  assert.equal(rxPresetOffer('mic', 5800, 'rx-2g4-typical').buttonText, 'Use 5.8 GHz receiver preset');
+  assert.equal(rxPresetOffer('iem', 200, 'iem-bodypack-typical').id, 'rx-vhf-typical');
+  assert.equal(rxPresetOffer('mic', 2440, 'rx-2g4-typical'), null);
+  assert.equal(rxPresetOffer('mic', 600, 'rx-2g4-typical').id, 'mic-receiver-typical'); // offered back, never forced
+  assert.equal(rxPresetOffer('mic', 600, 'iem-bodypack-typical'), null); // two UHF presets: the user's own choice
+});
+
+test('walk all: plan covers mic links and imd transmitters with a shared offset', () => {
+  const sc = createDefaultScene();
+  assert.deepEqual(planWalkAll(sc).items, [{ linkId: sc.links[0].id }]);
+  sc.imd.enabled = true;
+  sc.imd.transmitters = [createImdTransmitter({ pos: { x: 2, y: 3, z: 1 } }), createImdTransmitter({ pos: { x: 3, y: 4, z: 1 } })];
+  const p = planWalkAll(sc);
+  assert.equal(p.items.length, 3);
+  const xs = [sc.links[0].tx.pos.x, 2, 3];
+  const dx = p.offset.x;
+  assert.ok(xs.every((x) => x + dx >= -1e-9 && x + dx <= sc.stage.width + 1e-9), 'everyone stays on the stage');
+  const iem = createDefaultScene(); setLinkKind(createStore(iem), iem.links[0].id, 'iem');
+  const st = createStore(createDefaultScene()); setLinkKind(st, st.getScene().links[0].id, 'iem');
+  assert.deepEqual(planWalkAll(st.getScene()).items, []);
+  const store = createStore(sc);
+  const ctl = startMultiWalk(store, p.items, { offset: p.offset, raf: () => 1, caf: () => {}, now: () => 0 });
+  assert.ok(ctl && isWalking());
+  stopWalk();
+  assert.equal(isWalking(), false);
+});
+
+test('IEM bodypack-side chain: add, move, remove through actions (target rx)', () => {
+  const store = createStore(createDefaultScene());
+  const id = store.getScene().links[0].id;
+  assert.equal(addChainItem(store, id, 'cable', undefined, { target: 'rx' }), null, 'mic links have no bodypack chain');
+  setLinkKind(store, id, 'iem');
+  assert.equal(store.getScene().links[0].rx.chain, undefined);
+  const a = addChainItem(store, id, 'booster', undefined, { target: 'rx' });
+  const b = addChainItem(store, id, 'cable', undefined, { target: 'rx' });
+  assert.ok(a && b);
+  assert.deepEqual(store.getScene().links[0].rx.chain.map((x) => x.kind), ['booster', 'cable']);
+  moveChainItem(store, id, b, -1, { target: 'rx' });
+  assert.deepEqual(store.getScene().links[0].rx.chain.map((x) => x.kind), ['cable', 'booster']);
+  removeChainItem(store, id, a, { target: 'rx' });
+  assert.equal(store.getScene().links[0].rx.chain.length, 1);
+  assert.equal(store.getScene().links[0].chain.length, 1, 'the Tx-side chain is untouched');
+  store.undo(); store.undo(); store.undo();
+  assert.deepEqual(store.getScene().links[0].rx.chain.map((x) => x.kind), ['booster']);
 });

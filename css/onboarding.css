@@ -72,3 +72,11 @@ abbr.gl:focus-visible { outline: 2px solid var(--focus, var(--ink, #1d2733)); ou
 .ob-field { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
 .ob-field input[type="number"] { width: 4.5em; }
 .ob-coord-sum { margin: 6px 0; font-size: 13px; font-weight: 600; }
+
+/* ---- band groups, Wi-Fi occupancy strip, preset offer ---- */
+.ob-field[hidden], .ob-coord-out [hidden], #coordination [hidden] { display: none !important; }
+.ob-wifi { list-style: none; margin: 6px 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px; }
+.ob-wifi-ch { min-width: 2.2em; padding: 2px 6px; text-align: center; font-size: 12px; font-variant-numeric: tabular-nums; border: 1px solid var(--line, #cfc8b6); border-radius: var(--radius, 3px); background: var(--paper, #fbf9f3); color: var(--ink-soft, #5b6673); }
+.ob-wifi-ch[data-in-use="true"] { border: 2px solid var(--marginal, #d99a00); background: var(--marginal-bg, rgba(217, 154, 0, 0.14)); color: var(--ink, #1d2733); font-weight: 600; }
+.insp-offer { margin: 4px 0; }
+.insp-offer[hidden] { display: none; }
