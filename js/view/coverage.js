@@ -6,6 +6,7 @@ import { coverage } from '../coverageTracker.js';
 import { covView, setCovView } from './coverageUi.js';
 import { suggestFix } from '../model/coverage.js';
 import { createChainItem } from '../model/scene.js';
+import { addOrLimit } from '../ui/limitNote.js';
 import { addZone, removeZone, addZonePoint, removeZonePoint, setCoverageMode, moveBranch, updateBranch } from '../actions.js';
 
 const MODES = [['power', 'Power sum'], ['coherent', 'Coherent'], ['best', 'Best antenna']];
@@ -64,7 +65,7 @@ export function mountCoverage({ container, store }) {
   let suggestFor = null, suggestions = [];
 
   const selectedZone = () => (store.getScene().zones || []).find((z) => z.id === store.getSelection());
-  bAdd.addEventListener('click', () => { const id = addZone(store); if (id) store.select(id); });
+  bAdd.addEventListener('click', () => { addOrLimit(store, bAdd, 'zone', () => addZone(store)); });
   bDel.addEventListener('click', () => { const z = selectedZone(); if (z) { removeZone(store, z.id); store.select(null); } });
   bVert.addEventListener('click', () => {
     const z = selectedZone(); if (!z) return;

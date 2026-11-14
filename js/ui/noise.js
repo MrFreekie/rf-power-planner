@@ -33,14 +33,14 @@ export function noiseOptions(stored, freqMHz) {
 export const noiseHint = () => 'External RF noise (TV, radios, electronics) raises the noise floor at the receive antenna, so it lowers the SNR and margin. It is stronger at low frequencies and fades with frequency. Old scenes without this setting are treated as Off.';
 
 // ---- interference floor (2.4 / 5.8 GHz) and receiver preset offer ------------------------------------------------------------------
-import { INTERFERENCE_LEVELS, INTERFERENCE_RISE_DB, INTERFERENCE_MIN_MHZ, interferenceBandOf, RX_PRESETS, rxPresetForFreq } from '../model/rx-params.js';
+import { INTERFERENCE_LEVELS, INTERFERENCE_RISE_DB, interferenceBandOf, isInterferenceBand, RX_PRESETS, rxPresetForFreq } from '../model/rx-params.js';
 
 const LEVEL_LABELS = { none: 'None', quiet: 'Quiet', typical: 'Typical', busy: 'Busy' };
 const BAND_NAMES = { '2g4': '2.4 GHz', '5g8': '5.8 GHz' };
 const r1 = (v) => String(Math.round(v * 10) / 10);
 
-/** The interference select only applies at 2 GHz and above. */
-export const interferenceApplies = (freqMHz) => Number.isFinite(freqMHz) && freqMHz >= INTERFERENCE_MIN_MHZ;
+/** The interference select only applies inside the 2.4 GHz (2400-2500 MHz) and 5.8 GHz (5725-5875 MHz) licence-exempt bands. */
+export const interferenceApplies = (freqMHz) => Number.isFinite(freqMHz) && isInterferenceBand(freqMHz);
 export const interferenceValue = (v) => (INTERFERENCE_LEVELS.includes(v) ? v : 'none');
 
 /** [[value, label]] for the Interference select; the labels carry the dB rise for the band of this carrier. */

@@ -141,6 +141,11 @@ const bodyEl = (e) => -6 * Math.pow(Math.sin(e * DEG), 2);
 export const ANTENNAS = {
   dipole: { name: 'Dipole (1/2 wave)', gainDbi: 2.15, patternFn: 'dipole',
     pattern: { azDb: table(flat), elDb: table(dipoleEl) } }, // gain: theory 2.15 dBi
+  // Quarter-wave whip / monopole: a 1/4 wave element over a small ground plane (bodypack case, receiver chassis, the user's hand).
+  // Over an infinite ground plane it would be 5.15 dBi (the 2.15 dBi dipole plus 3 dB for the missing half space); a small or
+  // lossy ground plane gives roughly 0 to 2 dBi, so 1 dBi is used (approx). Pattern: the dipole's torus (no azimuth variation).
+  quarterwave: { name: 'Quarter-wave whip / monopole (1/4 wave)', gainDbi: 1, patternFn: 'dipole',
+    pattern: { azDb: table(flat), elDb: table(dipoleEl) } }, // approx, see PHYSICS.md
   omni: { name: 'Omni (0 dBi reference)', gainDbi: 0, patternFn: 'omni',
     pattern: { azDb: table(flat), elDb: table(flat) } },
   // Shure PA805 / UA860 style paddle (~7 dBi, HPBW ~70-80 deg, F/B ~ 15-20 dB)

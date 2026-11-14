@@ -387,3 +387,30 @@ test('Tx power limit hint: UK limit text, warning when above, region shared with
   setCoordRegion('nowhere'); assert.equal(getCoordRegion(), 'us');
   setCoordRegion('uk'); off();
 });
+
+// ---- release review: conducted limits, interference band gate, IM3 other carriers ----
+test('txLimitHint: a conducted limit counts Tx power only, not antenna gain', () => {
+  const ok = txLimitHint('us', 600, 20, 10); // 100 mW conducted vs 250 mW; 10 dBi gain must not count
+  assert.ok(ok && ok.over === false, ok && ok.text);
+  const over = txLimitHint('us', 600, 25, 0); // 316 mW conducted vs 250 mW
+  assert.equal(over.over, true); assert.match(over.text, /Tx power is/);
+});
+test('interferenceApplies follows the 2.4 and 5.8 GHz bands, not a plain >= 2000 MHz', () => {
+  assert.equal(interferenceApplies(2100), false); assert.equal(interferenceApplies(3500), false);
+  assert.equal(interferenceApplies(2437), true); assert.equal(interferenceApplies(5800), true);
+  assert.equal(interferenceApplies(NaN), false);
+});
+import { otherCarriersAt, rxConfig as rxCfg2 } from '../js/rxTracker.js';
+import { createDefaultScene as mkScene } from '../js/model/scene.js';
+test('rxConfig passes otherCarriersDbm; otherCarriersAt is empty without IMD and skips the wanted channel', () => {
+  const sc = mkScene(); const link = sc.links[0];
+  assert.deepEqual(otherCarriersAt(sc, link), []);
+  assert.equal(rxCfg2(link).otherCarriersDbm, undefined);
+  assert.deepEqual(rxCfg2(link, [-30, -40]).otherCarriersDbm, [-30, -40]);
+  const sc2 = structuredClone(sc);
+  sc2.imd = { enabled: true, transmitters: [
+    { id: 'a', name: 'A', freqMHz: link.freqMHz, powerDbm: 10, pos: { x: 1, y: 1, z: 1.5 } },
+    { id: 'b', name: 'B', freqMHz: link.freqMHz + 1.2, powerDbm: 10, pos: { x: 2, y: 1, z: 1.5 } }] };
+  const o = otherCarriersAt(sc2, sc2.links[0]);
+  assert.equal(o.length, 1); assert.ok(Number.isFinite(o[0]));
+});

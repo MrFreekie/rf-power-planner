@@ -327,6 +327,16 @@ function renderToolbar(scene) {
   $('btn-redo').disabled = !store.canRedo();
 }
 
+function renderWarnings(list) {
+  const ul = $('r-warnings');
+  const items = Array.isArray(list) ? list : [];
+  const sig = items.join('');
+  if (ul.dataset.sig === sig) return;
+  ul.dataset.sig = sig;
+  ul.replaceChildren(...items.map((t) => { const li = document.createElement('li'); li.textContent = t; return li; }));
+  ul.hidden = items.length === 0;
+}
+
 function renderResults(scene) {
   const link = scene.links[0];
   const status = $('r-status');
@@ -341,10 +351,12 @@ function renderResults(scene) {
     $('r-floor').textContent = r.cascade ? formatPower(r.cascade.noiseFloorDbm, u.power) : '-';
     status.textContent = r.status.toUpperCase();
     status.dataset.status = r.status;
+    renderWarnings(r.warnings);
     showError(loadError);
   } catch (err) {
     for (const id of ['r-distance', 'r-rx', 'r-input', 'r-margin', 'r-nf', 'r-floor', 'r-status']) $(id).textContent = '-';
     status.dataset.status = '';
+    renderWarnings([]);
     showError(`Could not solve link: ${err.message}`);
   }
 }
@@ -417,7 +429,7 @@ if (staleCleared) showStatus('Your previously saved scene could not be read, so 
 // venue underlay button and dialog (optional: a failure must not break the planner)
 try {
   const { mountVenue } = await import('./ui/venue.js');
-  await mountVenue({ button: $('btn-venue'), store, isLocked: () => document.body.dataset.readonly === 'true' });
+  await mountVenue({ button: $('btn-venue'), store });
 } catch (err) { console.error('venue', err); $('btn-venue').hidden = true; }
 
 const openHash = () => handleHash().catch((err) => { console.error(err); showError(`Could not open the link: ${err.message}`); });

@@ -75,11 +75,12 @@ export function txLimitHint(regionId, freqMHz, txPowerDbm, antennaGainDbi = 0) {
   let over = false;
   if (Number.isFinite(txPowerDbm)) {
     const eirp = txPowerDbm + (Number.isFinite(antennaGainDbi) ? antennaGainDbi : 0);
-    const rad = d.unit === 'ERP' ? eirp - ERP_TO_EIRP_DB : eirp;
+    // 'conducted' limits (US Part 74) are on the transmitter output power: antenna gain does not count
+    const rad = d.unit === 'conducted' ? txPowerDbm : d.unit === 'ERP' ? eirp - ERP_TO_EIRP_DB : eirp;
     const radMw = Math.pow(10, rad / 10);
     const top = Math.max(d.handheldMw, d.bodyWornMw);
-    if (radMw > top * 1.0001) { over = true; text += ` Tx power plus antenna gain is about ${mw(radMw)} mW ${d.unit}, above that limit.`; }
-    else if (radMw > d.handheldMw * 1.0001) text += ` About ${mw(radMw)} mW ${d.unit} radiated: above the handheld figure, so only for a body-worn transmitter.`;
+    if (radMw > top * 1.0001) { over = true; text += ` ${d.unit === 'conducted' ? 'Tx power is' : 'Tx power plus antenna gain is about'} ${mw(radMw)} mW ${d.unit}, above that limit.`; }
+    else if (radMw > d.handheldMw * 1.0001) text += ` About ${mw(radMw)} mW ${d.unit === 'conducted' ? 'conducted' : d.unit} ${d.unit === 'conducted' ? 'output' : 'radiated'}: above the handheld figure, so only for a body-worn transmitter.`;
   }
   return { text, over, level: v.level };
 }

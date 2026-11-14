@@ -20,6 +20,7 @@ const IMD_PRESETS = [['mic-rack-typical', 'Mic rack, typical'], ['iem-combiner-n
 import { createChainItem } from '../model/scene.js';
 import { dispAxis, internalAxis, dispRange, COORD_HINT } from './coords.js';
 import { txLimitHint, getCoordRegion } from './region.js';
+import { addOrLimit } from './limitNote.js';
 import { txPresetOptions, powerOptionChoices, currentPowerOption, lowIntermodAvailable, presetNotes, txFigures, rxFigures, tuningHint, rxPresetChoices, isFmRxPreset, LOW_IM_LABEL } from './fmui.js';
 import { setTxFmPreset, setTxPowerOption, setTxLowIntermod, setRxFmPreset, setImdTransmitterFm } from '../actions.js';
 import { noiseOptions, noiseValue, noiseFromChoice, noiseHint, interferenceApplies, interferenceOptions, interferenceValue, interferenceHint, rxPresetOffer } from './noise.js';
@@ -612,7 +613,7 @@ export function mountInspector({ container, store }) {
       box.append(fields);
       body.append(box);
     });
-    body.append(button('Add transmitter', 'imd-add', () => { const id = addImdTransmitter(store); if (id) store.select(id); }));
+    body.append(button('Add transmitter', 'imd-add', (e) => { addOrLimit(store, e && e.currentTarget, 'transmitter', () => addImdTransmitter(store)); }));
   }
 
   function buildPlatforms(body, c) {
@@ -625,7 +626,7 @@ export function mountInspector({ container, store }) {
     });
     if (!(c.scene.platforms || []).length) body.append(el('p', 'hint', 'No platforms. Add one to put a riser on the stage.'));
     body.append(list);
-    body.append(button('Add platform', 'plat-add', () => { const id = addPlatform(store); if (id) store.select(id); }));
+    body.append(button('Add platform', 'plat-add', (e) => { addOrLimit(store, e && e.currentTarget, 'platform', () => addPlatform(store)); }));
     const p0 = c.found?.type === 'platform' ? c.found.item : null;
     if (!p0) return;
     const id = p0.id;
@@ -872,9 +873,8 @@ export function mountInspector({ container, store }) {
     });
     if (!c.scene.reflectors.length) body.append(el('p', 'hint', 'No reflectors. Add walls, glass or metal to see multipath.'));
     body.append(list);
-    body.append(button('Add reflector', 'refl-add', () => {
-      const id = addReflector(store);
-      store.select(id);
+    body.append(button('Add reflector', 'refl-add', (e) => {
+      addOrLimit(store, e && e.currentTarget, 'reflector', () => addReflector(store));
     }));
 
     const idx = c.found?.type === 'reflector' ? c.scene.reflectors.findIndex((r) => r.id === c.found.item.id) : -1;

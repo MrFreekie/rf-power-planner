@@ -85,6 +85,7 @@ export function buildReportData(scene, linkId, results = {}) {
   }
 
   const W = out.warnings;
+  if (res && Array.isArray(res.warnings)) for (const t of res.warnings) W.push({ kind: 'model', severity: 'warning', text: t });
   const sq = results.squelch;
   if (sq && !sq.open) W.push({ kind: 'squelch', severity: 'warning', text: `The squelch is closed (reason: ${sq.reason || 'carrier'}); the audio is muted in this position.` });
   const ov = results.rx && results.rx.overload;

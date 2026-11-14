@@ -16,10 +16,36 @@ const CS_KEYS = ['systemNfDb', 'noiseFloorDbm', 'sensitivityAtAntennaDbm', 'marg
 const DV_KEYS = ['mode', 'active', 'switched', 'switchCount', 'combinedDbm', 'aDbm', 'bDbm', 'gainDb', 'cableLossADb', 'cableLossBDb'];
 
 /** Overload parameters: the link's receiver preset overlaid with link.rx.overload (maxInputDbm, p1dBDbm). */
-export function rxConfig(link) {
+export function rxConfig(link, otherCarriersDbm) {
   const rx = (link && link.rx) || {};
   const preset = RX_PRESETS[rx.rxPreset] || RX_PRESETS['iem-bodypack-typical'];
-  return { ...preset, ...(rx.overload || {}) };
+  const cfg = { ...preset, ...(rx.overload || {}) };
+  if (Array.isArray(otherCarriersDbm) && otherCarriersDbm.length) cfg.otherCarriersDbm = otherCarriersDbm;
+  return cfg;
+}
+
+const DEFAULT_ANT = { type: 'omni', gainDbi: 0, orientation: { az: 0, el: 0 } };
+let othersKey = '', othersVal = [];
+/**
+ * Levels (dBm at this receiver's input) of the other transmitters of the scene's intermodulation demo, so the receiver model can add the
+ * IM3 noise rise (overload.js cfg.otherCarriersDbm). Empty when the demo is off or has no other tones. A tone on this link's own channel
+ * is the wanted carrier and is skipped. The last result is memoised on the inputs that change it.
+ */
+export function otherCarriersAt(scene, link) {
+  const m = scene && scene.imd;
+  if (!m || !m.enabled || !Array.isArray(m.transmitters) || m.transmitters.length < 1 || !link || !link.rx || !link.rx.pos) return [];
+  const key = JSON.stringify([m.transmitters, link.rx.pos, link.rx.antenna, link.chain, link.freqMHz, scene.reflectors, scene.stage, m.combiner]);
+  if (key === othersKey) return othersVal;
+  const out = [];
+  for (const t of m.transmitters) {
+    if (!t || !t.pos || !Number.isFinite(t.freqMHz) || Math.abs(t.freqMHz - link.freqMHz) < 1e-6) continue;
+    try {
+      const r = solveLink(scene, { id: `imd-${t.id}`, kind: 'mic', freqMHz: t.freqMHz, tx: { pos: t.pos, powerDbm: t.powerDbm, antenna: t.antenna || DEFAULT_ANT }, rx: { ...link.rx, bodyLossDb: 0, diversity: undefined }, chain: link.chain || [] });
+      if (Number.isFinite(r.inputPowerDbm)) out.push(r.inputPowerDbm);
+    } catch (e) { /* a tone that cannot be solved is skipped */ }
+  }
+  othersKey = key; othersVal = out;
+  return out;
 }
 
 const sameObj = (a, b, keys) => (a === b) || (!!a && !!b && keys.every((k) => Object.is(a[k], b[k])));
@@ -57,7 +83,7 @@ export function createRxTracker({ now = () => (typeof performance !== 'undefined
       levelDbm = r.inputPowerDbm; rxPowerDbm = r.rxPowerDbm; ovInput = levelDbm;
       m.div = null;
     }
-    const ov = { ...overloadStep(m.ov, ovInput, rxConfig(link)), inputDbm: ovInput };
+    const ov = { ...overloadStep(m.ov, ovInput, rxConfig(link, otherCarriersAt(scene, link))), inputDbm: ovInput };
     m.ov = ov;
     const prev = states.get(link.id) || null;
     const cascade = casc ? Object.fromEntries(CS_KEYS.map((k) => [k, casc[k]])) : null;

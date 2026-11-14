@@ -12,6 +12,8 @@ import { telemetry, dataConfig } from '../telemetryTracker.js';
 import { squelch } from '../squelchTracker.js';
 import { digitalConfig } from '../digitalTracker.js';
 import { mpxMessage, modeText, SPEC_DB } from './mpx.js';
+import { drawMonoMpx, isStereoMpx, monoInputs, monoSummary, monoNotes } from './spectraMono.js';
+export { drawMonoMpx, isStereoMpx, monoInputs, monoSummary, monoNotes };
 
 export const SPECTRA = Object.freeze([
   { id: 'audio', label: 'Audio spectrum' },
@@ -218,12 +220,17 @@ export function drawAudio(ctx, w, h, th, a, inp, hoverX) {
   hoverMark(ctx, th, f, h, w, hoverX, xs, rs.db, (x) => { const hz = audioAxis.fromX(x); return `${hzText(hz)} (${bandLabel(nearestBand(hz))} band)`; }, (v) => `${v.toFixed(0)} dB`);
 }
 
+/** Fixed RF spectrum axis limits, dBm per RBW. */
+export const RF_SPECTRUM_TOP_DBM = -20, RF_SPECTRUM_BOTTOM_DBM = -120;
+
 /** RF spectrum panel. s = rfSpectrum result, inp = the arguments it was made from. */
 export function drawRf(ctx, w, h, th, s, inp, hoverX) {
   if (!s || !s.freqsMHz || !s.freqsMHz.length) { note(ctx, w, h, th, 'No received level for this link, so there is no RF spectrum to show.'); return; }
   const xs = s.freqsMHz.map((m) => (m - inp.carrierMHz) * 1000);
   const lo = s.noiseDbm, hi = Math.max(...s.levelsDbm.filter(fin), s.noiseDbm); // far skirts can be hundreds of dB down: the axis follows the noise trace
-  const yMin = Math.floor((lo - 12) / 10) * 10, yMax = Math.max(Math.ceil((hi + 8) / 10) * 10, yMin + 40);
+  // Fixed scale so a level change moves the trace instead of rescaling the axis: top at RF_SPECTRUM_TOP_DBM, bottom at
+  // RF_SPECTRUM_BOTTOM_DBM. It only extends when the noise floor is below the bottom or the signal rises above the top.
+  const yMin = Math.min(RF_SPECTRUM_BOTTOM_DBM, Math.floor((lo - 12) / 10) * 10), yMax = Math.max(RF_SPECTRUM_TOP_DBM, Math.ceil((hi + 8) / 10) * 10);
   const xMin = xs[0], xMax = xs[xs.length - 1];
   const f = frame(ctx, w, h, th, { xMin, xMax, yMin, yMax, xTicks: niceTicks(xMin, xMax, w < 300 ? 4 : 6), yTicks: niceTicks(yMin, yMax, 4), xFmt: (v) => (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v), xName: `offset from ${inp.carrierMHz} MHz (kHz)`, yName: `dBm per RBW (${fin(s.rbwKhz) ? s.rbwKhz.toFixed(0) : '-'} kHz)`, L: 44 });
   f.xMin = xMin; f.xMax = xMax;
@@ -392,7 +399,12 @@ export function mountSpectra({ container, store, now = () => performance.now() }
         let s = null; if (inp) { try { s = model.rfSpectrum(inp); } catch (e) { console.warn(e); } }
         res = { s, inp };
       }
-    } else if (link && !mpxMessage(link) && mst) res = { st: mst, link };
+    } else if (link && isStereoMpx(link)) { if (mst) res = { st: mst, link }; }
+    else if (link && model && model.monoBasebandSpectrum) {
+      const inp = monoInputs(link, mst, r, t, Math.max(120, Math.min(400, Math.round(w - 42))));
+      let m = null; try { m = model.monoBasebandSpectrum(inp); } catch (e) { console.warn(e); }
+      res = { m, inp };
+    }
     cache[id] = res;
     return { res, link, mst };
   }
@@ -406,10 +418,10 @@ export function mountSpectra({ container, store, now = () => performance.now() }
       } else if (id === 'rf') {
         if (!res) note(ctx, w, h, th, link ? 'RF spectrum model not loaded.' : 'No link selected.'); else drawRf(ctx, w, h, th, res.s, res.inp || { carrierMHz: 0 }, hv);
       } else {
-        const m = mpxMessage(link);
-        if (m) note(ctx, w, h, th, m);
-        else if (!mst) note(ctx, w, h, th, 'Waiting for the MPX model.');
-        else drawMpx(ctx, w, h, th, { state: mst, link, hoverX: hv });
+        if (!link) note(ctx, w, h, th, 'No link selected.');
+        else if (isStereoMpx(link)) { if (!mst) note(ctx, w, h, th, 'Waiting for the MPX model.'); else drawMpx(ctx, w, h, th, { state: mst, link, hoverX: hv }); }
+        else if (!res || !res.m) note(ctx, w, h, th, 'MPX baseband model not loaded.');
+        else drawMonoMpx(ctx, w, h, th, { m: res.m, inp: res.inp, hoverX: hv });
       }
       panels[id].canvas.dataset.ms = (now() - t0).toFixed(2);
     };
@@ -420,12 +432,12 @@ export function mountSpectra({ container, store, now = () => performance.now() }
     const texts = {
       audio: c.audio && c.audio.a ? audioSummary(c.audio.a, c.audio.inp) : 'Audio spectrum not available.',
       rf: c.rf && c.rf.inp ? rfSummary(c.rf.s, c.rf.inp) : 'RF spectrum not available.',
-      mpx: c.mpx ? mpxSummary(c.mpx.st) : 'MPX baseband spectrum not shown for this link.',
+      mpx: c.mpx ? (c.mpx.inp ? monoSummary(c.mpx.m, c.mpx.inp) : mpxSummary(c.mpx.st)) : 'MPX baseband spectrum not shown: no link selected.',
     };
     const notes = {
       audio: ['Standard or illustrative: the signal is simulated, not real audio. Levels are illustrative.', 'Frequency is on a logarithmic axis because hearing works in ratios: each octave is a doubling of frequency (31.5, 63, 125 Hz and so on up to 16 kHz, the standard ISO octave band centres), so the low notes get as much room as the high ones.', ...((c.audio && c.audio.a && c.audio.a.notes) || [])],
       rf: ["Only the selected link's own carrier is simulated: no other devices, intermodulation or interference.", 'The received level and the channel noise floor are the planner numbers; the carrier shape is illustrative.', ...((c.rf && c.rf.s && c.rf.s.notes) || [])],
-      mpx: ['Standard: the 19 kHz pilot, 38 kHz stereo subcarrier and 57 kHz RDS positions are FM broadcast practice. Levels are illustrative.'],
+      mpx: c.mpx && c.mpx.inp ? monoNotes(c.mpx.m) : ['Standard: the 19 kHz pilot, 38 kHz stereo subcarrier and 57 kHz RDS positions are FM broadcast practice. Levels are illustrative.'],
     };
     for (const id of Object.keys(texts)) { const nt = notes[id].join(' '); if (nt !== panels[id].aboutBody.textContent) panels[id].aboutBody.textContent = nt; }
     for (const id of Object.keys(texts)) {

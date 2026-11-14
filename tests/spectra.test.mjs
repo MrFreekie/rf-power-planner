@@ -150,3 +150,60 @@ test('audio panel requests enough bins for a log axis and draws the labelled oct
   }
   assert.match(audioSummary(a, inp), /logarithmic axis/);
 });
+
+// ---- mono MPX view (mic and mono IEM) ----
+import { monoBasebandSpectrum } from '../js/model/spectrum-views.js';
+import { isStereoMpx, monoInputs, monoSummary, drawMonoMpx } from '../js/view/spectra.js';
+
+const micLink = { id: 'm1', kind: 'mic' };
+const iemMono = { id: 'i1', kind: 'iem', mpx: { enabled: false } };
+const iemStereo = { id: 'i2', kind: 'iem', mpx: { enabled: true } };
+
+test('mono view: stereo view only for an IEM with MPX on', () => {
+  assert.equal(isStereoMpx(micLink), false);
+  assert.equal(isStereoMpx(iemMono), false);
+  assert.equal(isStereoMpx(iemStereo), true);
+  assert.equal(isStereoMpx(null), false);
+});
+
+test('mono view: mic has a tone key, no pilot, no data by default', () => {
+  const inp = monoInputs(micLink, null, { inputPowerDbm: -60, cascade: { noiseFloorDbm: -110 } }, 0, 200);
+  assert.equal(inp.kind, 'mic'); assert.equal(inp.cnrDb, 50); assert.equal(inp.dataConfig.enabled, false);
+  const m = monoBasebandSpectrum(inp);
+  assert.deepEqual(m.markers.map((k) => k.name), ['Tone key']);
+  assert.equal(m.markers[0].status, 'assumed');
+  const s = monoSummary(m, inp);
+  assert.match(s, /microphone/); assert.match(s, /assumed and illustrative/); assert.match(s, /No data subcarrier/);
+});
+
+test('mono view: mono IEM shows the absent 19 kHz pilot', () => {
+  const inp = monoInputs(iemMono, { cnrDb: 35 }, null, 0, 200);
+  assert.equal(inp.cnrDb, 35);
+  const m = monoBasebandSpectrum(inp);
+  const p = m.markers.find((k) => k.name === 'Stereo pilot');
+  assert.ok(p && p.present === false && p.freqKhz === 19);
+  assert.match(monoSummary(m, inp), /pilot position is empty/);
+});
+
+test('mono view: data subcarrier only when telemetry is on; cnr clamped', () => {
+  const link = { ...micLink, telemetry: { enabled: true } };
+  const inp = monoInputs(link, null, { inputPowerDbm: 0, cascade: { noiseFloorDbm: -110 } }, 0, 200, { subcarrierKHz: 57 });
+  assert.equal(inp.cnrDb, 70); assert.equal(inp.fMaxKhz, 65); assert.equal(inp.dataConfig.enabled, true);
+  const m = monoBasebandSpectrum(inp);
+  assert.ok(m.markers.some((k) => k.name === 'Data subcarrier' && k.freqKhz === 57));
+  assert.equal(monoInputs(null, null, null, 0), null);
+});
+
+test('mono view draws for mic, mono IEM, at phone and desktop widths, with hover and without', () => {
+  for (const link of [micLink, iemMono]) for (const w of [300, 560]) for (const hv of [null, 120, 40]) {
+    const inp = monoInputs(link, null, null, 0, 200), m = monoBasebandSpectrum(inp);
+    const c = fakeCtx(); drawMonoMpx(c, w, 250, th, { m, inp, hoverX: hv });
+    assert.ok(c.calls.some((x) => x[0] === 'fillText' || x[0] === 'strokeText'));
+  }
+  const c = fakeCtx(); drawMonoMpx(c, 300, 250, th, { m: null, inp: null, hoverX: null }); assert.equal(c.calls.length, 0);
+});
+
+test('mono view: the old "microphone links carry mono audio" message is no longer used by the bottom bar', () => {
+  const src = fs.readFileSync(new URL('../js/view/spectra.js', import.meta.url), 'utf8');
+  assert.ok(!/mpxMessage\(link\)/.test(src));
+});

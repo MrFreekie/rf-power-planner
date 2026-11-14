@@ -603,3 +603,41 @@ summary { min-height: 24px; }
 
 .pane-fit { float: right; font-size: 12px; min-height: 24px; padding: 0 10px; margin-left: 8px; }
 @media (pointer: coarse), (max-width: 800px) { .pane-fit { min-height: 44px; min-width: 44px; } }
+
+.r-warnings { margin: 6px 0 0; padding: 6px 8px 6px 24px; border-left: 3px solid var(--marginal); font-size: 12px; background: var(--paper2); }
+.r-warnings li { margin: 2px 0; }
+
+.limit-note { margin-left: 8px; font-size: 12px; color: var(--warn-text, var(--ink)); font-weight: 600; }
+
+
+/* ---- fit-to-viewport (desktop, 1100 px and wider, 560 px and taller): the PAGE does not scroll; the sidebar and bottom-bar panels may ---- */
+@media (min-width: 1100px) and (min-height: 560px) {
+  html { height: 100%; }
+  body { height: 100vh; height: 100dvh; min-height: 0; overflow: hidden; }
+  #workspace { flex: 1 1 0; height: auto; min-height: 0; }
+  #sidebar { overflow-y: auto; overflow-x: hidden; min-height: 0; }
+  #bottombar { flex: none; height: clamp(200px, 30vh, 340px); height: clamp(200px, 30dvh, 340px); min-height: 0; overflow: hidden; grid-template-rows: minmax(0, 1fr); }
+  #bottombar > .bb-col { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  #timeline, #spectra { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; padding: 4px 12px; border-bottom: 0; }
+  .timeline-canvas { flex: 1 1 0; height: auto; min-height: 56px; }
+  #spectra .spectra-grid { flex: 1 1 0; min-height: 0; grid-template-rows: minmax(0, 1fr); }
+  #spectra .spectrum-panel { display: flex; flex-direction: column; min-height: 0; }
+  #spectra .spectrum-panel[hidden] { display: none; }
+  .spectrum-canvas { flex: 1 1 0; height: auto; min-height: 56px; }
+  .spectrum-sum { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-top: 2px; }
+  .spectra-head, .timeline-head { margin-bottom: 2px; }
+  .spectrum-panel h3 { margin-bottom: 2px; }
+}
+@media (min-width: 1100px) and (min-height: 560px) and (max-height: 1000px) {
+  #brandbar { padding: 2px 12px; border-bottom-width: 2px; }
+  .brand-logo { width: 22px; height: 22px; }
+  #brandbar h1.brand-name { font-size: 16px; }
+  #toolbar { padding: 3px 12px; gap: 3px 10px; }
+  #toolbar label { font-size: 12px; }
+  #toolbar button, #toolbar select, #toolbar input { min-height: 28px; padding: 1px 8px; }
+  #bottombar { height: clamp(180px, 30vh, 300px); height: clamp(180px, 30dvh, 300px); }
+}
+@media (min-width: 1100px) and (min-height: 560px) and (max-height: 760px) {
+  #bottombar { height: clamp(170px, 31vh, 250px); height: clamp(170px, 31dvh, 250px); }
+  .spectrum-sum { -webkit-line-clamp: 1; line-clamp: 1; }
+}
