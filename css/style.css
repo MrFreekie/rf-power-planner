@@ -551,3 +551,22 @@ body.modlab-open { overflow: hidden; }
 @media (max-width: 800px) { .ml-aux { height: 430px; } .ml-table th, .ml-table td { padding: 4px 6px; } .ml-compare .ml-table { min-width: 560px; } }
 .ml-scrollhint { display: none; margin: 0; font-size: 12px; color: var(--ink-soft); }
 @media (max-width: 800px) { .ml-scrollhint { display: block; } }
+
+/* ---- venue underlay dialog ---- */
+.venue-dialog { width: min(560px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); padding: 0; border: 1px solid var(--ink); border-radius: var(--radius); background: var(--paper); color: var(--ink); overflow: auto; }
+.venue-dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
+.venue-dialog > * { margin: 0; padding: 10px 14px; }
+.venue-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--line); }
+.venue-head h2 { font-size: 14px; }
+.venue-hint { font-size: 13px; color: var(--ink-soft); line-height: 1.45; }
+.venue-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.venue-msg { font-size: 13px; font-weight: 600; line-height: 1.4; border-left: 4px solid var(--pass); background: var(--paper-2); }
+.venue-msg[data-kind="error"] { border-left-color: var(--fail); color: var(--fail); background: var(--fail-bg); }
+.venue-layers { margin: 0 14px; padding: 6px 10px 10px; border: 1px solid var(--line); border-radius: var(--radius); min-width: 0; }
+.venue-layers legend { font-size: 13px; font-weight: 600; padding: 0 6px; }
+.venue-list { display: flex; flex-direction: column; max-height: 40dvh; overflow-y: auto; }
+.venue-layer { display: flex; align-items: center; gap: 8px; min-height: 32px; font-size: 14px; overflow-wrap: anywhere; }
+.venue-layer-n { color: var(--ink-soft); font-size: 12px; white-space: nowrap; }
+.venue-foot { display: flex; justify-content: flex-end; border-top: 1px solid var(--line); }
+@media (max-width: 800px) { .venue-layer { min-height: 40px; } .venue-actions button { flex: 1 1 100%; } }
+@media print { .venue-dialog, #btn-venue { display: none !important; } }

@@ -180,9 +180,9 @@ $('btn-share').addEventListener('click', async () => {
   let copied = false;
   try { await navigator.clipboard.writeText(link.url); copied = true; } catch { /* clipboard unavailable: fall back to a prompt */ }
   if (!copied) { try { window.prompt('Copy this link', link.url); copied = true; } catch { /* ignore */ } }
-  if (!copied) { showStatus('Copy this link: ' + link.url, 20000); return; }
+  if (!copied) { showStatus('Copy this link: ' + link.url + (link.venueOmitted && link.message ? ' ' + link.message : ''), 20000); return; }
   const note = 'The whole scene is stored in the link itself; nothing is uploaded.';
-  showStatus((copied ? 'Copied. ' : '') + (link.warn ? `Long link (${(link.size / 1024).toFixed(1)} KB): some apps may cut it. ` : '') + note, 6000);
+  showStatus((copied ? 'Copied. ' : '') + (link.warn ? `Long link (${(link.size / 1024).toFixed(1)} KB): some apps may cut it. ` : '') + note + (link.venueOmitted && link.message ? ' ' + link.message : ''), link.venueOmitted ? 10000 : 6000);
 });
 
 let pendingShared = null;
@@ -201,7 +201,7 @@ async function handleHash() {
   if (h.kind === 'scene') {
     const r = await decodeScene(h.token);
     if (!r.ok) { showError(`Could not open the shared link: ${r.error}`); return; }
-    askToLoad('Load shared scene? It replaces your current scene (use Save first to keep it).', () => { store.setScene(r.scene); store.select(null); stopWalk(); history.clear(); });
+    askToLoad('Load shared scene? It replaces your current scene (use Save first to keep it).' + (r.venueOmitted && r.message ? ' ' + r.message : ''), () => { store.setScene(r.scene); store.select(null); stopWalk(); history.clear(); if (r.venueOmitted && r.message) showStatus(r.message, 10000); });
   } else if (h.kind === 'example') {
     const known = EXAMPLES.some((e) => e.id === h.id);
     if (!known) { showError('That example link is not known.'); return; }
@@ -407,6 +407,12 @@ for (const [name, fn] of [
   try { fn(); } catch (err) { console.error(name, err); }
 }
 if (staleCleared) showStatus('Your previously saved scene could not be read, so it was discarded and the default scene is shown.', 8000);
+
+// venue underlay button and dialog (optional: a failure must not break the planner)
+try {
+  const { mountVenue } = await import('./ui/venue.js');
+  await mountVenue({ button: $('btn-venue'), store, isLocked: () => document.body.dataset.readonly === 'true' });
+} catch (err) { console.error('venue', err); $('btn-venue').hidden = true; }
 
 handleHash();
 window.addEventListener('hashchange', handleHash);

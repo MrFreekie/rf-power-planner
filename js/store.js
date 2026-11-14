@@ -39,11 +39,15 @@ export function createStore(initial = createDefaultScene()) {
     },
 
     update(fn, { coalesce = null } = {}) {
-      const draft = structuredClone(scene);
+      // The venue underlay can be large and is replaced, never edited in place, so it is shared by reference instead of cloned.
+      const { venue: heldVenue, ...rest } = scene;
+      const draft = structuredClone(rest);
+      if (heldVenue !== undefined) draft.venue = heldVenue;
       const result = fn(draft);
       const next = result === undefined ? draft : result;
       syncScene(next); // keeps IEM branch 0 mirrored to the legacy tx/chain fields
-      if (JSON.stringify(next) === JSON.stringify(scene)) return false; // no-op
+      const { venue: nv, ...nrest } = next;
+      if (nv === heldVenue && JSON.stringify(nrest) === JSON.stringify(rest)) return false; // no-op
       if (!(coalesce && coalesce === lastCoalesce && past.length)) pushHistory(scene);
       else future = [];
       lastCoalesce = coalesce;

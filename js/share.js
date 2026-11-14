@@ -186,8 +186,13 @@ export function safeParse(text) {
 
 // ---- public API ------------------------------------------------------------------------------------------------
 
+export const VENUE_SHARE_MESSAGE = 'The venue drawing is not included in share links because it is too long. Save the scene to a file to keep it with the venue.';
+export const VENUE_SHARED_OPEN_MESSAGE = 'This shared scene was sent without its venue drawing. Share links leave the venue out.';
+
 export async function encodeScene(scene) {
-  const json = new TextEncoder().encode(JSON.stringify(scene));
+  // the venue underlay never goes into a link; a flag tells the opener that one was left out
+  const { venue, ...rest } = scene;
+  const json = new TextEncoder().encode(JSON.stringify(venue !== undefined ? { ...rest, venueOmitted: true } : rest));
   let token;
   if (hasCompression()) token = 'z' + bytesToB64url(await pipeThrough(json, new CompressionStream('deflate-raw')));
   else token = 'j' + bytesToB64url(json);
@@ -211,10 +216,12 @@ export async function decodeScene(token) {
     const text = new TextDecoder('utf-8', { fatal: true }).decode(json);
     let raw;
     try { raw = safeParse(text); } catch (e) { return { ok: false, error: 'The link does not contain valid scene data' }; }
+    const venueOmitted = raw && raw.venueOmitted === true;
+    if (raw && typeof raw === 'object') { delete raw.venue; delete raw.venueOmitted; } // a link never carries a venue
     const scene = migrateScene(raw);
     const { ok, errors } = validateScene(scene);
     if (!ok) return { ok: false, error: `The shared scene is not valid: ${errors.slice(0, 3).join('; ')}` };
-    return { ok: true, scene };
+    return venueOmitted ? { ok: true, scene, venueOmitted: true, message: VENUE_SHARED_OPEN_MESSAGE } : { ok: true, scene };
   } catch (e) {
     return { ok: false, error: e instanceof ShareError ? e.message : 'The link is damaged or not a scene' };
   }
@@ -222,7 +229,9 @@ export async function decodeScene(token) {
 
 export async function buildShareLink(scene, baseUrl = '') {
   const token = await encodeScene(scene);
-  return { url: `${baseUrl}#s=${token}`, size: token.length, warn: token.length > SIZE_WARN };
+  const out = { url: `${baseUrl}#s=${token}`, size: token.length, warn: token.length > SIZE_WARN };
+  if (scene && scene.venue !== undefined) { out.venueOmitted = true; out.message = VENUE_SHARE_MESSAGE; }
+  return out;
 }
 
 /** Interpret a location hash. Example ids are restricted to a safe alphabet; nothing else is interpreted. */

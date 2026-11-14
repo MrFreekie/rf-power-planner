@@ -23,6 +23,7 @@ import { effectiveAntennaB } from '../model/diversity.js';
 import { initA11y, announce } from './a11y.js';
 import { resizeFromCorner, rotationFromPointer } from './platformGeom.js';
 import { dispX, dispY, describePos } from '../ui/coords.js';
+import { drawVenue } from './venueDraw.js';
 
 const LOBE_STEP = 6; // degrees
 
@@ -99,6 +100,9 @@ export function createPlanView(canvas, store) {
       haloText(ctx, th, 'CL x=0', cx, b.y + 19, { align: 'center', color: th.ink, px: 11, weight: '600' });
       if (w >= 420) haloText(ctx, th, 'FRONT EDGE y=0', a.x, b.y + 19, { align: 'left', color: th.ink, px: 11, weight: '600' });
       else haloText(ctx, th, 'y=0', a.x, b.y + 19, { align: 'left', color: th.ink, px: 11, weight: '600' }); }
+
+    // optional venue underlay (SU4SV): grey hairlines under all content; never affects scale or extent
+    drawVenue(ctx, th, vp, scene, w, h, { hairline: isSnap ? 1 : undefined });
 
     // raised platforms above the stage fill, under everything else
     drawPlatforms(ctx, th, vp, scene, sel, handles, scene.units.length);

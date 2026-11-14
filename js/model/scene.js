@@ -1,6 +1,6 @@
 // Scene schema: defaults, validation, (de)serialisation, ids. Pure module (no DOM).
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2; // 2: optional scene.venue (underlay). Version 1 files open with no venue; older apps refuse version 2.
 
 const POWER_UNITS = ['dBm', 'dBW', 'mW'];
 const LENGTH_UNITS = ['m', 'ft'];
@@ -21,6 +21,7 @@ export const defaultDiversity = (pos, _antennaA) => ({
   antennaB: { pos: { x: Math.round((pos.x - 0.6) * 1000) / 1000, y: pos.y, z: pos.z }, antenna: null, chain: null, orientation: null },
   hysteresisDb: 3, switchMs: 30,
 });
+import { validateVenue, packUnderlay, unpackUnderlay } from './venue-underlay.js';
 import { MATERIAL_TRANSMISSION } from './zones-params.js';
 import { SURFACES, MATERIALS } from './library.js';
 import { EXTERNAL_NOISE_FIGURE_600MHZ_DB, INTERFERENCE_LEVELS, RX_PRESETS } from './rx-params.js';
@@ -279,6 +280,7 @@ export function validateScene(scene) {
   const errors = [];
   if (!isObj(scene)) return { ok: false, errors: ['scene must be an object'] };
   if (scene.version !== SCHEMA_VERSION) errors.push(`version must be ${SCHEMA_VERSION}`);
+  if (scene.venue !== undefined) errors.push(...validateVenue(scene.venue));
   if (!isObj(scene.units) || !POWER_UNITS.includes(scene.units.power)) errors.push('units.power invalid');
   if (!isObj(scene.units) || !LENGTH_UNITS.includes(scene.units.length)) errors.push('units.length invalid');
   if (!isObj(scene.stage) || !(scene.stage.width > 0) || !(scene.stage.depth > 0)) {
@@ -508,6 +510,17 @@ export function migrateScene(raw) {
   const s = structuredClone(raw);
   if (s.version === undefined) s.version = 1; // pre-versioned files
   if (s.version > SCHEMA_VERSION) throw new Error(`Scene version ${s.version} is newer than supported ${SCHEMA_VERSION}`);
+  // Version 1 -> 2: scene.venue is new. Older files have none; a saved venue (packed shades) is unpacked into memory.
+  if (s.version < 2) { delete s.venue; s.version = 2; }
+  if (s.venue === null) delete s.venue;
+  if (s.venue !== undefined) {
+    const packed = isObj(s.venue) && Array.isArray(s.venue.layers) && s.venue.layers.some((L) => isObj(L) && Array.isArray(L.shades) && L.shades.some((sh) => isObj(sh) && typeof sh.packed === 'string'));
+    if (packed) {
+      const u = unpackUnderlay(s.venue);
+      if (!u) throw new Error('The venue lines could not be read');
+      s.venue = u;
+    }
+  }
   // Additive change (no version bump): every chain item carries an id.
   if (Array.isArray(s.links)) {
     for (const l of s.links) {
@@ -571,6 +584,8 @@ export function migrateScene(raw) {
 }
 
 export function serialize(scene) {
+  // the venue is stored packed (about 10 characters per line); in memory it stays as number arrays
+  if (scene && scene.venue !== undefined && scene.venue !== null) return JSON.stringify({ ...scene, venue: packUnderlay(scene.venue) }, null, 2);
   return JSON.stringify(scene, null, 2);
 }
 

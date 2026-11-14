@@ -6,6 +6,7 @@ import { startWalk, stopWalk } from './walk.js';
 import { effectiveAntennaB } from './model/diversity.js';
 import { createDefaultScene, createDefaultLink, createChainItem, createReflector, createBranch, createZone, createPlatform, STAGE_LIMITS, PLATFORM_LIMITS, PLATFORM_MATERIALS, createImdTransmitter, defaultImdTransmitters, newId } from './model/scene.js';
 import { applyFmPreset } from './model/fm-presets.js';
+import { validateVenue } from './model/venue-underlay.js';
 
 const UNSAFE = new Set(['__proto__', 'prototype', 'constructor']);
 
@@ -603,4 +604,26 @@ export function setImdTransmitterFm(store, id, { fmPreset, powerOptionId, lowInt
       if ('lowIntermod' in l.tx) t.lowIntermod = l.tx.lowIntermod; else delete t.lowIntermod;
     } else if (lowIntermod !== undefined && t.fmPreset) t.lowIntermod = !!lowIntermod;
   });
+}
+
+// ---- venue underlay (js/model/venue-underlay.js). The underlay is replaced as a whole, never edited in place.
+
+/** setVenue(store, underlay) -> boolean. Replaces any existing venue, hidden flags included. Undoable. */
+export function setVenue(store, underlay) {
+  if (validateVenue(underlay).length) return false;
+  return store.update((d) => { d.venue = underlay; });
+}
+
+/** removeVenue(store) -> boolean (false when there was none). */
+export function removeVenue(store) {
+  if (store.getScene().venue === undefined) return false;
+  return store.update((d) => { delete d.venue; });
+}
+
+/** setVenueLayerHidden(store, name, hidden) -> boolean. Flips that layer's flag only. */
+export function setVenueLayerHidden(store, name, hidden) {
+  const v = store.getScene().venue;
+  const cur = v && v.layers.find((L) => L.name === name);
+  if (!cur || cur.hidden === !!hidden) return false;
+  return store.update((d) => { d.venue = { layers: v.layers.map((L) => (L.name === name ? { ...L, hidden: !!hidden } : L)) }; });
 }
