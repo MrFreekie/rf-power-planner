@@ -43,7 +43,7 @@ export function mountWelcome({ container, openButton, storage = defaultStorage()
   head.append(h, close);
   const intro = document.createElement('p');
   intro.className = 'ob-welcome-intro';
-  intro.textContent = 'This tool shows how strong a wireless microphone or in-ear-monitor signal is at its receiver, and how much spare level ("margin") you have before it drops out.';
+  intro.textContent = 'RF Bench shows how strong a wireless microphone or in-ear-monitor signal is at its receiver, and how much spare level ("margin") you have before it drops out.';
   const ol = document.createElement('ol');
   ol.className = 'ob-steps';
   for (const s of WELCOME_STEPS) {

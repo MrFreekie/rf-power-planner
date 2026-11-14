@@ -108,7 +108,7 @@ function buildSheet(data) {
   const sheet = el('article', 'report-sheet');
   sheet.setAttribute('aria-label', 'Link budget report');
   const head = el('header', 'report-head');
-  head.append(el('h1', null, data.title), el('p', 'report-date', `Date: ${data.date}`));
+  head.append(el('p', 'report-brand', 'RF Bench: Plan, simulate, learn.'), el('h1', null, data.title), el('p', 'report-date', `Date: ${data.date}`));
   sheet.append(head);
 
   if (data.margin) {

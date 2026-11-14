@@ -1,4 +1,6 @@
-# RF Power Planner
+# RF Bench
+
+Plan, simulate, learn.
 
 A static, dependency-free web tool for planning wireless microphone and in-ear monitor (IEM) RF links,
 and for demonstrating the physics behind them. It runs entirely in the browser: no build step, no server,

@@ -1,4 +1,4 @@
-/* RF Power Planner: paper-like technical drawing. Colour is reserved for signal status. */
+/* RF Bench: paper-like technical drawing. Colour is reserved for signal status. */
 :root {
   --paper: #fbf9f3;
   --paper-2: #f1eee4;
@@ -26,10 +26,12 @@
   --mech-fe: #4a78b5; --mech-tx: #c77a1f; --mech-pim: #7d5ba6;
   --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --radius: 3px;
+  --brand: #17365d; --on-brand: #ffffff; --brand-accent: #8fd0ff;
   color-scheme: light;
 }
 /* Dark palette. Text pairs: ink on paper 13:1, ink-soft on paper 7:1, pass/marginal/fail on paper >= 6:1. */
 :root[data-theme="dark"] {
+  --brand: #2a5d9f; --on-brand: #ffffff; --brand-accent: #d6ecff;
   --paper: #14181d;
   --paper-2: #1d232b;
   --ink: #e8e6df;
@@ -58,6 +60,7 @@
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
+    --brand: #2a5d9f; --on-brand: #ffffff; --brand-accent: #d6ecff;
     --paper: #14181d; --paper-2: #1d232b; --ink: #e8e6df; --ink-rgb: 232, 230, 223; --ink-soft: #a9b3be;
     --line: #3a434e; --grid: #222931; --grid-major: #343d48; --hatch: #2b333c;
     --pass: #4cc38a; --marginal: #f0b429; --fail: #ff7b6e; --warn-text: #f0b429; --on-fail: #14181d;
@@ -80,6 +83,16 @@ body {
 h1, h2 { margin: 0; font-weight: 600; }
 h1 { font-size: 16px; letter-spacing: 0.02em; }
 h2 { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft); }
+
+/* ---- brand bar ---- */
+#brandbar { display: flex; align-items: center; gap: 10px; padding: 6px 12px; background: var(--brand); color: var(--on-brand); border-bottom: 3px solid var(--brand-accent); }
+.brand-logo { flex: none; color: var(--brand-accent); }
+#brandbar h1.brand-name { font-size: 18px; letter-spacing: 0.04em; color: var(--on-brand); }
+.brand-tag { margin: 0; font-size: 13px; color: var(--on-brand); opacity: 0.92; }
+.brand-tag::before { content: ""; display: inline-block; width: 1px; height: 14px; margin-right: 10px; background: currentColor; opacity: 0.5; vertical-align: -2px; }
+@media (max-width: 800px) { #brandbar { padding: 4px 8px; gap: 8px; } .brand-logo { width: 22px; height: 22px; } #brandbar h1.brand-name { font-size: 16px; } .brand-tag { font-size: 12px; } }
+@media (max-width: 420px) { .brand-tag::before { display: none; } }
+@media (forced-colors: active) { #brandbar { border-bottom: 3px solid CanvasText; } }
 
 /* ---- toolbar ---- */
 #toolbar {
@@ -213,7 +226,6 @@ button.danger { color: var(--fail); border-color: var(--fail); }
 @media (max-width: 800px) {
   body { height: auto; min-height: 100dvh; }
   #toolbar { gap: 6px 10px; padding: 8px; }
-  #toolbar h1 { flex-basis: 100%; }
   button, select, input { min-height: 40px; }
   #workspace { display: flex; flex-direction: column; flex: none; height: auto; }
   .pane { flex: none; grid-column: auto; height: min(62vh, 440px); border-bottom: 1px solid var(--ink); }
@@ -369,7 +381,6 @@ button.danger { color: var(--fail); border-color: var(--fail); }
 @media (max-width: 800px) {
   #toolbar { flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; gap: 8px 10px; align-items: center; }
   #toolbar > * { flex: none; }
-  #toolbar h1 { flex-basis: auto; position: sticky; left: 0; z-index: 1; background: var(--paper); padding-right: 8px; }
   #toolbar label { white-space: nowrap; flex-wrap: nowrap; }
   #example-note { max-height: 7.5em; overflow-y: auto; }
   .rc-vis { display: none; }
@@ -481,6 +492,9 @@ a { color: var(--blue-text); }
   .report-sheet [data-gl] { text-decoration: none !important; border-bottom: 0 !important; }
   .report-sheet, .report-sheet * { color-scheme: light; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .skip-link, .sr-only, #btn-theme { display: none !important; }
+  #brandbar { background: #fff !important; color: #000 !important; border-bottom: 1px solid #000; }
+  #brandbar * { color: #000 !important; }
+  .report-brand { font-size: 10pt; margin: 0 0 4px; color: #333; }
   .report-img { max-width: 100%; }
 }
 
@@ -527,6 +541,7 @@ body.modlab-open { overflow: hidden; }
   .ml-body { padding: 10px 10px 40px; }
 }
 @media print { .modlab, #btn-modlab { display: none !important; } }
+.report-brand { margin: 0 0 4px; font-size: 12px; color: var(--ink-soft); letter-spacing: 0.04em; }
 .ml-msx { display: flex; flex-direction: column; gap: 10px; }
 .ml-msx[hidden] { display: none; }
 .ml-msx .ml-table { min-width: 0; width: 100%; max-width: 520px; }
