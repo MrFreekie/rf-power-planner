@@ -14,7 +14,7 @@
 //   VSWR = (1 + |gamma|) / (1 - |gamma|)                       (voltage standing-wave ratio)
 //   return loss RL = -20 log10 |gamma|  (dB)
 //   mismatch loss ML = -10 log10(1 - |gamma|^2) (dB)           (power not delivered: reflected, not dissipated)
-// Anchors: VSWR 1.5 = 0.18 dB, 2 = 0.51 dB, 3 = 1.25 dB, 5 = 3.01 dB. Mismatch loss is capped at MAX_MISMATCH_DB (30) because a real
+// Anchors: VSWR 1.5 = 0.18 dB, 2 = 0.51 dB, 3 = 1.25 dB, 5 = 2.55 dB. Mismatch loss is capped at MAX_MISMATCH_DB (30) because a real
 // antenna far out of band still radiates a little and the series model stops being meaningful.
 
 export const MAX_MISMATCH_DB = 30;
