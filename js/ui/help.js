@@ -53,11 +53,12 @@ export const HELP_TOPICS = Object.freeze({
   mpx: { title: 'Stereo multiplex', text: 'In-ear monitors send left and right audio plus a 19 kHz pilot tone on one FM carrier. A weak signal makes the receiver blend towards mono to keep the hiss down.', terms: ['MPX','FM','CNR','dB'] },
   digital: { title: 'Digital link', text: 'Digital links stay clean until the signal-to-noise ratio gets too low for the chosen modulation, then fail suddenly (the "cliff"). Error correction stretches the usable range.', terms: ['BER','EVM','MER','FEC','QAM','QPSK','BPSK','Es/N0','Eb/N0','SNR'] },
   telemetry: { title: 'Telemetry and battery', text: 'Battery level reported back over the radio link. As the battery runs down the transmit power sags, which lowers the margin at the receiver.', terms: ['PER','Tx','Rx','dB'] },
+  spectra: { title: 'Spectra', text: 'Three small spectrum views for the selected link: Audio spectrum (a simulated voice or music signal, not real audio), MPX spectrum (the FM stereo multiplex: pilot, stereo difference signal) and RF spectrum (just the own carrier of this link against the receiver channel and noise floor, no other devices). Shapes are illustrative; the received level and noise floor are the planner numbers.', terms: ['FM','MPX','dBm'] },
   timeline: { title: 'Timeline', text: 'The last couple of minutes of RF level, squelch state and audio, so you can see when a walk or an edit caused a dropout.', terms: ['RF','dBm'] },
 });
 
 /** Section ids that get a "What's this?" row, in sidebar order, and the panes handled separately. */
-export const HELP_SIDEBAR_IDS = ['results', 'meters', 'mpx', 'diversity', 'telemetry', 'digital', 'coverage', 'imd', 'scenes', 'compare', 'coordination', 'inspector', 'waterfall', 'timeline'];
+export const HELP_SIDEBAR_IDS = ['results', 'meters', 'mpx', 'diversity', 'telemetry', 'digital', 'coverage', 'imd', 'scenes', 'compare', 'coordination', 'inspector', 'waterfall', 'timeline', 'spectra'];
 
 function makeToggle(topic, id) {
   const wrap = document.createElement('div');

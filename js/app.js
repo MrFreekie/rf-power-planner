@@ -385,6 +385,7 @@ for (const [path, name, id] of [
   ['./view/coverage.js', 'mountCoverage', 'coverage'],
   ['./view/imd.js', 'mountImd', 'imd'],
   ['./view/timeline.js', 'mountTimeline', 'timeline'],
+  ['./view/spectra.js', 'mountSpectra', 'spectra'],
 ]) {
   try {
     const mod = await import(path);
