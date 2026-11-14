@@ -352,6 +352,9 @@ export function validateScene(scene) {
   } else {
     const [smin, smax] = STAGE_LIMITS.size;
     if (scene.stage.width < smin || scene.stage.width > smax || scene.stage.depth < smin || scene.stage.depth > smax) errors.push(`stage.width and stage.depth must be between ${smin} and ${smax} m`);
+    if (scene.stage.material !== undefined && !(typeof scene.stage.material === 'string' && Object.prototype.hasOwnProperty.call(SURFACES, scene.stage.material))) {
+      errors.push(`stage.material invalid: ${String(scene.stage.material).slice(0, 40)}`);
+    }
     if (scene.stage.heightM !== undefined && !(isNum(scene.stage.heightM) && scene.stage.heightM >= STAGE_LIMITS.heightM[0] && scene.stage.heightM <= STAGE_LIMITS.heightM[1])) {
       errors.push(`stage.heightM must be between ${STAGE_LIMITS.heightM[0]} and ${STAGE_LIMITS.heightM[1]} m`);
     }

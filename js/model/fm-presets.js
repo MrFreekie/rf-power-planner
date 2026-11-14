@@ -238,7 +238,7 @@ const SRC2 = {
   psm900: ['Shure PSM 900 specification sheets'],
   psm1000: ['Shure PSM 1000 specification sheet'],
 };
-const PSM_SINAD_NOTE = 'Sensitivity is 2.2 uV (-100.2 dBm) at 20 dB SINAD; required CNR 10.2 dB comes from the UR SINAD line (assumed).';
+const PSM_SINAD_NOTE = 'Sensitivity is 2.2 uV (-100.2 dBm) at 20 dB SINAD; required CNR 10.2 dB comes from the UR SINAD line (assumed). That is a SINAD point, not the FM threshold knee (about 11 dB in a 200 kHz channel in the MPX model), so it sits slightly below it.';
 const psmExtraConf = { compander: S, mpxPilotKhz: S, pilotToleranceKhz: S, compatibleFrequenciesPerBand: S };
 const psmTx = (o) => senTx({ mfr: 'Shure', kind: 'IEM transmitter (dual stereo)', dev: 34, peak: 34, audioKhz: 15, audioConf: I, devConf: S, powerConf: I, stepKhz: 25, stepConf: A, windowConf: I,
   factoryBanks: null, pilotSq: false, ppm: 2.5, defaultPowerId: 'low-10mw', options: [PWR.low, PWR.high, mwId(100, 'hi-100mw', '100 mW (band dependent)')],

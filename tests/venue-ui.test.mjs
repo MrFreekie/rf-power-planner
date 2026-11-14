@@ -175,7 +175,9 @@ test('drawing never changes the viewport (scale, origin) and adding or hiding a 
 test('the plan fit rectangle ignores the venue (plan.js fits the stage only)', () => {
   const src = fs.readFileSync(new URL('../js/view/plan.js', import.meta.url), 'utf8');
   assert.ok(!/venue/i.test(src.replace(/drawVenue|venueDraw/g, '').replace(/\/\/.*venue.*/gi, '')), 'plan.js uses the venue only through drawVenue');
-  assert.match(src, /fitRect\(-1\.0, -1\.2, st\.width \+ 1\.0, st\.depth \+ 1\.8/);
+  assert.match(src, /planExtent\(store\.getScene\(\)\)/);
+  const ext = fs.readFileSync(new URL('../js/view/planExtent.js', import.meta.url), 'utf8');
+  assert.ok(!/venue/i.test(ext.replace(/\/\/.*venue.*/gi, '')), 'planExtent never reads the venue');
 });
 
 test('optional: private real venue files import when present', async (t) => {

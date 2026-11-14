@@ -106,7 +106,7 @@ test('welcome: remembered via storage, tolerant of storage errors', () => {
   const broken = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); } };
   assert.equal(shouldShowWelcome(broken), true);
   assert.equal(markWelcomeSeen(broken), false);
-  assert.ok(WELCOME_STEPS.length >= 4 && WELCOME_STEPS.length <= 5);
+  assert.ok(WELCOME_STEPS.length >= 4 && WELCOME_STEPS.length <= 6);
 });
 
 test('glossary: finder is whole-word and case-sensitive', () => {

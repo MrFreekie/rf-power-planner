@@ -41,7 +41,9 @@ function baseConfig() {
 // The parameter-file defaults are merged only when the caller passes no configuration at all. A caller-supplied
 // (even partial) config is merged over the built-in fallback alone, so a default preset can never leak a field
 // such as fixedOrder into another configuration.
-const cfgOf = (cfg) => {
+const cfgOf = (raw) => {
+  // keys whose value is undefined count as not given (they must not overwrite the fallbacks with undefined -> NaN)
+  const cfg = raw ? Object.fromEntries(Object.entries(raw).filter(([, v]) => v !== undefined)) : raw;
   const given = cfg && Object.keys(cfg).length > 0;
   const c = { ...FALLBACK, ...(given ? {} : baseConfig()), ...(cfg || {}) };
   c.amcThresholdsDb = { ...FALLBACK.amcThresholdsDb, ...(c.amcThresholdsDb || {}) };

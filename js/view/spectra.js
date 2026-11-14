@@ -29,6 +29,56 @@ export const spectraLayout = (widthPx) => (widthPx > 0 && widthPx < TABS_BELOW_P
 const fin = (v) => Number.isFinite(v);
 const sgn = (v, d = 1) => (fin(v) ? `${v < 0 ? '−' : ''}${Math.abs(v).toFixed(d)}` : '-');
 
+
+// ---- audio frequency axis: logarithmic, ISO octave bands ---------------------------------------
+export const AUDIO_BANDS = Object.freeze([31.5, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]); // ISO octave band centres, Hz
+export const AUDIO_F_LO = 20, AUDIO_F_HI = 20000;
+export const AUDIO_BINS = 2048; // linear bins requested from the model; resampled to log spacing for display (~10 Hz resolution)
+const LABEL_PRIORITY = [1000, 125, 8000, 250, 4000, 500, 2000, 63, 16000, 31.5];
+
+/** Axis mapping Hz <-> plot coordinate (log10 Hz). Plot coordinates are what frame() uses for the audio panel. */
+export const audioAxis = Object.freeze({ min: Math.log10(AUDIO_F_LO), max: Math.log10(AUDIO_F_HI), toX: (f) => Math.log10(f), fromX: (x) => Math.pow(10, x) });
+
+/** Tick label for a band centre: 31.5, 63, 125, 250, 500, 1k, 2k, 4k, 8k, 16k. */
+export function bandLabel(f) { return f >= 1000 ? `${+(f / 1000).toFixed(1)}k` : String(+f.toFixed(1)); }
+
+/** Hz as text for the readout: 1234 -> "1.23 kHz", 63 -> "63 Hz". */
+export function hzText(f) { return f >= 1000 ? `${+(f / 1000).toFixed(f >= 10000 ? 1 : 2)} kHz` : `${Math.round(f)} Hz`; }
+
+/** The octave band centre nearest (in log distance) to f. */
+export function nearestBand(f) {
+  let best = AUDIO_BANDS[0], d = Infinity;
+  for (const b of AUDIO_BANDS) { const k = Math.abs(Math.log(f / b)); if (k < d) { d = k; best = b; } }
+  return best;
+}
+
+/** Which band labels fit: greedy in priority order, each label `widthOf(label)` px wide centred on xOf(f), with `gap` between. Returns the chosen centres. */
+export function pickLabels(xOf, widthOf, gap = 6, bands = AUDIO_BANDS, xMin = -Infinity, xMax = Infinity) {
+  const placed = [];
+  for (const f of LABEL_PRIORITY.filter((b) => bands.includes(b))) {
+    const x = xOf(f), w = widthOf(bandLabel(f));
+    if (x - w / 2 < xMin || x + w / 2 > xMax) continue;
+    if (placed.every((p) => Math.abs(p.x - x) >= (p.w + w) / 2 + gap)) placed.push({ f, x, w });
+  }
+  return placed.map((p) => p.f).sort((a, b) => a - b);
+}
+
+/** Resample a linear-frequency spectrum to nOut log-spaced points between fLo and fHi: peak over the bins in each cell, interpolated in dB where a cell holds none. */
+export function logResample(freqs, levels, nOut, fLo = AUDIO_F_LO, fHi = AUDIO_F_HI) {
+  const n = freqs.length, outF = [], outDb = [];
+  if (!n || nOut < 2) return { f: outF, db: outDb };
+  const ratio = Math.pow(fHi / fLo, 1 / (nOut - 1)), half = Math.sqrt(ratio);
+  const lowerBound = (x) => { let lo = 0, hi = n; while (lo < hi) { const m = (lo + hi) >> 1; if (freqs[m] < x) lo = m + 1; else hi = m; } return lo; };
+  for (let i = 0; i < nOut; i++) {
+    const fc = fLo * Math.pow(ratio, i), j0 = lowerBound(fc / half), j1 = lowerBound(fc * half) - 1;
+    let v;
+    if (j1 >= j0) { v = -Infinity; for (let j = j0; j <= j1; j++) if (levels[j] > v) v = levels[j]; }
+    else { const j = Math.min(Math.max(lowerBound(fc), 1), n - 1), f0 = freqs[j - 1], f1 = freqs[j], u = f1 > f0 ? (fc - f0) / (f1 - f0) : 0; v = levels[j - 1] + (levels[j] - levels[j - 1]) * Math.min(Math.max(u, 0), 1); }
+    outF.push(fc); outDb.push(v);
+  }
+  return { f: outF, db: outDb };
+}
+
 /** Nearest index of sorted `arr` to `x`; -1 when empty. */
 export function nearestIndex(arr, x) {
   if (!arr || !arr.length) return -1;
@@ -70,14 +120,14 @@ export function rfInputs(scene, link, r, t, nBins = 240) {
 }
 
 /** Arguments for audioSpectrum. Stereo only for an IEM link with MPX stereo on and the receiver not in mono. */
-export function audioInputs(link, mpxState, t, nBins = 200) {
+export function audioInputs(link, mpxState, t, nBins = AUDIO_BINS) {
   const iem = !!link && link.kind === 'iem';
   const stereoOn = iem && !!(link.mpx && link.mpx.enabled) && !(mpxState && mpxState.mode === 'mono');
   return { kind: iem ? 'iem' : 'mic', stereo: stereoOn, nBins, fMaxHz: 20000, t, preEmphasisTauUs: 50, deEmphasised: true };
 }
 
 export const audioSummary = (a, inp) => (a
-  ? `Audio spectrum, simulated ${inp.kind === 'iem' ? `music${inp.stereo ? ' in stereo (left and right)' : ' (mono)'}` : 'voice'}, 0 to ${Math.round(inp.fMaxHz / 1000)} kilohertz, after de-emphasis. Noise floor ${sgn(a.floorDb, 0)} dB. Illustrative, not a measurement.`
+  ? `Audio spectrum, simulated ${inp.kind === 'iem' ? `music${inp.stereo ? ' in stereo (left and right)' : ' (mono)'}` : 'voice'}, 20 hertz to 20 kilohertz on a logarithmic axis with octave band labels from 31.5 hertz to 16 kilohertz, after de-emphasis. Noise floor ${sgn(a.floorDb, 0)} dB. Illustrative, not a measurement.`
   : 'Audio spectrum not available.');
 
 export function rfSummary(s, inp) {
@@ -95,7 +145,7 @@ export const mpxSummary = (st) => (st
 // ---- drawing -----------------------------------------------------------------------------------
 
 /** Plot frame with ticks and labels. Returns { L, T, pw, ph, X(x), Y(y) }. */
-function frame(ctx, w, h, th, { xMin, xMax, yMin, yMax, xTicks, yTicks, xFmt = String, yFmt = String, xName = '', yName = '', L = 40, R = 8, T = 20, B = 30 }) {
+function frame(ctx, w, h, th, { xMin, xMax, yMin, yMax, xTicks, yTicks, xFmt = String, yFmt = String, xLabels = null, xName = '', yName = '', L = 40, R = 8, T = 20, B = 30 }) {
   const pw = w - L - R, ph = h - T - B;
   const X = (x) => L + ((x - xMin) / (xMax - xMin)) * pw;
   const Y = (y) => T + ph - ((Math.min(Math.max(y, yMin), yMax) - yMin) / (yMax - yMin)) * ph;
@@ -105,7 +155,7 @@ function frame(ctx, w, h, th, { xMin, xMax, yMin, yMax, xTicks, yTicks, xFmt = S
   ctx.textAlign = 'right';
   for (const v of yTicks) { const y = Math.round(Y(v)) + 0.5; ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(L + pw, y); ctx.stroke(); ctx.fillText(yFmt(v), L - 4, y + 4); }
   ctx.textAlign = 'center';
-  for (const v of xTicks) { const x = Math.round(X(v)) + 0.5; ctx.beginPath(); ctx.moveTo(x, T); ctx.lineTo(x, T + ph); ctx.stroke(); ctx.fillText(xFmt(v), Math.min(Math.max(x, L + 8), w - R - 8), T + ph + 13); }
+  for (const v of xTicks) { const x = Math.round(X(v)) + 0.5; ctx.beginPath(); ctx.moveTo(x, T); ctx.lineTo(x, T + ph); ctx.stroke(); if (!xLabels || xLabels.has(v)) ctx.fillText(xFmt(v), Math.min(Math.max(x, L + 8), w - R - 8), T + ph + 13); }
   ctx.strokeStyle = th.ink; ctx.strokeRect(L + 0.5, T + 0.5, pw - 1, ph - 1);
   if (xName) { ctx.fillStyle = th.inkSoft; ctx.textAlign = 'center'; ctx.fillText(xName, L + pw / 2, h - 3); }
   if (yName) { ctx.save(); ctx.translate(10, T + ph / 2); ctx.rotate(-Math.PI / 2); ctx.fillStyle = th.inkSoft; ctx.textAlign = 'center'; ctx.fillText(yName, 0, 0); ctx.restore(); }
@@ -152,16 +202,20 @@ function hoverMark(ctx, th, f, h, w, hoverX, xs, ys, fmtX, fmtY) {
 /** Audio spectrum panel. a = audioSpectrum result. */
 export function drawAudio(ctx, w, h, th, a, inp, hoverX) {
   if (!a || !a.freqsHz || !a.freqsHz.length) { note(ctx, w, h, th, 'Audio spectrum not available.'); return; }
-  const yMin = -90, yMax = 0, fMaxK = a.freqsHz[a.freqsHz.length - 1] / 1000;
-  const f = frame(ctx, w, h, th, { xMin: 0, xMax: fMaxK, yMin, yMax, xTicks: niceTicks(0, fMaxK, w < 300 ? 4 : 5), yTicks: [-90, -60, -30, 0], xFmt: (v) => String(v), xName: 'audio frequency (kHz)', yName: 'dB' });
-  f.xMin = 0; f.xMax = fMaxK;
-  const xs = a.freqsHz.map((v) => v / 1000);
-  curve(ctx, f, xs, a.levelsDb, { stroke: th.ink, fill: th.ink });
-  if (a.levelsDbR) curve(ctx, f, xs, a.levelsDbR, { stroke: th.blue, fill: th.blue, alpha: 0.18 });
-  if (fin(a.floorDb)) curve(ctx, f, [0, fMaxK], [a.floorDb, a.floorDb], { stroke: th.fail, dash: [5, 3] });
+  const yMin = -90, yMax = 0, L = 40, R = 8;
+  setFont(ctx, th, 11);
+  const pw = w - L - R, xOf = (f) => L + ((audioAxis.toX(f) - audioAxis.min) / (audioAxis.max - audioAxis.min)) * pw;
+  const labelled = new Set(pickLabels(xOf, (s) => ctx.measureText(s).width, 6, AUDIO_BANDS, L + 2, w - R).map(audioAxis.toX));
+  const f = frame(ctx, w, h, th, { xMin: audioAxis.min, xMax: audioAxis.max, yMin, yMax, xTicks: AUDIO_BANDS.map(audioAxis.toX), xLabels: labelled, yTicks: [-90, -60, -30, 0], xFmt: (x) => bandLabel(nearestBand(audioAxis.fromX(x))), xName: 'audio frequency (Hz), octave bands', yName: 'dB', L, R });
+  f.xMin = audioAxis.min; f.xMax = audioAxis.max;
+  const rs = logResample(a.freqsHz, a.levelsDb, Math.max(60, Math.round(pw)));
+  const xs = rs.f.map(audioAxis.toX);
+  curve(ctx, f, xs, rs.db, { stroke: th.ink, fill: th.ink });
+  if (a.levelsDbR) curve(ctx, f, xs, logResample(a.freqsHz, a.levelsDbR, Math.max(60, Math.round(pw))).db, { stroke: th.blue, fill: th.blue, alpha: 0.18 });
+  if (fin(a.floorDb)) curve(ctx, f, [audioAxis.min, audioAxis.max], [a.floorDb, a.floorDb], { stroke: th.fail, dash: [5, 3] });
   haloText(ctx, th, inp.kind === 'iem' ? (inp.stereo ? 'music, L and R' : 'music, mono') : 'voice', f.L + 4, f.T + 12, { px: 11, weight: '600', color: th.inkSoft });
   haloText(ctx, th, 'simulated', f.L + f.pw - 4, f.T + f.ph - 5, { align: 'right', px: 11, color: th.inkSoft });
-  hoverMark(ctx, th, f, h, w, hoverX, xs, a.levelsDb, (v) => `${v.toFixed(1)} kHz`, (v) => `${v.toFixed(0)} dB`);
+  hoverMark(ctx, th, f, h, w, hoverX, xs, rs.db, (x) => { const hz = audioAxis.fromX(x); return `${hzText(hz)} (${bandLabel(nearestBand(hz))} band)`; }, (v) => `${v.toFixed(0)} dB`);
 }
 
 /** RF spectrum panel. s = rfSpectrum result, inp = the arguments it was made from. */
@@ -369,7 +423,7 @@ export function mountSpectra({ container, store, now = () => performance.now() }
       mpx: c.mpx ? mpxSummary(c.mpx.st) : 'MPX baseband spectrum not shown for this link.',
     };
     const notes = {
-      audio: ['Standard or illustrative: the signal is simulated, not real audio. Levels are illustrative.', ...((c.audio && c.audio.a && c.audio.a.notes) || [])],
+      audio: ['Standard or illustrative: the signal is simulated, not real audio. Levels are illustrative.', 'Frequency is on a logarithmic axis because hearing works in ratios: each octave is a doubling of frequency (31.5, 63, 125 Hz and so on up to 16 kHz, the standard ISO octave band centres), so the low notes get as much room as the high ones.', ...((c.audio && c.audio.a && c.audio.a.notes) || [])],
       rf: ["Only the selected link's own carrier is simulated: no other devices, intermodulation or interference.", 'The received level and the channel noise floor are the planner numbers; the carrier shape is illustrative.', ...((c.rf && c.rf.s && c.rf.s.notes) || [])],
       mpx: ['Standard: the 19 kHz pilot, 38 kHz stereo subcarrier and 57 kHz RDS positions are FM broadcast practice. Levels are illustrative.'],
     };

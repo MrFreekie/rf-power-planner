@@ -66,3 +66,10 @@ Issues found and status:
 5. Separation cap `min(maxSeparationDb, cnr + 10)` is ad hoc (approx); fine for display.
 6. Above-threshold improvement is for full-deviation tone modulation. Programme audio with a lower average level shows lower SNR; state this in the UI if the number is shown as a measurement.
 7. Pilot hysteresis is only referenced to CNR. Real detectors also depend on pilot injection; a low-injection transmitter would lock later. Acceptable.
+
+
+## Addendum: capture, thresholds and the audio SNR note
+- One capture model: the wanted-to-interferer audio ratio `captureSuppressionDb(C/I, captureRatio)` (30 dB at the capture ratio, about 1 dB per dB beyond) caps the audio SNR in `mpxState`. The earlier C/I + 20 cap and `cleanCiDb` are gone.
+- Audio SNR is not monotonic in CNR: while the receiver blends between mono and stereo, stereo adds L-R noise (the stereo penalty) so the audio SNR can be lower at a higher CNR than at a lower one. `mpxState` returns `audioSnrNote` (MPX_AUDIO_SNR_NOTE) for the UI.
+- Two threshold definitions are in use and are not interchangeable: `fm-deviation.js` takes the threshold as 10 dB CNR in the Carson bandwidth of each system, while the MPX presets use 11 to 12 dB in the 200 kHz channel. The two are different bandwidths, so the same receiver quotes different numbers; the Shure PSM class value (required CNR 10.2 dB at 20 dB SINAD) sits below the 11 dB MPX threshold for the same reason (SINAD point, not threshold knee). Compare figures only within one definition.
+- The stereo penalty comment in code: b = 0.5 and p = 22 dB give 10 log10(1 + 0.25 (158.5 - 1)) = 16.06 dB.

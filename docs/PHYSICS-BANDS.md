@@ -33,3 +33,10 @@ Model: `INTERFERENCE_MODEL`, `interferenceRiseDb(freqMHz, venue, {bwMHz, nfDb, f
 
 ## Model limits and validation
 Specular only, no diffraction. Average-power rise understates bursty interference: digital links should use `hitProbability`. Validation checklist: cable slopes 0.4-0.75 with no kinks; sensitivity = -174 + 10 log B + NF + CNR within 1.5 dB; wall loss above the slab bound; body shadow rises with frequency; rise ordered quiet < typical < busy; Wi-Fi channel centres above gaps. Tests: `tests/library-bands.test.mjs`.
+
+
+## Power limits by device, and the EIRP / ERP convention
+`bandLimitDbm(region, f, { device, antennaGainDbi })` returns the largest transmitter OUTPUT power that keeps the radiated power within the limit. device: `handheld` (handheld mic) and `iem-tx` (a stationary IEM transmitter, not body-worn) use the handheld / other figure; `bodyworn` uses the body-worn figure (so UK VHF 174.5 MHz is 10 mW ERP for an IEM transmitter, 50 mW only for a body-worn device; UK 821-826 MHz is 20 mW EIRP against 100 mW body-worn, draft IR 2030). EIRP limit: Tx + G <= limit. ERP limit: Tx + G - 2.15 <= limit (ERP is relative to a half-wave dipole). `conducted` limits (US Part 74 style, unverified) count the transmitter output only. US 2.4 and 5.8 GHz (FCC 15.247) are 1 W conducted with up to 6 dBi, about 36 dBm EIRP (4000 mW). Interference rise applies only inside the 2.4 GHz (2400-2500) and 5.8 GHz (5725-5875 MHz) bands; the rx-params table is the figure at a Wi-Fi channel centre and agrees with `interferenceRiseDb` there (2.0 / 9.3 / 19.6 dB at 2.4 GHz, 0.6 / 4.1 / 12.3 at 5.8 GHz); between channels (2449.5 MHz gap: 5.5 dB typical) use `interferenceRiseDb(f, venue)`.
+
+## Ground and grass
+Medium dry ground follows ITU-R P.2040-3 Table 3: epsilon_r = 15 f_GHz^-0.1, sigma = 0.035 f_GHz^1.63 S/m (0.146 S/m at 2.4 GHz); held at the 1 GHz values below 1 GHz.

@@ -188,7 +188,7 @@ export function antennaPatternDb(antennaId, azDeg, elDeg) {
 export const SURFACES = {
   wood: { name: 'Wood stage deck', epsR: 3.66, sigma: 0.0044 },   // P.2040 floorboard
   concrete: { name: 'Concrete', epsR: 5.31, sigma: 0.0326 },       // P.2040 concrete
-  grass: { name: 'Grass / soil (damp)', epsR: 15, sigma: 0.01 },   // P.527 medium dry ground, approx
+  grass: { name: 'Grass / soil', epsR: 15, sigma: 0.035 },   // P.2040-3 Table 3 medium dry ground at 1 GHz: a = 15, b = -0.1, c = 0.035, d = 1.63
   carpet: { name: 'Carpet on concrete', epsR: 3.0, sigma: 0.02, absorbDb: 2 }, // approx
   glass: { name: 'Glass', epsR: 6.27, sigma: 0.0043 },             // P.2040 glass
   metal: { name: 'Metal deck', epsR: 1, sigma: 1e7 },              // PEC-like
@@ -202,7 +202,7 @@ export const MATERIALS = {
   glass: { name: 'Glass', epsR: 6.27, sigma: 0.0043 },
   metal: { name: 'Metal', epsR: 1, sigma: 1e7 },
   drapes: { name: 'Drapes / absorber', epsR: 1.5, sigma: 0.05, absorbDb: 8 }, // approx
-  grass: { name: 'Grass / soil', epsR: 15, sigma: 0.01 },          // approx
+  grass: { name: 'Grass / soil', epsR: 15, sigma: 0.035 },         // P.2040-3 medium dry ground at 1 GHz (as the grass surface)
 };
 
 // ---------------------------------------------------------------------------
@@ -260,20 +260,23 @@ export const SIGMA_FREQ_EXPONENT = {
   materials: { wood: 1.0718, concrete: 0.8095, brick: { hi: 0, lo: 0.7 }, drywall: 0.7076, glass: 1.1925, metal: 0, drapes: 0, grass: 1.63 },
 };
 
-function atFreq(entry, d, freqMHz, groundLike) {
+// P.2040-3 permittivity exponent b (epsR = a f_GHz^b): medium dry ground -0.1. Others 0 (the tabulated materials have b = 0).
+export const EPS_FREQ_EXPONENT = { surfaces: { grass: -0.1 }, materials: { grass: -0.1 } };
+
+function atFreq(entry, d, freqMHz, groundLike, b = 0) {
   const g = Math.max(freqMHz / 1000, groundLike ? 1 : 0.1);
   const e = typeof d === 'object' && d ? (g < 1 ? d.lo : d.hi) : d;
-  return { epsR: entry.epsR, sigma: entry.sigma * Math.pow(g, e || 0), absorbDb: entry.absorbDb || 0 };
+  return { epsR: entry.epsR * Math.pow(g, b), sigma: entry.sigma * Math.pow(g, e || 0), absorbDb: entry.absorbDb || 0 };
 }
 /** {epsR, sigma, absorbDb} of a floor surface at freqMHz (sigma scaled by the P.2040 exponent). Unknown id -> concrete. */
 export function surfaceAt(id, freqMHz) {
   const k = SURFACES[id] ? id : 'concrete';
-  return atFreq(SURFACES[k], SIGMA_FREQ_EXPONENT.surfaces[k], freqMHz, k === 'grass');
+  return atFreq(SURFACES[k], SIGMA_FREQ_EXPONENT.surfaces[k], freqMHz, k === 'grass', EPS_FREQ_EXPONENT.surfaces[k] || 0);
 }
 /** {epsR, sigma, absorbDb} of a wall material at freqMHz. Unknown id -> concrete. */
 export function materialAt(id, freqMHz) {
   const k = MATERIALS[id] ? id : 'concrete';
-  return atFreq(MATERIALS[k], SIGMA_FREQ_EXPONENT.materials[k], freqMHz, k === 'grass');
+  return atFreq(MATERIALS[k], SIGMA_FREQ_EXPONENT.materials[k], freqMHz, k === 'grass', EPS_FREQ_EXPONENT.materials[k] || 0);
 }
 
 /**
@@ -318,7 +321,7 @@ export const WALL_LOSS_BY_FREQ = {
   wood: { refThicknessM: 0.04, points: wp([1.5, 2.5, 2.8, 3.5, 4.5]) },
   drapes: { refThicknessM: 0.02, points: wp([2.5, 3, 3, 3.5, 4]) },
   metal: { refThicknessM: 0.001, points: wp([60, 60, 60, 60, 60]) },
-  grass: { refThicknessM: 0.5, points: wp([8, 10, 12, 20, 45]) },
+  grass: { refThicknessM: 0.5, points: wp([12, 12, 13, 40, 120]) }, // above the P.2040 slab bound (damp soil sigma 0.035 S/m at 1 GHz): 0.5 m of soil is practically opaque at 5.8 GHz
 };
 /** Wall transmission loss (dB). thicknessM defaults to the reference thickness; loss scales linearly in dB with thickness. */
 export function wallLossDb(materialId, freqMHz, thicknessM) {

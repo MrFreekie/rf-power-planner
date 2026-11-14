@@ -7,6 +7,7 @@ export const WELCOME_STEPS = Object.freeze([
   { title: 'Fine-tune in the inspector', text: 'Click an item to select it. The Inspector lists its power, antenna, cables, boosters and height as typed values, so you can set exact numbers.' },
   { title: 'Try an example', text: 'The Examples menu in the toolbar loads ready-made situations (long cable, dead spots, intermodulation) with a short note on what to look for.' },
   { title: 'Walk the stage', text: 'Press Walk and the transmitter strolls across the stage while the meters and timeline show where the signal dips or drops out. Remember: these are planning estimates, not a site survey.' },
+  { title: 'Learn and explore', text: 'The Modulation lab animates AM, FM, digital, stereo, pre-emphasis and companding. Venue imports a grey drawing of the room under the plan. The Spectra along the bottom show the audio, the FM stereo multiplex and the radio carrier of the selected link.' },
 ]);
 
 export function defaultStorage() {

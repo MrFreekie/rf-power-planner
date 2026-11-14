@@ -160,3 +160,75 @@ test('venue in a scene file: bad packed data fails the whole load, oversize edge
   assert.ok(e.length > 0);
   assert.ok(validateVenue({ layers: [{ name: 'A', hidden: false, shades: [{ step: 0, edges: [0, 0, 1e12, 0] }] }] }).length > 0);
 });
+
+// ---- caps in actions, coverage grid, dev server, saved-scene library ---------------------------------------------------
+
+test('actions refuse to add past the scene limits', async () => {
+  const A = await import('../js/actions.js');
+  const { createStore } = await import('../js/store.js');
+  const store = createStore(createDefaultScene());
+  for (let i = 0; i < SCENE_LIMITS.maxImdTransmitters + 5; i++) A.addImdTransmitter(store);
+  assert.equal(store.getScene().imd.transmitters.length, SCENE_LIMITS.maxImdTransmitters);
+  assert.equal(A.addImdTransmitter(store), null);
+  for (let i = 0; i < SCENE_LIMITS.maxReflectors + 3; i++) A.addReflector(store);
+  assert.equal(store.getScene().reflectors.length, SCENE_LIMITS.maxReflectors);
+  assert.equal(A.addReflector(store), null);
+  for (let i = 0; i < SCENE_LIMITS.maxZones + 3; i++) A.addZone(store);
+  assert.equal(store.getScene().zones.length, SCENE_LIMITS.maxZones);
+  assert.equal(A.addZone(store), null);
+  const zid = store.getScene().zones[0].id;
+  for (let i = 0; i < SCENE_LIMITS.maxZonePoints + 3; i++) A.addZonePoint(store, zid, { x: i % 9, y: i % 5 });
+  assert.equal(store.getScene().zones[0].polygon.length, SCENE_LIMITS.maxZonePoints);
+  const lid = store.getScene().links[0].id;
+  for (let i = 0; i < SCENE_LIMITS.maxChain + 3; i++) A.addChainItem(store, lid, 'filter');
+  assert.equal(store.getScene().links[0].chain.length, SCENE_LIMITS.maxChain);
+  assert.equal(validateScene(store.getScene()).ok, true); // everything the actions can build still loads
+});
+
+test('actions: IEM branches stop at the limit', async () => {
+  const A = await import('../js/actions.js');
+  const { createStore } = await import('../js/store.js');
+  const store = createStore(createDefaultScene());
+  A.setLinkKind(store, store.getScene().links[0].id, 'iem');
+  const lid = store.getScene().links[0].id;
+  for (let i = 0; i < SCENE_LIMITS.maxBranches + 3; i++) A.addBranch(store, lid);
+  assert.equal(store.getScene().links[0].branches.length, SCENE_LIMITS.maxBranches);
+});
+
+test('coverage grid is capped in cells and survives huge or bad bounds', async () => {
+  const { coverageGrid, MAX_GRID_CELLS } = await import('../js/model/coverage.js');
+  const s = createDefaultScene();
+  const id = s.links[0].id;
+  const g = coverageGrid(s, id, { cellM: 0.25, bounds: { x0: 0, y0: 0, x1: 4000, y1: 4000 }, budgetMs: 1 });
+  assert.ok(g.nx * g.ny <= MAX_GRID_CELLS * 1.01, `${g.nx * g.ny}`);
+  assert.ok(g.cellM > 0.25);
+  assert.equal(coverageGrid(s, id, { bounds: { x0: 0, y0: 0, x1: Infinity, y1: 5 } }), null);
+  const small = coverageGrid(s, id, { cellM: 0.25, bounds: { x0: 0, y0: 0, x1: 12, y1: 8 }, budgetMs: 1 });
+  assert.equal(small.cellM, 0.25); // normal venues are unchanged
+});
+
+test('dev server denies dot-folders, private notes and private test data', async () => {
+  const { isDenied } = await import('../scripts/serve.mjs');
+  const sep = (await import('node:path')).sep;
+  const p = (x) => sep + x.split('/').join(sep);
+  for (const d of ['.git/config', '.claude/launch.json', 'docs/research/EQUIPMENT.md', 'docs/lessons/a.md', 'tests/private-venues/x.txt', 'CLAUDE.md', 'docs/CONTRACT.md', '.env']) assert.equal(isDenied(p(d)), true, d);
+  for (const d of ['index.html', 'js/app.js', 'css/style.css', 'docs/PHYSICS.md']) assert.equal(isDenied(p(d)), false, d);
+});
+
+test('saved-scene library drops oversize or tampered entries', async () => {
+  const { createSceneLibrary, LIBRARY_KEY, LIMITS } = await import('../js/ui/scenes.js');
+  const mem = new Map();
+  const storage = { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, v), removeItem: (k) => mem.delete(k) };
+  mem.set(LIBRARY_KEY, JSON.stringify({ v: 1, items: [
+    { id: 'a', name: 'ok', savedAt: 1, json: serialize(createDefaultScene()) },
+    { id: 'b', name: 'huge', savedAt: 2, json: 'x'.repeat(LIMITS.maxSceneBytes + 1) },
+  ] }));
+  const lib = createSceneLibrary(storage);
+  assert.deepEqual(lib.list().map((x) => x.id), ['a']);
+});
+
+test('venue validation rejects duplicate layer names', () => {
+  const L = (name) => ({ name, hidden: false, shades: [{ step: 0, edges: [0, 0, 1, 1] }] });
+  assert.ok(validateVenue({ layers: [L('A'), L('A')] }).length > 0);
+  assert.equal(validateVenue({ layers: [L('A'), L('B')] }).length, 0);
+});

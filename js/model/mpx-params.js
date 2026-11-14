@@ -153,7 +153,6 @@ export const INTERFERER_PARAMS = Object.freeze({
   captureRatioDb: Object.freeze({ good: 1.5, typical: 3, poor: 6 }),
   suppressionAtCaptureDb: 30,
   suppressionSlopeAboveCapture: 1,        // dB of audio ratio per dB of C/I beyond the capture ratio
-  cleanCiDb: 20,                          // approx: C/I above which the interferer is inaudible in programme material
   // Behaviour of a stray unmodulated or pilotless carrier at the same frequency (illustrative).
   strayCarrier: Object.freeze({
     carrierSquelchOpens: true,            // carrier squelch only sees total RF level, so any carrier above threshold opens it

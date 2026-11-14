@@ -2,6 +2,7 @@
 // no DOM, no Math.random (a small integer hash gives repeatable "life"). Everything here is illustrative where `notes` says so;
 // the planner's own numbers (rx level, noise floor) come from the caller. The MPX view uses mpxSpectrum from mpx.js.
 import { emphasisMagnitudeDb } from './audio-processing.js';
+import { mpxSpectrum } from './mpx.js';
 
 const L10 = Math.log10;
 const TWO_PI = 2 * Math.PI;
@@ -70,7 +71,7 @@ function musicDb(f, t, ch) {
  * as heard after de-emphasis, so the boost is undone). FM stereo IEM audio is cut above 15 kHz (steeply) as in FM broadcast.
  */
 export function audioSpectrum({ kind = 'mic', stereo = false, nBins = 256, fMaxHz = 20000, t = 0, preEmphasisTauUs = 0, deEmphasised = false } = {}) {
-  const n = Math.max(2, Math.floor(nBins));
+  const n = Math.min(8192, Math.max(2, Math.floor(nBins)));
   const isIem = kind === 'iem';
   const freqsHz = Array.from({ length: n }, (_, i) => (i / (n - 1)) * fMaxHz);
   const pre = preEmphasisTauUs > 0 && !deEmphasised;
@@ -94,18 +95,43 @@ export function audioSpectrum({ kind = 'mic', stereo = false, nBins = 256, fMaxH
 
 // ---------------------------------------------------------------- RF
 
-/** Bessel function of the first kind J_n(x), integer n >= 0, by its power series (accurate for x up to about 30). */
+/**
+ * Bessel function of the first kind J_n(x), integer n, any real x. Power series for |x| <= 12; above that Miller's backward
+ * recurrence J_{k-1} = (2k/x) J_k - J_{k+1}, normalised with J0 + 2 sum J_2k = 1 (stable for large x, where the series loses all
+ * precision). Non-finite x gives NaN. J_{-n} = (-1)^n J_n, J_n(-x) = (-1)^n J_n(x).
+ */
 export function besselJ(n, x) {
-  const m = Math.abs(n);
-  let term = 1;
-  for (let k = 1; k <= m; k++) term *= (x / 2) / k;
-  let sum = term;
-  for (let k = 1; k < 200; k++) {
-    term *= -((x / 2) * (x / 2)) / (k * (k + m));
-    sum += term;
-    if (Math.abs(term) < 1e-18 * Math.abs(sum) && k > x) break;
+  if (!Number.isFinite(x) || !Number.isFinite(n)) return NaN;
+  const m = Math.abs(Math.trunc(n));
+  const ax = Math.abs(x);
+  let v;
+  if (ax === 0) v = m === 0 ? 1 : 0;
+  else if (ax <= 12) {
+    let term = 1;
+    for (let k = 1; k <= m; k++) term *= (ax / 2) / k;
+    v = term;
+    for (let k = 1; k < 200; k++) {
+      term *= -((ax / 2) * (ax / 2)) / (k * (k + m));
+      v += term;
+      if (Math.abs(term) < 1e-18 * Math.abs(v) && k > ax) break;
+    }
+  } else {
+    if (m > ax + 60) return 0; // far beyond the transition order: negligible
+    let N = 2 * Math.ceil((Math.max(m, ax) + 30) / 2);
+    N = Math.min(N, 2 * 20000);
+    let jp1 = 0, j = 1e-300, norm = 0, target = m === N ? j : 0;
+    for (let k = N; k >= 1; k--) {
+      const jm1 = (2 * k / ax) * j - jp1;
+      jp1 = j; j = jm1;
+      if (k - 1 === m) target = j;
+      if ((k - 1) % 2 === 0) norm += (k - 1 === 0 ? 1 : 2) * j;
+      if (Math.abs(j) > 1e250) { j *= 1e-250; jp1 *= 1e-250; norm *= 1e-250; target *= 1e-250; }
+    }
+    v = target / norm;
   }
-  return (n < 0 && m % 2 === 1) ? -sum : sum;
+  if (x < 0 && m % 2 === 1) v = -v;
+  if (n < 0 && m % 2 === 1) v = -v;
+  return v;
 }
 
 /** Carson bandwidth (kHz) of FM: 2 (deviation + highest audio frequency). */
@@ -136,7 +162,7 @@ export function rfSpectrum({
   carrierMHz, rxLevelDbm, mode = 'fm', devKhz = 40, audioMaxKhz = 15, occupiedBwKhz, channelBwKhz = 200, noiseFloorDbm,
   spanKhz, nBins = 256, t = 0,
 } = {}) {
-  const n = Math.max(8, Math.floor(nBins));
+  const n = Math.min(4096, Math.max(8, Math.floor(nBins)));
   const span = Number.isFinite(spanKhz) && spanKhz > 0 ? spanKhz : 4 * channelBwKhz;
   const binKhz = span / (n - 1);
   const sigma = binKhz; // display smoothing (Gaussian)
@@ -169,7 +195,7 @@ export function rfSpectrum({
     if (!Number.isFinite(occupiedBwKhz)) notes.push('Occupied bandwidth not given: 75 percent of the channel assumed.');
   } else {
     const fm = Math.min(audioMaxKhz, 5);
-    const beta = devKhz / fm;
+    const beta = Math.min(devKhz / fm, 200); // very large indices are shown as 200 (the shape is a box of width 2 dev anyway)
     const nMax = Math.ceil(beta + 3) + 2;
     const lines = [];
     for (let k = -nMax; k <= nMax; k++) {
@@ -197,4 +223,87 @@ export function rfSpectrum({
     window: { lowMHz: carrierMHz - channelBwKhz / 2000, highMHz: carrierMHz + channelBwKhz / 2000 },
     carrierLevelDbm: rxLevelDbm, marginToNoiseDb: rxLevelDbm - floor, bwKhz, sidebands, clipsAtFilter, notes,
   };
+}
+
+// ---------------------------------------------------------------- mono baseband (MPX view for mics and mono IEMs)
+
+/** Generic tone-key (pilot) subcarrier frequency of a wireless mic, kHz. ASSUMED / illustrative: the real frequency is not published. */
+export const TONE_KEY_GENERIC_KHZ = 32.768;
+const PILOT_KHZ = 19; // standard FM stereo pilot (ITU-R BS.450)
+const PILOT_INJECTION = 0.09; // fraction of peak deviation (standard 8 to 10 percent)
+const TONE_KEY_INJECTION = 0.05; // illustrative
+const DATA_INJECTION = 0.05;
+
+/**
+ * monoBasebandSpectrum({ kind, stereo, pilotLocked, toneKeyKhz, dataConfig, cnrDb, nBins, fMaxKhz, t, preEmphasisTauUs })
+ *   -> { freqKhz, levelDb, noiseDb, markers: [{ name, freqKhz, levelDb, present, status, note }], bands, notes }
+ * The composite baseband the discriminator sees for a link that is not a stereo FM broadcast: programme audio 0-15 kHz (voice-like
+ * for 'mic', music-like mono for 'iem', the audioSpectrum shapes scaled so the programme peaks at -8 dB, the level mpxSpectrum
+ * uses for L+R), the FM noise triangle (the same noise as mpxSpectrum, so the stereo and mono views agree), and the control tones:
+ *   - mic: tone-key subcarrier at toneKeyKhz (default TONE_KEY_GENERIC_KHZ = 32.768, status 'assumed': frequency not published);
+ *   - iem: the 19 kHz stereo pilot is shown ABSENT (expected position) for a mono link, present when stereo && pilotLocked !== false;
+ *   - data subcarrier from dataConfig { enabled, subcarrierKHz, injectionFrac } when enabled, else no marker.
+ * dB relative to 100 percent modulation. cnrDb is the caller's carrier-to-noise ratio (default 40). status per marker:
+ * 'standard' (pilot), 'assumed' (tone key), 'illustrative'. Deterministic from t.
+ */
+export function monoBasebandSpectrum({
+  kind = 'mic', stereo = false, pilotLocked = true, toneKeyKhz, dataConfig, cnrDb = 40, nBins = 256, fMaxKhz = 100, t = 0, preEmphasisTauUs = 0,
+} = {}) {
+  const isIem = kind === 'iem';
+  const maxKhz = Math.max(20, Number.isFinite(fMaxKhz) ? fMaxKhz : 100);
+  const base = mpxSpectrum({ cnrDb: Number.isFinite(cnrDb) ? cnrDb : 40, blend: 0, pilotLevelDb: -200 }, { points: Math.min(4096, Math.max(8, Math.floor(nBins))), maxKHz: maxKhz, seed: Math.floor(Math.max(0, t) * 2) });
+  const freqKhz = base.freqKHz, n = freqKhz.length;
+  // programme: audioSpectrum on a fine grid up to 15 kHz, scaled so its peak (before pre-emphasis) is -8 dB
+  const aud = audioSpectrum({ kind: isIem ? 'iem' : 'mic', stereo: false, nBins: 512, fMaxHz: 15000, t });
+  const peak = Math.max(...aud.levelsDb);
+  const pre = audioSpectrum({ kind: isIem ? 'iem' : 'mic', stereo: false, nBins: 512, fMaxHz: 15000, t, preEmphasisTauUs });
+  const at = (f) => { // linear interpolation of the programme (no content above 15 kHz)
+    if (f < 0.03) return -Infinity;
+    const x = (f * 1000) / 15000 * 511;
+    if (x > 511) return -Infinity; // band-limited at 15 kHz
+    const i = Math.floor(x), w = x - i, j = Math.min(511, i + 1);
+    return pre.levelsDb[i] * (1 - w) + pre.levelsDb[j] * w;
+  };
+  const pwr = (db) => (Number.isFinite(db) ? Math.pow(10, db / 10) : 0);
+  const dbOf = (p) => (p > 1e-12 ? 10 * Math.log10(p) : -120);
+  const toneOn = !isIem;
+  const tk = toneOn ? (Number.isFinite(toneKeyKhz) ? toneKeyKhz : TONE_KEY_GENERIC_KHZ) : null;
+  const dc = dataConfig && dataConfig.enabled ? dataConfig : null;
+  const dKhz = dc && Number.isFinite(dc.subcarrierKHz) ? dc.subcarrierKHz : dc ? 57 : null;
+  const dInj = dc && Number.isFinite(dc.injectionFrac) ? dc.injectionFrac : DATA_INJECTION;
+  const pilotPresent = isIem && stereo && pilotLocked !== false;
+  const lineDb = (inj) => 20 * Math.log10(inj);
+  const lineAt = (f, f0, db, half = 0.4) => (Math.abs(f - f0) <= half ? pwr(db) * (0.5 * (1 + Math.cos(Math.PI * Math.abs(f - f0) / half))) : 0);
+  const levelDb = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const f = freqKhz[i];
+    let p = pwr(base.noiseDb[i]);
+    const a = at(f);
+    if (Number.isFinite(a)) p += pwr(Math.min(-3, a - peak - 8));
+    if (pilotPresent) p += lineAt(f, PILOT_KHZ, lineDb(PILOT_INJECTION), 0.3);
+    if (tk !== null) p += lineAt(f, tk, lineDb(TONE_KEY_INJECTION));
+    if (dKhz !== null) p += lineAt(f, dKhz, lineDb(dInj), 1.5);
+    levelDb[i] = dbOf(p);
+  }
+  const noiseAt = (f0) => { let k = 0; for (let i = 1; i < n; i++) if (Math.abs(freqKhz[i] - f0) < Math.abs(freqKhz[k] - f0)) k = i; return base.noiseDb[k]; };
+  const markers = [];
+  if (isIem) {
+    markers.push({
+      name: 'Stereo pilot', freqKhz: PILOT_KHZ, levelDb: pilotPresent ? lineDb(PILOT_INJECTION) : noiseAt(PILOT_KHZ), present: pilotPresent, status: 'standard',
+      note: pilotPresent ? 'The 19 kHz pilot (8 to 10 percent of deviation) tells the receiver to decode stereo.' : 'Expected pilot position, absent: a mono link sends no pilot, so there is no stereo (L-R) band either.',
+    });
+  } else {
+    markers.push({
+      name: 'Tone key', freqKhz: tk, levelDb: lineDb(TONE_KEY_INJECTION), present: true, status: 'assumed',
+      note: Number.isFinite(toneKeyKhz) ? 'Tone-key (pilot) subcarrier at the frequency given.' : 'About 32.768 kHz: the real frequency is not published, so this position and level are illustrative.',
+    });
+  }
+  if (dKhz !== null) markers.push({ name: 'Data subcarrier', freqKhz: dKhz, levelDb: lineDb(dInj), present: true, status: 'illustrative', note: 'Telemetry subcarrier at the frequency the planner models.' });
+  const notes = [
+    'Programme audio is simulated, not real: ' + (isIem ? 'music-like mono' : 'voice-like') + ' shape, illustrative levels.',
+    'Noise rises with frequency (FM triangular noise), the same law as the stereo MPX view.',
+    isIem ? 'The 19 kHz stereo pilot is a standard of FM stereo; it is absent for a mono IEM.' : 'The tone-key frequency of a mic system is not published: the marker is illustrative.',
+  ];
+  if (dKhz === null) notes.push('No data subcarrier on this link.');
+  return { freqKhz, levelDb, noiseDb: base.noiseDb, markers, bands: { programme: [0.03, 15] }, notes };
 }

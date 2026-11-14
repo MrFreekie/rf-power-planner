@@ -134,7 +134,8 @@ test('materialAt / surfaceAt: 1 GHz values equal the library, sigma rises with f
   for (const id of Object.keys(MATERIALS)) {
     const a = materialAt(id, 1000);
     assert.ok(Math.abs(a.sigma - MATERIALS[id].sigma) < 1e-12, id);
-    assert.equal(materialAt(id, 5800).epsR, MATERIALS[id].epsR);
+    if (id === 'grass') assert.ok(Math.abs(materialAt(id, 5800).epsR - 15 * Math.pow(5.8, -0.1)) < 1e-9); // P.2040-3 b = -0.1
+    else assert.equal(materialAt(id, 5800).epsR, MATERIALS[id].epsR);
     assert.ok(materialAt(id, 5800).sigma >= materialAt(id, 2400).sigma - 1e-12, id);
     assert.ok(materialAt(id, 2400).sigma >= materialAt(id, 200).sigma - 1e-12, id);
   }
@@ -186,4 +187,14 @@ test('interference model: venue ordering, Wi-Fi channel peaks and gaps, 5.8 quie
     for (const v of INTERFERENCE_MODEL.venues) assert.ok(w.avgDbmPer20MHz[v] < w.burstDbm[v] && w.utilisation[v] > 0 && w.utilisation[v] < 1);
     assert.ok(w.avgDbmPer20MHz.quiet < w.avgDbmPer20MHz.typical && w.avgDbmPer20MHz.typical < w.avgDbmPer20MHz.busy);
   }
+});
+
+test('grass / ground is self-consistent with ITU-R P.2040-3 medium dry ground (a 15, b -0.1, c 0.035, d 1.63)', () => {
+  assert.equal(SURFACES.grass.sigma, 0.035);
+  assert.equal(MATERIALS.grass.sigma, 0.035);
+  // 2.4 GHz: sigma = 0.035 x 2.4^1.63 = 0.1458 S/m (hand value 0.146, tol 0.001); eps_r = 15 x 2.4^-0.1 = 13.74
+  assert.ok(Math.abs(surfaceAt('grass', 2400).sigma - 0.035 * Math.pow(2.4, 1.63)) < 1e-12);
+  assert.ok(Math.abs(surfaceAt('grass', 2400).sigma - 0.146) < 0.001);
+  assert.ok(Math.abs(surfaceAt('grass', 2400).epsR - 13.74) < 0.01);
+  assert.equal(surfaceAt('grass', 600).sigma, 0.035); // held flat below 1 GHz
 });

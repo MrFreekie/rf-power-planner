@@ -267,6 +267,10 @@ export function mountInspector({ container, store }) {
       get: (cc) => lengthToUi(cc.scene.stage[field] ?? 0, cc.lu), set: (cc, v, o) => setStage(store, { [field]: lengthFromUi(v, cc.lu) }, o),
     });
     sb.append(stageNum('stage-w', 'Stage width', 'width', 0.5, 500), stageNum('stage-d', 'Stage depth', 'depth', 0.5, 500), stageNum('stage-h', 'Deck height above the ground', 'heightM', 0, 20));
+    sb.append(selectField({
+      key: 'stage-mat', label: 'Stage deck surface', options: [['', 'Same as venue floor'], ...Object.entries(SURFACES).map(([id, s]) => [id, s.name])],
+      get: (cc) => cc.scene.stage.material || '', set: (cc, v) => setStage(store, { material: v }),
+    }));
     const plb = section('plats', 'Platforms', 'A platform is a raised block on the stage (drum riser, choir steps). Its top height is measured from the ground.');
     buildPlatforms(plb, c);
 
@@ -473,7 +477,7 @@ export function mountInspector({ container, store }) {
     const eb = section('env', 'Environment');
     eb.append(
       selectField({
-        key: 'env-floor', label: 'Stage surface', options: Object.entries(SURFACES).map(([id, s]) => [id, s.name]),
+        key: 'env-floor', label: 'Venue floor surface', options: Object.entries(SURFACES).map(([id, s]) => [id, s.name]),
         get: (cc) => cc.scene.environment.floor, set: (cc, v) => setPath(store, 'environment.floor', v),
       }),
       selectField({
@@ -497,7 +501,7 @@ export function mountInspector({ container, store }) {
     );
     eb.append(el('p', 'hint', 'Body loss values stack: environment + Rx body loss + body-worn antenna are summed.'));
     eb.append(el('p', 'hint', noiseHint()));
-    eb.append(el('p', 'hint', 'Stage surface is the material of the stage floor: it sets how strongly the floor reflects the signal (platforms have their own material).'));
+    eb.append(el('p', 'hint', 'Venue floor surface is the ground material of the whole venue: it sets how strongly the floor reflects the signal. The stage deck and platforms can have their own material.'));
     const interfHint = el('p', 'hint');
     updaters.push((cc) => { interfHint.hidden = !interferenceApplies(cc.link.freqMHz); interfHint.textContent = interferenceHint(cc.scene.environment.interference, cc.link.freqMHz); });
     eb.append(interfHint);

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { audioSpectrum, rfSpectrum, besselJ, carsonBwKhz } from '../js/model/spectrum-views.js';
+import { mpxSpectrum } from '../js/model/mpx.js';
 import { emphasisMagnitudeDb } from '../js/model/audio-processing.js';
 
 const near = (a, b, tol, m) => assert.ok(Math.abs(a - b) <= tol, `${m || ''} ${a} vs ${b} (tol ${tol})`);
@@ -138,4 +139,68 @@ test('audio: pre-emphasis boost at 10 kHz equals emphasisMagnitudeDb; de-emphasi
   }
   // 50 us: 10 log10(1 + (10 / 3.183)^2) = 10.4 dB (hand value, tol 0.05)
   near(emphasisMagnitudeDb(10000, 50, 'pre'), 10.4, 0.05);
+});
+
+import { monoBasebandSpectrum, TONE_KEY_GENERIC_KHZ } from '../js/model/spectrum-views.js';
+
+test('mono baseband: grid, determinism, programme band-limited, noise rises with frequency', () => {
+  const m = monoBasebandSpectrum({ kind: 'mic', cnrDb: 25, t: 1 });
+  assert.equal(m.freqKhz.length, 256);
+  near(m.freqKhz[255], 100, 1e-9);
+  assert.deepEqual(monoBasebandSpectrum({ kind: 'mic', cnrDb: 25, t: 1 }), m);
+  assert.notDeepEqual(monoBasebandSpectrum({ kind: 'mic', cnrDb: 25, t: 4 }).levelDb, m.levelDb);
+  // noise triangle: +20 log10(f2/f1) between two frequencies (same law as the stereo view), tol 1 dB for the ripple
+  const nz = (f) => m.noiseDb[m.freqKhz.findIndex((x) => x >= f)];
+  near(nz(80) - nz(40), 20 * Math.log10(2), 1.2);
+  assert.ok(nz(90) > nz(5) + 15);
+  // programme sits well above the noise inside 15 kHz at CNR 25, and nothing but noise above it (away from the lines)
+  const idx = (f) => m.freqKhz.findIndex((x) => x >= f);
+  assert.ok(Math.max(...m.levelDb.slice(idx(0.1), idx(15))) > -16);
+  near(m.levelDb[idx(70)], m.noiseDb[idx(70)], 0.01);
+  // consistent with the stereo view: same noise as mpxSpectrum for the same CNR
+  const st = mpxSpectrum({ cnrDb: 25, blend: 0, pilotLevelDb: -200 }, { points: 256, maxKHz: 100, seed: 2 });
+  near(m.noiseDb[100], st.noiseDb[100], 1e-9);
+});
+
+test('mono baseband markers: mic tone key (assumed), IEM pilot absent for mono and present for stereo, data subcarrier', () => {
+  const mic = monoBasebandSpectrum({ kind: 'mic' });
+  const tk = mic.markers.find((x) => x.name === 'Tone key');
+  assert.equal(tk.freqKhz, TONE_KEY_GENERIC_KHZ);
+  assert.equal(tk.status, 'assumed');
+  assert.equal(tk.present, true);
+  assert.match(tk.note, /not published/);
+  assert.equal(mic.markers.some((x) => x.name === 'Stereo pilot'), false);
+  assert.equal(monoBasebandSpectrum({ kind: 'mic', toneKeyKhz: 40 }).markers[0].freqKhz, 40);
+  const mono = monoBasebandSpectrum({ kind: 'iem', stereo: false });
+  const p0 = mono.markers.find((x) => x.name === 'Stereo pilot');
+  assert.equal(p0.freqKhz, 19);
+  assert.equal(p0.present, false);
+  assert.equal(p0.status, 'standard');
+  assert.match(p0.note, /absent/);
+  assert.equal(mono.markers.some((x) => x.name === 'Tone key'), false);
+  const ster = monoBasebandSpectrum({ kind: 'iem', stereo: true, cnrDb: 40 });
+  const p1 = ster.markers.find((x) => x.name === 'Stereo pilot');
+  assert.equal(p1.present, true);
+  near(p1.levelDb, 20 * Math.log10(0.09), 1e-9);
+  const i19 = ster.freqKhz.findIndex((x) => Math.abs(x - 19) < 0.2);
+  assert.ok(ster.levelDb[i19] > mono.levelDb[i19] + 10, 'pilot line shows in the trace');
+  assert.equal(monoBasebandSpectrum({ kind: 'iem', stereo: true, pilotLocked: false }).markers[0].present, false);
+  // data subcarrier
+  assert.equal(mic.markers.some((x) => x.name === 'Data subcarrier'), false);
+  const dat = monoBasebandSpectrum({ kind: 'mic', dataConfig: { enabled: true, subcarrierKHz: 57 } });
+  const dm = dat.markers.find((x) => x.name === 'Data subcarrier');
+  assert.equal(dm.freqKhz, 57);
+  assert.ok(dat.levelDb[dat.freqKhz.findIndex((x) => x >= 57)] > mic.levelDb[mic.freqKhz.findIndex((x) => x >= 57)] + 10);
+  assert.ok(mic.notes.some((x) => /No data subcarrier/.test(x)));
+});
+
+test('mono baseband: mic differs from iem; pre-emphasis lifts the top of the band', () => {
+  const a = monoBasebandSpectrum({ kind: 'mic', cnrDb: 60, t: 2 });
+  const b = monoBasebandSpectrum({ kind: 'iem', cnrDb: 60, t: 2 });
+  const k = a.freqKhz.findIndex((x) => x >= 15);
+  const d = a.levelDb.slice(1, k).reduce((s, x, i) => s + Math.abs(x - b.levelDb[i + 1]), 0) / (k - 1);
+  assert.ok(d > 2, 'mic vs iem ' + d);
+  const pe = monoBasebandSpectrum({ kind: 'iem', cnrDb: 60, t: 2, preEmphasisTauUs: 50 });
+  const i = b.freqKhz.findIndex((x) => x >= 10);
+  assert.ok(pe.levelDb[i] > b.levelDb[i] + 3);
 });

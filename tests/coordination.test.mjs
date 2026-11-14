@@ -277,3 +277,23 @@ test('notes match the tool: 863-865 holds 3 intermod-free channels, ch38 plan 4,
   assert.ok(!/Inconsistent|20 mW for other/.test(r826.note));
   assert.ok(/draft/i.test(r826.note));
 });
+
+test('bandLimitDbm depends on device and antenna gain; ERP/EIRP/conducted conventions (tol 0.01 dB)', async () => {
+  const { bandLimitDbm: lim, typicalTxDbm: typ, REGIONS: R } = await import('../js/model/bands.js');
+  // UK VHF 174.4: 10 mW ERP handheld / other, 50 mW ERP body-worn. ERP -> Tx limit = limit + 2.15 - gain
+  assert.ok(Math.abs(lim('uk', 174.5, { device: 'iem-tx' }).maxDbm - (10 + 2.15)) < 0.01);
+  assert.ok(Math.abs(lim('uk', 174.5, { device: 'bodyworn' }).maxDbm - (10 * Math.log10(50) + 2.15)) < 0.01);
+  assert.ok(Math.abs(lim('uk', 174.5, { device: 'iem-tx', antennaGainDbi: 3 }).maxDbm - (12.15 - 3)) < 0.01);
+  // UK 821-826: 20 mW EIRP other, 100 mW body-worn
+  assert.ok(Math.abs(lim('uk', 823, { device: 'iem-tx' }).maxDbm - 10 * Math.log10(20)) < 0.01);
+  assert.ok(Math.abs(lim('uk', 823, { device: 'bodyworn' }).maxDbm - 20) < 0.01);
+  assert.ok(Math.abs(lim('uk', 823, { device: 'iem-tx', antennaGainDbi: 3 }).maxDbm - (10 * Math.log10(20) - 3)) < 0.01);
+  assert.ok(lim('uk', 823, { device: 'bodyworn' }).basis.includes('draft'));
+  // US: 15.247 is 1 W conducted + 6 dBi = 36 dBm EIRP (4000 mW); Part 74 figures are conducted, unverified
+  assert.ok(Math.abs(lim('us', 2440, {}).limitDbm - 10 * Math.log10(4000)) < 0.01);
+  const u = R.us.ranges.find((r) => r.id === 'us-uhf-470-608');
+  assert.equal(u.powerBasis, 'conducted');
+  assert.ok(Math.abs(lim('us', 500, { antennaGainDbi: 5 }).maxDbm - 10 * Math.log10(250)) < 0.01); // gain not counted
+  assert.ok(typ('iem', 174.5, 'uk') <= 12.16);
+  assert.equal(lim('xx', 500), null);
+});

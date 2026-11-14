@@ -41,7 +41,7 @@ export const MATERIAL_TRANSMISSION = Object.freeze({
   wood: row('Wood door / stage flat', 0.04, 2.5, 0.4, 'approx: P.2040 wood', 1),
   drapes: row('Drapes / curtain', 0.02, 3, 0.3, 'approx', 1),
   metal: row('Metal sheet', 0.001, 60, 0, 'approx: practically a screen; real leakage comes from gaps and joints', 60),
-  grass: row('Soil / earth bank', 0.5, 10, 0.5, 'approx', 2)
+  grass: row('Soil / earth bank', 0.5, 12, 0.5, 'approx: above the P.2040 slab bound for damp soil', 2)
 });
 
 // dB at 600 MHz and the reference thickness, by material id (ids match MATERIALS in library.js, plus variants).

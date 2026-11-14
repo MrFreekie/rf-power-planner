@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { captureState, CLEAN_CIR_DB, DEFAULT_CAPTURE_RATIO_DB } from '../js/model/interferer.js';
+import { captureState, DEFAULT_CAPTURE_RATIO_DB } from '../js/model/interferer.js';
 import { INTERFERER_PARAMS } from '../js/model/mpx-params.js';
 import { mpxState } from '../js/model/mpx.js';
 
@@ -40,7 +40,6 @@ test('captureState: who captures, C/I, quality from the capture suppression (han
   assert.equal(captureState(-58.4, -60, { captureRatioDb: 1.5 }).captured, 'wanted');
   assert.equal(captureState(-58.4, -60, { captureRatioDb: 6 }).captured, 'none');
   near(captureState(-58.5, -60, { captureRatioDb: 1.5 }).suppressionDb, 30, 1e-9);
-  assert.equal(CLEAN_CIR_DB, INTERFERER_PARAMS.cleanCiDb);
   // monotonic quality in C/I
   let q = -1;
   for (let cir = -10; cir <= 30; cir += 0.5) { const v = captureState(-60 + cir, -60).audioQuality; assert.ok(v >= q); q = v; }
@@ -73,7 +72,7 @@ test('mpxState with a stronger pilotless interferer: carrier squelch open, pilot
   assert.equal(ok.pilotLocked, true);
   assert.equal(ok.mode, 'stereo');
   assert.equal(ok.audioQuality, 1);
-  near(ok.audioSnrDb, Math.min(mpxState(-50, CFG, null).audioSnrDb, 20 + 20), 1e-9);
+  near(ok.audioSnrDb, Math.min(mpxState(-50, CFG, null).audioSnrDb, 30 + (20 - 3)), 1e-9); // captureSuppressionDb(20, 3) = 47 dB
   // beat (within 3 dB): neither captures, pilot lost, quality very low
   const beat = mpxState(-60, CFG, null, { interferer: { dbm: -61 } });
   assert.equal(beat.captured, 'none');

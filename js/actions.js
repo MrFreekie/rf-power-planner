@@ -7,6 +7,7 @@ import { effectiveAntennaB } from './model/diversity.js';
 import { createDefaultScene, createDefaultLink, createChainItem, createReflector, createBranch, createZone, createPlatform, STAGE_LIMITS, PLATFORM_LIMITS, PLATFORM_MATERIALS, createImdTransmitter, defaultImdTransmitters, newId, SCENE_LIMITS } from './model/scene.js';
 import { applyFmPreset } from './model/fm-presets.js';
 import { validateVenue } from './model/venue-underlay.js';
+import { SURFACES } from './model/library.js';
 
 const UNSAFE = new Set(['__proto__', 'prototype', 'constructor']);
 
@@ -486,13 +487,17 @@ export function setAntennaBOrientation(store, linkId, orientation, o = {}) {
 const clampTo = (v, [lo, hi]) => Math.min(hi, Math.max(lo, v));
 const fin = Number.isFinite;
 
-/** setStage(store, { width?, depth?, heightM? }, { coalesce }): values are clamped to 0.5..500 m (size) and 0..20 m (deck height). */
+/** setStage(store, { width?, depth?, heightM?, material? }, { coalesce }): material = a SURFACES id for the deck, '' = same as the venue floor; values are clamped to 0.5..500 m (size) and 0..20 m (deck height). */
 export function setStage(store, partial = {}, o = {}) {
   return store.update((d) => {
     if (fin(partial.width)) d.stage.width = clampTo(partial.width, STAGE_LIMITS.size);
     if (fin(partial.depth)) d.stage.depth = clampTo(partial.depth, STAGE_LIMITS.size);
     if (fin(partial.heightM)) d.stage.heightM = clampTo(partial.heightM, STAGE_LIMITS.heightM);
     else if (!fin(d.stage.heightM)) d.stage.heightM = 0;
+    if ('material' in partial) {
+      if (typeof partial.material === 'string' && Object.prototype.hasOwnProperty.call(SURFACES, partial.material)) d.stage.material = partial.material;
+      else delete d.stage.material; // '' or unknown = same as the venue floor
+    }
   }, opts(o));
 }
 

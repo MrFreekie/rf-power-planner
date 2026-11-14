@@ -18,7 +18,18 @@ const EPS = 1e-9;
 /** True when the scene has a raised deck or any platform; false means every floor function is the flat floor z = 0. */
 export function hasFloorFeatures(scene) {
   if (!scene) return false;
-  return (scene.stage && scene.stage.heightM > 0) || (Array.isArray(scene.platforms) && scene.platforms.length > 0);
+  return (scene.stage && scene.stage.heightM > 0) || (Array.isArray(scene.platforms) && scene.platforms.length > 0) || stageMaterialDiffers(scene);
+}
+
+/** Optional stage.material: the deck surface when it differs from environment.floor (the venue floor). Unset = same as the venue floor. */
+export function stageMaterialDiffers(scene) {
+  const m = scene && scene.stage && scene.stage.material;
+  return typeof m === 'string' && m !== '' && m !== (scene.environment ? scene.environment.floor : undefined);
+}
+/** Material of the stage deck: stage.material when set, else environment.floor. */
+export function stageSurface(scene) {
+  const m = scene && scene.stage && scene.stage.material;
+  return typeof m === 'string' && m !== '' ? m : (scene && scene.environment ? scene.environment.floor : undefined);
 }
 
 function inRect(x, y, x0, y0, w, d) {
@@ -67,6 +78,7 @@ export function floorSurfaceAt(scene, x, y) {
   if (!hasFloorFeatures(scene)) return base;
   let h = 0, mat = base;
   const st = scene.stage;
+  if (st && inRect(x, y, 0, 0, st.width, st.depth)) mat = stageSurface(scene);
   if (st && st.heightM > 0 && inRect(x, y, 0, 0, st.width, st.depth)) h = st.heightM;
   for (const p of scene.platforms || []) {
     if (p && p.topM > h && pointInPlatform(p, x, y)) { h = p.topM; mat = p.material || base; }
@@ -125,6 +137,7 @@ export function platformBoxes(scene) {
   const out = [];
   const st = scene.stage;
   const mat = scene.environment ? scene.environment.floor : undefined;
+  const deckMat = stageSurface(scene);
   const box = (id, kind, x, y, w, d, zTop, material, rot) => {
     const cx = x + w / 2, cy = y + d / 2;
     const corners = [[x, y], [x + w, y], [x + w, y + d], [x, y + d]].map(([px, py]) => toWorld(rot, cx, cy, px, py));
@@ -134,7 +147,7 @@ export function platformBoxes(scene) {
       zBottom: 0, zTop, material, rotationDeg: rot, cx, cy, lx0: x, ly0: y, lx1: x + w, ly1: y + d, corners,
     };
   };
-  if (st && st.heightM > 0) out.push(box('stage-deck', 'deck', 0, 0, st.width, st.depth, st.heightM, mat, 0));
+  if (st && st.heightM > 0) out.push(box('stage-deck', 'deck', 0, 0, st.width, st.depth, st.heightM, deckMat, 0));
   for (const p of scene.platforms || []) {
     if (p && p.topM > 0) out.push(box(p.id, 'platform', p.x, p.y, p.width, p.depth, p.topM, p.material || mat, platformRotationDeg(p)));
   }

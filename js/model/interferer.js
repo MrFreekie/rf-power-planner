@@ -12,7 +12,6 @@ export const DEFAULT_CAPTURE_RATIO_DB = INTERFERER_PARAMS.captureRatioDb.typical
 // Audio suppression of the weaker signal (dB) below which the audio is garbled and above which it is clean (approx).
 export const GARBLED_BELOW_SUPPRESSION_DB = 10;
 export const CLEAN_ABOVE_SUPPRESSION_DB = INTERFERER_PARAMS.suppressionAtCaptureDb; // 30 dB: defines the capture ratio
-export const CLEAN_CIR_DB = INTERFERER_PARAMS.cleanCiDb;
 
 const smooth = (t) => { const x = t < 0 ? 0 : t > 1 ? 1 : t; return x * x * (3 - 2 * x); };
 

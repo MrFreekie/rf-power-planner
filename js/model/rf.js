@@ -21,13 +21,17 @@
 import { CABLES, ANTENNAS, SURFACES, MATERIALS, cableDbPer100m as libraryCableDbPer100m, surfaceAt, materialAt } from './library.js';
 import { formatLength } from './units.js';
 import { hasFloorFeatures, floorHeightAt, floorSurfaceAt, absolutePos, allReflectors, chordsThrough, floorZoneFraction } from './floor.js';
-import { RX_PRESETS, RX_DEFAULTS, externalNoiseFigureDb, INTERFERENCE_RISE_DB, INTERFERENCE_LEVELS, INTERFERENCE_MIN_MHZ, interferenceBandOf, cascadeIip3Dbm as stagesIip3Dbm } from './rx-params.js';
+import { RX_PRESETS, RX_DEFAULTS, externalNoiseFigureDb, INTERFERENCE_RISE_DB, INTERFERENCE_LEVELS, isInterferenceBand, interferenceBandOf, cascadeIip3Dbm as stagesIip3Dbm } from './rx-params.js';
 
 let ZP = {};
 try { ZP = await import('./zones-params.js'); } catch { ZP = {}; }
 
 const C = 299792458; // m/s
 const DEG = Math.PI / 180;
+// Pattern floor policy: ANALYTIC patterns (dipole null, cardioid rear) are floored at -30 dB because a real antenna on a real stage
+// scatters energy into nulls; directional types (paddle, helical, log-periodic) use their front-to-back figure (-25, -20, -25 dB,
+// approx). TABLE patterns (library.js antennaPatternDb and custom azDb/elDb) are floored at -40 dB, the deepest value stored in any
+// table. A non-finite bearing is treated as boresight (gain = gainDbi) so one bad input cannot turn a whole sweep into NaN.
 const PATTERN_FLOOR_DB = -30;
 
 // ---------------------------------------------------------------- geometry basics
@@ -42,8 +46,9 @@ export function wavelengthM(freqMHz) {
 }
 
 /** Friis free-space path loss, positive dB: FSPL = 20 log10(4 pi d / lambda). */
+export const NEAR_FIELD_M = 0.1;
 export function fsplDb(distanceM, freqMHz) {
-  const d = Math.max(distanceM, 0.1); // near-field clamp: FSPL stays positive
+  const d = Math.max(distanceM, NEAR_FIELD_M); // near-field clamp: FSPL stays positive
   return 20 * Math.log10((4 * Math.PI * d) / wavelengthM(freqMHz));
 }
 
@@ -106,6 +111,7 @@ function analyticRelDb(name, f, uu) {
  * = gainDbi + relative pattern, evaluated in the antenna's own frame.
  */
 export function antennaGainDb(antennaRef, bearing) {
+  if (!bearing || !Number.isFinite(bearing.az) || !Number.isFinite(bearing.el)) return (antennaRef && antennaRef.gainDbi) ?? ((ANTENNAS[antennaRef && antennaRef.type] || {}).gainDbi ?? 0);
   const lib = ANTENNAS[antennaRef.type] || {};
   const gain = antennaRef.gainDbi ?? lib.gainDbi ?? 0;
   const orient = antennaRef.orientation || { az: 0, el: 0 };
@@ -493,12 +499,12 @@ export function externalNoiseNfDb(env, freqMHz) {
 
 /**
  * Interference floor rise (dB) from environment.interference ('none'|'quiet'|'typical'|'busy', unset = none). Only for
- * freqMHz >= 2000 (licence-exempt 2.4 / 5.8 GHz bands shared with Wi-Fi etc.); 0 below. It is a separate additive in-band noise
+ * the licence-exempt 2.4 GHz (2400-2500) and 5.8 GHz (5725-5875) bands shared with Wi-Fi; 0 elsewhere (2.1 or 3.5 GHz included). It is a separate additive in-band noise
  * power: N_total = N_floor x 10^(rise/10), i.e. the floor moves up by `rise` dB (noise-plus-interference, treated as noise).
  */
 export function interferenceRiseDb(env, freqMHz) {
   const v = env && env.interference;
-  if (!(freqMHz >= INTERFERENCE_MIN_MHZ) || typeof v !== 'string' || !INTERFERENCE_LEVELS.includes(v)) return 0;
+  if (!isInterferenceBand(freqMHz) || typeof v !== 'string' || !INTERFERENCE_LEVELS.includes(v)) return 0;
   return INTERFERENCE_RISE_DB[interferenceBandOf(freqMHz)][v];
 }
 
@@ -687,7 +693,15 @@ export function solveLink(scene, link) {
   const status = marginDb >= 6 ? 'pass' : marginDb >= 0 ? 'marginal' : 'fail';
   paths.forEach((p) => { delete p._gt; delete p._gr; });
 
-  return { distanceM, paths, pathLossDb, fsplDb: fspl, rxPowerDbm, waterfall: wf, inputPowerDbm, marginDb, status, cascade, requiredSnrDb: cascade.requiredSnrDb };
+  // Warnings (plain text for the UI). nearField: the Friis formula is clamped at 0.1 m (FSPL stays positive) and the path amplitude
+  // at 1 mm, so closer than 0.1 m the loss is NOT real physics (the antennas are in each other's near field).
+  const warnings = [];
+  const nearField = distanceM < NEAR_FIELD_M;
+  if (nearField) warnings.push(`Antennas are ${distanceM.toFixed(2)} m apart, closer than ${NEAR_FIELD_M} m: the free-space formula does not hold in the near field, so the loss is held at its 0.1 m value.`);
+  if (body && ((link.rx.antenna && link.rx.antenna.type === 'body') || (link.tx.antenna && link.tx.antenna.type === 'body'))) {
+    warnings.push('A body antenna already includes the loss of the wearer (-3 dBi, weaker behind); a body loss setting on top of it counts the body twice.');
+  }
+  return { distanceM, paths, pathLossDb, fsplDb: fspl, rxPowerDbm, waterfall: wf, inputPowerDbm, marginDb, status, cascade, requiredSnrDb: cascade.requiredSnrDb, nearField, warnings };
 }
 
 // ---------------------------------------------------------------- multi-antenna (branch) IEM zones
@@ -752,6 +766,8 @@ export function prepareBranches(scene, link) {
   const split = splitterLossDb(link, branches.length);
   const env = scene.environment || {};
   const body = (env.bodyLossDb || 0) + (link.rx.bodyLossDb || 0) + (env.fadeMarginDb || 0);
+  // IEM links: items between the bodypack antenna and the bodypack (link.rx.chain) also attenuate the coherent sum, as in solveLink
+  const rxChainLoss = link.kind === 'iem' && Array.isArray(link.rx.chain) ? chainLossDb(link.rx.chain, link.freqMHz) : 0;
   const lambda = wavelengthM(link.freqMHz);
   return {
     split,
@@ -760,7 +776,7 @@ export function prepareBranches(scene, link) {
       bl.rx = { ...link.rx, pos: { x: 0, y: 0, z: 0 } }; // mutable rx point reused for every cell
       return {
         bl,
-        off: bl.tx.powerDbm - chainLossDb(br.chain, link.freqMHz) - body,
+        off: bl.tx.powerDbm - chainLossDb(br.chain, link.freqMHz) - body - rxChainLoss,
         chainPh: -2 * Math.PI * chainElectricalLengthM(br.chain) / lambda,
       };
     }),

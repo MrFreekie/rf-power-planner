@@ -24,6 +24,7 @@ import { initA11y, announce } from './a11y.js';
 import { resizeFromCorner, rotationFromPointer } from './platformGeom.js';
 import { dispX, dispY, describePos } from '../ui/coords.js';
 import { drawVenue } from './venueDraw.js';
+import { planExtent, farBounds } from './planExtent.js';
 
 const LOBE_STEP = 6; // degrees
 
@@ -47,8 +48,8 @@ export function createPlanView(canvas, store) {
   // report snapshot: fit the stage into w x h and draw synchronously, without touching the live view
   const unregSnap = registerSnapshot('plan', (w, h) => {
     const save = { px: vp.pxPerM, ox: vp.origin.x, oy: vp.origin.y, user: userView, hs: handles };
-    const st = store.getScene().stage;
-    vp.fitRect(-1.0, -1.2, st.width + 1.0, st.depth + 1.8, w, h, 6);
+    const ex = planExtent(store.getScene());
+    vp.fitRect(ex.x0, ex.y0, ex.x1, ex.y1, w, h, 6);
     const { c, ctx } = makeSnapshotCanvas(w, h);
     const ripOn = rip.settings.on; rip.settings.on = false; // clean sheet: no animated rings in the print
     isSnap = true;
@@ -57,8 +58,8 @@ export function createPlanView(canvas, store) {
   });
 
   function fit(w = host.width, h = host.height) {
-    const st = store.getScene().stage;
-    vp.fitRect(-1.0, -1.2, st.width + 1.0, st.depth + 1.8, w, h, 6);
+    const ex = planExtent(store.getScene());
+    vp.fitRect(ex.x0, ex.y0, ex.x1, ex.y1, w, h, 6);
     userView = false;
     host.invalidate();
   }
@@ -323,7 +324,7 @@ export function createPlanView(canvas, store) {
     }
     return c;
   }
-  const bounds = (st) => ({ x0: -3, x1: st.width + 3, y0: -3, y1: st.depth + 10 });
+  const bounds = (st) => farBounds(st);
   function dragStart(hd, w0) {
     const key = `plan-drag-${++dragCounter}`;
     if (hd.kind === 'platBody' || hd.kind === 'platCorner' || hd.kind === 'platRot') {
@@ -333,7 +334,14 @@ export function createPlanView(canvas, store) {
     const r = (store.getScene().reflectors || []).find((q) => q.id === hd.itemId);
     return { key, p1: r && { ...r.p1 }, p2: r && { ...r.p2 }, startW: { x: hd.wx, y: hd.wy } };
   }
-  function dragMove(hd, ptr, target, state) {
+  // while dragging near the canvas edge, zoom out about the centre so items can be placed beyond the current view
+  function edgeGrow(ptr) {
+    const w = host.width, h = host.height; if (!w || !h) return;
+    const s = vp.worldToScreen(ptr.x, ptr.y), m = 28;
+    if (s.x < m || s.y < m || s.x > w - m || s.y > h - m) { vp.zoomAt(w / 2, h / 2, 0.97); userView = true; }
+  }
+  function dragMove(hd, ptr, target, state) { dragMoveInner(hd, ptr, target, state); edgeGrow(ptr); }
+  function dragMoveInner(hd, ptr, target, state) {
     if (hd.kind === 'platRot' && state.plat) {
       const deg = rotationFromPointer(state.plat, ptr, shiftDown ? 15 : 1);
       updatePlatform(store, hd.itemId, { rotationDeg: deg }, { coalesce: state.key });
@@ -359,7 +367,7 @@ export function createPlanView(canvas, store) {
     }
     if (hd.kind === 'zoneP' || hd.kind === 'branch' || hd.kind === 'imdTx') {
       const bd = bounds(store.getScene().stage);
-      const pt = { x: round2(clamp(target.x, bd.x0 - 20, bd.x1 + 40)), y: round2(clamp(target.y, bd.y0 - 20, bd.y1 + 40)) };
+      const pt = { x: round2(clamp(target.x, bd.x0, bd.x1)), y: round2(clamp(target.y, bd.y0, bd.y1)) };
       if (hd.kind === 'zoneP') movePoint(store, hd.zoneId, hd.index, pt, { coalesce: state.key });
       else if (hd.kind === 'imdTx') moveImdTransmitter(store, hd.itemId, pt, { coalesce: state.key });
       else moveBranch(store, hd.linkId, hd.branchId, pt, { coalesce: state.key });
@@ -453,8 +461,12 @@ export function createPlanView(canvas, store) {
     host.invalidate();
   });
 
+  const fitBtn = typeof document !== 'undefined' ? document.getElementById('btn-plan-fit') : null;
+  const onFitBtn = () => fit();
+  if (fitBtn) fitBtn.addEventListener('click', onFitBtn);
+
   return {
     viewport: vp, fit, invalidate: host.invalidate,
-    destroy() { canvas.removeEventListener('pointermove', onCurMove); canvas.removeEventListener('pointerleave', onCurLeave); canvas.removeEventListener('pointercancel', onCurLeave); window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKey); unregSnap(); detachRip(); detach(); unsub?.(); unsubSq?.(); unsubRx?.(); unsubCov?.(); unsubImd?.(); unsubView?.(); host.destroy(); },
+    destroy() { if (fitBtn) fitBtn.removeEventListener('click', onFitBtn); canvas.removeEventListener('pointermove', onCurMove); canvas.removeEventListener('pointerleave', onCurLeave); canvas.removeEventListener('pointercancel', onCurLeave); window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKey); unregSnap(); detachRip(); detach(); unsub?.(); unsubSq?.(); unsubRx?.(); unsubCov?.(); unsubImd?.(); unsubView?.(); host.destroy(); },
   };
 }

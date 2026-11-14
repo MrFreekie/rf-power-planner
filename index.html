@@ -18,6 +18,8 @@
   </svg>
   <h1 class="brand-name">RF Bench</h1>
   <p class="brand-tag">Plan, simulate, learn.</p>
+  <span class="brand-alpha" title="Alpha: under heavy development, so errors may be present. Always build and verify real systems before use.">Alpha</span>
+  <p class="brand-warn">Under heavy development, errors may be present. Build and verify real systems before use.</p>
 </div>
 <header id="toolbar" role="toolbar" aria-label="Scenario controls">
   <div class="group" role="group" aria-label="Scenario">
@@ -96,7 +98,7 @@
 
 <main id="workspace">
   <section class="pane" aria-label="Plan view">
-    <h2>Plan</h2>
+    <h2>Plan <button type="button" id="btn-plan-fit" class="pane-fit" title="Fit every item in the plan view (key 0)">Fit all</button></h2>
     <canvas id="plan-canvas" tabindex="0" aria-label="Plan view of the stage"></canvas>
   </section>
   <section class="pane" aria-label="Side view">

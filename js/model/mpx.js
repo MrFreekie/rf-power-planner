@@ -120,7 +120,7 @@ export function audioSnrDb(cnr, opts = {}) {
   const b = opts.blend === undefined ? 1 : clamp01(opts.blend);
   snr = Math.min(snr, c.snrCeilingDb); // audio chain ceiling
   // penalty in the power domain: noise powers add, L-R noise weight b^2:
-  //   penalty_dB = 10log10(1 + b^2 (10^(p/10) - 1))  (b = 0.5, p = 22 -> about 17.9 dB)
+  //   penalty_dB = 10log10(1 + b^2 (10^(p/10) - 1))  (b = 0.5, p = 22: 10 log10(1 + 0.25 (158.5 - 1)) = 16.06 dB)
   if (opts.stereo) snr -= 10 * Math.log10(1 + b * b * (Math.pow(10, c.stereoPenaltyDb / 10) - 1));
   return snr;
 }
@@ -165,8 +165,9 @@ export function mpxState(inputDbm, cfg, prev, { pilotPresent = true, interferer 
   const mode = blend >= 0.999 ? 'stereo' : blend > 0 ? 'blend' : 'mono';
   const inj = Math.max(fin(c.pilotInjection, 0.09), 1e-6); // fraction of peak deviation (params: 9 %)
   let snr = audioSnrDb(cnr, { ...c, stereo: pilot.locked, blend });
-  // FM suppression of a weaker co-channel signal is about 20 dB beyond the carrier ratio (approx): the audio SNR cannot beat it.
-  if (cap) snr = Math.min(snr, cap.cirDb + 20);
+  // ONE capture model (interferer.js captureState -> mpx-params captureSuppressionDb): the wanted-to-interferer audio ratio
+  // (30 dB at the capture ratio, about 1 dB per dB beyond) limits the audio SNR.
+  if (cap) snr = Math.min(snr, cap.suppressionDb);
   return {
     ...(cap ? { captured: cap.captured, cirDb: cap.cirDb, audioQuality: cap.audioQuality, carrierLevelDbm: cap.carrierLevelDbm } : {}),
     cnrDb: cnr,
@@ -177,6 +178,7 @@ export function mpxState(inputDbm, cfg, prev, { pilotPresent = true, interferer 
     pilotMarginDb: pilot.marginDb,
     pilotLevelDb: pilot.locked ? 20 * Math.log10(inj) : SPECTRUM_FLOOR_DB,
     audioSnrDb: snr,
+    audioSnrNote: pilot.locked ? MPX_AUDIO_SNR_NOTE : null,
     lrLeak: lrLeakOf(blend),
     muted: !!c.pilotSquelchEnabled && !pilot.locked,
   };
@@ -191,6 +193,9 @@ function band(f, a, b, edge) {
   const d = f < a ? a - f : f - b;
   return d >= edge ? 0 : 0.5 * (1 + Math.cos(Math.PI * d / edge));
 }
+
+/** Shown with the audio SNR while stereo is on: audio SNR is not monotonic in CNR because the receiver trades noise for stereo. */
+export const MPX_AUDIO_SNR_NOTE = 'In stereo the audio signal-to-noise ratio is lower than in mono (the L-R channel is noisier). As the signal weakens the receiver blends towards mono, so the audio SNR can briefly rise as the signal falls.';
 
 /**
  * Display spectrum of the composite signal. Levels in dB relative to 100 % modulation.

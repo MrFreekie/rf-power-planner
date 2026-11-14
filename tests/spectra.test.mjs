@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { spectraLayout, TABS_BELOW_PX, SPECTRA, nearestIndex, niceTicks, rfInputs, audioInputs, linkDeviationKhz, audioSummary, rfSummary, mpxSummary, drawMpx, drawAudio, drawRf } from '../js/view/spectra.js';
+import { spectraLayout, TABS_BELOW_PX, SPECTRA, nearestIndex, niceTicks, rfInputs, audioInputs, linkDeviationKhz, audioSummary, rfSummary, mpxSummary, drawMpx, drawAudio, drawRf, AUDIO_BANDS, AUDIO_BINS, audioAxis, bandLabel, hzText, nearestBand, pickLabels, logResample } from '../js/view/spectra.js';
 import { audioSpectrum, rfSpectrum } from '../js/model/spectrum-views.js';
 import { createDefaultScene } from '../js/model/scene.js';
 import { solveLink } from '../js/model/rf.js';
@@ -96,4 +96,57 @@ test('the MPX spectrum moved: no spectrum canvas in the MPX panel, drawn in the 
 test('help: the spectra panel has a What\'s this? topic', () => {
   assert.ok(HELP_SIDEBAR_IDS.includes('spectra'));
   assert.ok(HELP_TOPICS.spectra.text.length > 40);
+});
+
+test('audio axis: log mapping both ways, 20 Hz to 20 kHz, one decade per 1/3 of the width', () => {
+  assert.ok(Math.abs(audioAxis.toX(20) - audioAxis.min) < 1e-12 && Math.abs(audioAxis.toX(20000) - audioAxis.max) < 1e-12);
+  for (const f of [20, 31.5, 100, 1000, 12345, 20000]) assert.ok(Math.abs(audioAxis.fromX(audioAxis.toX(f)) - f) < 1e-9 * f);
+  const frac = (f) => (audioAxis.toX(f) - audioAxis.min) / (audioAxis.max - audioAxis.min);
+  assert.ok(Math.abs(frac(200) - 1 / 3) < 1e-9 && Math.abs(frac(2000) - 2 / 3) < 1e-9); // decades are equal widths
+  assert.ok(Math.abs((frac(125) - frac(63)) - (frac(1000) - frac(500))) < 0.01); // octaves are (nearly) equal widths
+});
+
+test('audio ticks: ISO octave centres and label strings', () => {
+  assert.deepEqual(AUDIO_BANDS, [31.5, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]);
+  assert.deepEqual(AUDIO_BANDS.map(bandLabel), ['31.5', '63', '125', '250', '500', '1k', '2k', '4k', '8k', '16k']);
+  assert.ok(!AUDIO_BANDS.map(bandLabel).includes('31.50'));
+  assert.equal(hzText(63), '63 Hz'); assert.equal(hzText(1000), '1 kHz'); assert.equal(hzText(2500), '2.5 kHz'); assert.equal(hzText(16000), '16 kHz');
+  assert.equal(nearestBand(70), 63); assert.equal(nearestBand(900), 1000); assert.equal(nearestBand(20), 31.5); assert.equal(nearestBand(20000), 16000);
+});
+
+test('audio labels never overlap and fit inside the plot at 320 px wide', () => {
+  for (const pw of [270, 340, 700]) {
+    const xOf = (f) => ((audioAxis.toX(f) - audioAxis.min) / (audioAxis.max - audioAxis.min)) * pw;
+    const wOf = (s) => s.length * 6.5;
+    const chosen = pickLabels(xOf, wOf, 6, AUDIO_BANDS, 0, pw);
+    assert.ok(chosen.includes(1000), '1k is always labelled');
+    for (let i = 1; i < chosen.length; i++) assert.ok(xOf(chosen[i]) - xOf(chosen[i - 1]) >= (wOf(bandLabel(chosen[i])) + wOf(bandLabel(chosen[i - 1]))) / 2 + 6 - 1e-9);
+    for (const f of chosen) { const x = xOf(f), w = wOf(bandLabel(f)); assert.ok(x - w / 2 >= 0 && x + w / 2 <= pw); }
+    if (pw >= 700) assert.equal(chosen.length, 10);
+  }
+});
+
+test('logResample: log-spaced output, keeps peaks, fills the low end by interpolation', () => {
+  const freqs = Array.from({ length: 2048 }, (_, i) => (20000 * i) / 2047);
+  const levels = freqs.map((f) => (Math.abs(f - 5000) < 6 ? -10 : -60 - f / 1000));
+  const r = logResample(freqs, levels, 200);
+  assert.equal(r.f.length, 200);
+  assert.ok(Math.abs(r.f[0] - 20) < 1e-9 && Math.abs(r.f[199] - 20000) < 1e-6);
+  for (let i = 1; i < 200; i++) assert.ok(Math.abs(r.f[i] / r.f[i - 1] - r.f[1] / r.f[0]) < 1e-9); // constant ratio
+  assert.ok(Math.max(...r.db) >= -10, 'the narrow peak survives');
+  assert.ok(r.db.every(Number.isFinite));
+  assert.deepEqual(logResample([], [], 10), { f: [], db: [] });
+});
+
+test('audio panel requests enough bins for a log axis and draws the labelled octaves', () => {
+  assert.ok(AUDIO_BINS >= 1024);
+  assert.equal(audioInputs({ kind: 'mic' }, null, 0).nBins, AUDIO_BINS);
+  const inp = audioInputs({ kind: 'mic' }, null, 0), a = audioSpectrum(inp);
+  for (const w of [320, 1280]) {
+    const c = fakeCtx(); drawAudio(c, w, 250, th, a, inp, 100);
+    const texts = c.calls.filter((x) => x[0] === 'fillText').map((x) => x[1]);
+    assert.ok(texts.includes('1k'), 'labels 1k');
+    assert.ok(!texts.includes('31.50'));
+  }
+  assert.match(audioSummary(a, inp), /logarithmic axis/);
 });

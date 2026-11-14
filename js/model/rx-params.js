@@ -193,12 +193,18 @@ export const EXTERNAL_NOISE_FIGURE_600MHZ_DB = Object.freeze(Object.fromEntries(
 // power in the receiver channel against its noise floor, rise = 10 log10(1 + I/N); approx). 5.8 GHz is quieter than 2.4 GHz (less Wi-Fi
 // airtime, no Bluetooth). Applies only at or above INTERFERENCE_MIN_MHZ; 'none' (or unset) = no rise, so older scenes keep their numbers.
 export const INTERFERENCE_LEVELS = Object.freeze(['none', 'quiet', 'typical', 'busy']);
+// Rise at a Wi-Fi channel centre, the figure the planner uses per band (docs/PHYSICS-BANDS.md). These are the library.js
+// interferenceRiseDb values at 2437 and 5785 MHz (2.0 / 9.3 / 19.6 and 0.64 / 4.1 / 12.3 dB) rounded; a test keeps them within 0.5 dB.
+// Between channels (gaps) library.js gives other values (e.g. 5.5 dB typical at 2449.5 MHz): use it for a frequency-exact figure.
 export const INTERFERENCE_RISE_DB = Object.freeze({
   '2g4': Object.freeze({ none: 0, quiet: 2, typical: 9, busy: 20 }),
   '5g8': Object.freeze({ none: 0, quiet: 0.6, typical: 4, busy: 12 }),
 });
-/** Interference band key of a carrier: '2g4' below 4 GHz, else '5g8'. */
+/** Interference band key of a carrier: '2g4' below 4 GHz, else '5g8' (UI helper; use isInterferenceBand to test applicability). */
 export const interferenceBandOf = (freqMHz) => (freqMHz < 4000 ? '2g4' : '5g8');
+/** The licence-exempt bands where the Wi-Fi rise applies: 2.4 GHz (2400-2500) and 5.8 GHz (5725-5875). Nothing in between (2.1 or 3.5 GHz). */
+export const INTERFERENCE_BANDS_MHZ = Object.freeze({ '2g4': Object.freeze([2400, 2500]), '5g8': Object.freeze([5725, 5875]) });
+export const isInterferenceBand = (freqMHz) => Object.values(INTERFERENCE_BANDS_MHZ).some(([lo, hi]) => freqMHz >= lo && freqMHz <= hi);
 export const INTERFERENCE_MIN_MHZ = 2000;
 
 /** Cascade noise figure in dB of ordered stages [{ gainDb, nfDb }] (signal-flow order). Empty list gives 0. */
