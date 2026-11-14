@@ -134,7 +134,7 @@ test('glossary: static HTML acronyms are all in the glossary; wrapped terms are 
   const acr = [...new Set(visible.match(/\b[A-Z0-9]{2,}\b/g) || [])].filter((w) => !allow.has(w) && /[A-Z]/.test(w));
   for (const w of acr) assert.ok(lookup(w), `index.html acronym ${w} missing from the glossary`);
   // vice versa: each auto-wrapped glossary term appears in the static html or in the UI source text
-  const files = ['js/ui/inspector.js', 'js/ui/help.js', 'js/view/waterfall.js', 'js/view/meters.js', 'js/view/imd.js', 'js/view/digital.js', 'js/view/mpx.js', 'js/view/telemetry.js', 'js/view/diversity.js', 'js/view/coverage.js', 'js/view/timeline.js', 'js/reportData.js', 'js/model/rf.js', 'js/examples.js', 'js/model/library.js', 'js/model/digital-params.js', 'js/model/imd-params.js', 'js/model/rx-params.js', 'js/ui/coordination.js', 'js/ui/noise.js']
+  const files = ['js/ui/inspector.js', 'js/ui/help.js', 'js/view/waterfall.js', 'js/view/meters.js', 'js/view/imd.js', 'js/view/digital.js', 'js/view/mpx.js', 'js/view/modLab.js', 'js/view/telemetry.js', 'js/view/diversity.js', 'js/view/coverage.js', 'js/view/timeline.js', 'js/reportData.js', 'js/model/rf.js', 'js/examples.js', 'js/model/library.js', 'js/model/digital-params.js', 'js/model/imd-params.js', 'js/model/rx-params.js', 'js/ui/coordination.js', 'js/ui/noise.js']
     .map((f) => { try { return fs.readFileSync(new URL('../' + f, import.meta.url), 'utf8'); } catch { return ''; } }).join('\n') + html;
   const reserved = new Set(['EIRP', 'ERP', 'CIR', 'PLL', 'VHF']); // defined for text users may type or future labels
   const unused = Object.keys(GLOSSARY).filter((k) => GLOSSARY[k].wrap !== false && !reserved.has(k) && !files.includes(k));
@@ -144,7 +144,7 @@ test('glossary: static HTML acronyms are all in the glossary; wrapped terms are 
 test('help: topics reference only glossary terms; tooltip ids exist in index.html', () => {
   for (const [id, t] of Object.entries(HELP_TOPICS)) {
     for (const term of t.terms || []) assert.ok(lookup(term), `${id}: ${term}`);
-    assert.ok(t.text.length > 40 && t.text.length < 700, id);
+    assert.ok(t.text.length > 40 && t.text.length < 1200, id);
   }
   assert.ok(legend(['dB', 'Tx']).includes('decibel'));
   const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');

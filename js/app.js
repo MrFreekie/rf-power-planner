@@ -217,6 +217,17 @@ function reportResults() {
     squelch: squelch.get(id), rx: rxState.get(id), digital: digital.get(id), telemetry: telemetry.get(id), coverage: coverage.get(id), imd: imd.get(),
   };
 }
+// Modulation lab (educational overlay, loaded on first use)
+let modLab = null;
+$('btn-modlab').addEventListener('click', async () => {
+  try {
+    if (!modLab) { const mod = await import('./view/modLab.js'); modLab = mod.mountModLab({ container: $('modlab'), store }); }
+    modLab.isOpen() ? modLab.close() : modLab.open();
+  } catch (err) {
+    console.error(err);
+    showError(`Could not open the modulation lab: ${err.message}`);
+  }
+});
 $('btn-report').addEventListener('click', async () => {
   try {
     const mod = await import('./view/report.js');

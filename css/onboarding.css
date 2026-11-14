@@ -93,3 +93,15 @@ abbr.gl:focus-visible { outline: 2px solid var(--focus, var(--ink, #1d2733)); ou
 .insp-txlimit { margin: 2px 0 6px; }
 .insp-txlimit[hidden] { display: none; }
 .insp-txlimit[data-over="true"] { color: var(--warn-text, #8a6200); font-weight: 600; border-left: 3px solid var(--marginal, #d99a00); padding-left: 6px; }
+
+/* FM equipment presets */
+.fm-block { margin: 4px 0 8px; }
+.fm-figs { list-style: none; margin: 0 0 4px; padding: 0; font-size: 0.85em; }
+.fm-figs li { padding: 1px 0; }
+.fm-badge { display: inline-block; margin-left: 4px; padding: 0 5px; border: 1px solid currentColor; border-radius: 8px; font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.03em; }
+.fm-assumed { color: #8a5a00; background: rgba(255, 190, 60, 0.18); }
+.fm-sourced { color: #1d6b3a; }
+.fm-warn { color: #a33; font-weight: 600; }
+[data-theme="dark"] .fm-assumed { color: #ffcc66; background: rgba(255, 190, 60, 0.12); }
+[data-theme="dark"] .fm-sourced { color: #7fd69a; }
+[data-theme="dark"] .fm-warn { color: #ff9a9a; }

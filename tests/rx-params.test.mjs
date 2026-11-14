@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { RX_PRESETS, RX_DEFAULTS, DIVERSITY_PRESETS, SPACING_RULES, IM3_SLOPE, IIP3_MINUS_P1DB_DB } from '../js/model/rx-params.js';
 
+import { FM_RX_PRESET_IDS } from '../js/model/fm-presets.js';
 const rxIds = ['mic-receiver-typical', 'iem-bodypack-typical', 'budget-receiver', 'rx-vhf-typical', 'rx-2g4-typical', 'rx-5g8-typical'];
 
 // Bessel J0 by power series (accurate for |x| < 8).
@@ -9,7 +10,7 @@ function j0(x) { let t = 1, s = 1; for (let k = 1; k < 40; k++) { t *= -(x * x) 
 const L = (x) => 10 * Math.log10(x);
 
 test('rx presets exist, frozen, labelled illustrative', () => {
-  assert.deepEqual(Object.keys(RX_PRESETS).sort(), [...rxIds].sort());
+  assert.deepEqual(Object.keys(RX_PRESETS).sort(), [...rxIds, ...FM_RX_PRESET_IDS].sort());
   for (const id of rxIds) {
     assert.equal(RX_PRESETS[id].id, id);
     assert.equal(RX_PRESETS[id].illustrative, true);

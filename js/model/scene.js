@@ -9,7 +9,7 @@ const POLARISATIONS = ['vertical', 'horizontal'];
 const LINK_KINDS = ['mic', 'iem'];
 const ANTENNA_TYPES = ['dipole', 'paddle', 'helical', 'cardioid', 'omni', 'logperiodic', 'body', 'custom'];
 const AUDIO_SOURCES = ['speech', 'tone', 'pink', 'stereo-demo', 'off'];
-export const RX_PRESET_IDS = ['mic-receiver-typical', 'iem-bodypack-typical', 'budget-receiver', 'rx-vhf-typical', 'rx-2g4-typical', 'rx-5g8-typical'];
+export const RX_PRESET_IDS = Object.keys(RX_PRESETS); // includes the analogue FM equipment presets (fm-presets.js)
 export const DIVERSITY_MODES = ['switching', 'true', 'ratio'];
 export const defaultRxPreset = (kind) => (kind === 'iem' ? 'iem-bodypack-typical' : 'mic-receiver-typical');
 /**
@@ -23,7 +23,8 @@ export const defaultDiversity = (pos, _antennaA) => ({
 });
 import { MATERIAL_TRANSMISSION } from './zones-params.js';
 import { SURFACES, MATERIALS } from './library.js';
-import { EXTERNAL_NOISE_FIGURE_600MHZ_DB, INTERFERENCE_LEVELS } from './rx-params.js';
+import { EXTERNAL_NOISE_FIGURE_600MHZ_DB, INTERFERENCE_LEVELS, RX_PRESETS } from './rx-params.js';
+import { FM_TX_PRESET_IDS } from './fm-presets.js';
 
 // Stage and platform limits. Item pos.z everywhere stays the height above the LOCAL floor (deck or platform top).
 export const STAGE_LIMITS = Object.freeze({ size: [0.5, 500], heightM: [0, 20] });
@@ -255,6 +256,12 @@ export function createReflector(overrides = {}) {
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
+/** Optional analogue-FM transmitter fields: fmPreset (a tx id of fm-presets.js) and lowIntermod (boolean). */
+function checkFmTx(t, path, errors) {
+  if (t.fmPreset !== undefined && !FM_TX_PRESET_IDS.includes(t.fmPreset)) errors.push(`${path}.fmPreset invalid`);
+  if (t.lowIntermod !== undefined && typeof t.lowIntermod !== 'boolean') errors.push(`${path}.lowIntermod must be a boolean`);
+}
+
 function checkPos(p, path, errors, keys = ['x', 'y', 'z']) {
   if (!isObj(p)) { errors.push(`${path} must be an object`); return; }
   for (const k of keys) if (!isNum(p[k])) errors.push(`${path}.${k} must be a finite number`);
@@ -346,6 +353,7 @@ export function validateScene(scene) {
         if (!isNum(t.powerDbm)) errors.push(`${p}.powerDbm must be a number`);
         checkPos(t.pos, `${p}.pos`, errors);
         checkAntenna(t.antenna, `${p}.antenna`, errors);
+        checkFmTx(t, p, errors);
       });
       checkPos(m.rxAntennaPos, 'imd.rxAntennaPos', errors);
       if (m.rxAntenna !== undefined) checkAntenna(m.rxAntenna, 'imd.rxAntenna', errors);
@@ -437,6 +445,7 @@ export function validateScene(scene) {
       if (!isNum(l.tx.powerDbm)) errors.push(`${p}.tx.powerDbm must be a number`);
       checkPos(l.tx.pos, `${p}.tx.pos`, errors);
       checkAntenna(l.tx.antenna, `${p}.tx.antenna`, errors);
+      checkFmTx(l.tx, `${p}.tx`, errors);
     }
     if (!isObj(l.rx)) errors.push(`${p}.rx must be an object`);
     else {

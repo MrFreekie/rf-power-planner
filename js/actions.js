@@ -5,6 +5,7 @@ import { IMD_PRESETS, COMBINER_PRESETS } from './model/imd-params.js';
 import { startWalk, stopWalk } from './walk.js';
 import { effectiveAntennaB } from './model/diversity.js';
 import { createDefaultScene, createDefaultLink, createChainItem, createReflector, createBranch, createZone, createPlatform, STAGE_LIMITS, PLATFORM_LIMITS, PLATFORM_MATERIALS, createImdTransmitter, defaultImdTransmitters, newId } from './model/scene.js';
+import { applyFmPreset } from './model/fm-presets.js';
 
 const UNSAFE = new Set(['__proto__', 'prototype', 'constructor']);
 
@@ -551,4 +552,55 @@ export function movePlatform(store, id, pos = {}, o = {}) {
 /** resizePlatform(store, id, { width?, depth? }, { coalesce }) */
 export function resizePlatform(store, id, size = {}, o = {}) {
   return updatePlatform(store, id, { width: size.width, depth: size.depth }, o);
+}
+
+// ---- FM equipment presets (one undoable step each) ----
+
+/** Apply (or clear with null/'') a transmitter equipment preset on a link. opts: { powerOptionId, lowIntermod }. */
+export function setTxFmPreset(store, linkId, presetId, o = {}) {
+  return store.update((d) => {
+    const i = d.links.findIndex((l) => l.id === linkId);
+    if (i < 0) return;
+    if (!presetId) { delete d.links[i].tx.fmPreset; delete d.links[i].tx.lowIntermod; return; }
+    const l = applyFmPreset(d.links[i], presetId, o);
+    if (l.tx.fmPreset !== presetId) return;
+    d.links[i].tx = l.tx;
+  });
+}
+
+/** Power option or low-intermod change on a link's Tx preset. */
+export function setTxPowerOption(store, linkId, powerOptionId) {
+  const l = store.getScene().links.find((x) => x.id === linkId);
+  if (!l || !l.tx.fmPreset) return false;
+  return setTxFmPreset(store, linkId, l.tx.fmPreset, { powerOptionId });
+}
+export function setTxLowIntermod(store, linkId, on) {
+  return store.update((d) => {
+    const l = d.links.find((x) => x.id === linkId);
+    if (l && l.tx.fmPreset) l.tx.lowIntermod = !!on;
+  });
+}
+
+/** Apply an FM receiver preset (sets rxPreset, sensitivity, squelch, diversity mode). */
+export function setRxFmPreset(store, linkId, presetId) {
+  return store.update((d) => {
+    const i = d.links.findIndex((l) => l.id === linkId);
+    if (i < 0) return;
+    d.links[i].rx = applyFmPreset(d.links[i], presetId).rx;
+  });
+}
+
+/** Intermod-demo transmitter equipment preset and low-intermod flag. */
+export function setImdTransmitterFm(store, id, { fmPreset, powerOptionId, lowIntermod } = {}) {
+  return store.update((d) => {
+    const t = imdOf(d).transmitters.find((x) => x.id === id);
+    if (!t) return;
+    if (fmPreset === '' || fmPreset === null) { delete t.fmPreset; delete t.lowIntermod; return; }
+    if (fmPreset) {
+      const l = applyFmPreset({ tx: { powerDbm: t.powerDbm }, rx: {} }, fmPreset, { powerOptionId, lowIntermod });
+      if (l.tx.fmPreset !== fmPreset) return;
+      t.fmPreset = fmPreset; t.powerDbm = l.tx.powerDbm;
+      if ('lowIntermod' in l.tx) t.lowIntermod = l.tx.lowIntermod; else delete t.lowIntermod;
+    } else if (lowIntermod !== undefined && t.fmPreset) t.lowIntermod = !!lowIntermod;
+  });
 }

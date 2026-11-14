@@ -1,6 +1,7 @@
 // Example scenes: each builds a complete scene plus a short explanation. Pure (no DOM).
 //   EXAMPLES: [{ id, title, note, build() -> { scene, walk?: { to, speedMps, pingPong }, select? } }]
 //   getExample(id), buildExample(id) -> { id, title, note, scene, walk, selectId }
+import { applyFmPreset } from './model/fm-presets.js';
 import { createDefaultScene, createDefaultLink, createChainItem, createReflector, createBranch, createZone, createDefaultImd, createImdTransmitter, createPlatform, newId, syncScene } from './model/scene.js';
 
 const omni = (el = 90) => ({ type: 'omni', gainDbi: 0, orientation: { az: 0, el } });
@@ -562,6 +563,86 @@ export const EXAMPLES = [
         s.environment.interference = 'busy';
       }),
       walk: { to: { x: 8, y: 12, z: 1.5 }, speedMps: 2, pingPong: true },
+    }),
+  },
+  {
+    id: 'ur4d-style-link',
+    title: 'Analogue FM link, UR4D-style receiver (assumed figures)',
+    note: 'A 50 mW handheld at 590 MHz feeds a receiver set up from published UR4D-class figures; the quoted -102 dBm at 30 dB SINAD is used as the sensitivity, so the margin is 65.5 dB across 15 m. Walk the transmitter towards the receiver: the input reaches -30 dBm (hot, the top of the rated range) at about 8 m and passes the -25 dBm overload level at about 3.5 m (multipath ripples move both points), where the front end is flagged overloaded even though the margin is highest. Keep transmitters well away from the receiver antennas. Based on published specs, some figures (noise figure, squelch threshold, band edges) are assumed.',
+    build: () => ({
+      scene: make('mic', (s, l) => {
+        s.stage = { width: 20, depth: 12 };
+        s.environment.floor = 'wood';
+        l.freqMHz = 590;
+        l.tx.antenna = omni();
+        l.rx.antenna = omni();
+        l.tx.pos = { x: 2, y: 6, z: 1.5 };
+        l.rx.pos = { x: 17, y: 6, z: 2 };
+        l.rx.diversity.antennaB.pos = { x: 17, y: 5.4, z: 2 };
+        l.chain = [createChainItem('cable', { cableType: 'rg58', lengthM: 5 })];
+        Object.assign(l, applyFmPreset(l, 'shure-ur2', { powerOptionId: 'hi-50mw' }));
+        Object.assign(l, applyFmPreset(l, 'shure-ur4d'));
+      }),
+      walk: { to: { x: 15, y: 6, z: 1.5 }, speedMps: 1.2, pingPong: true },
+    }),
+  },
+  {
+    id: 'skm-low-intermod',
+    title: 'Four analogue FM mics, standard mode (SKM 5200-II class, assumed figures)',
+    note: 'Four 10 mW handhelds share a hybrid combiner with 25 dB isolation, and Mic A and Mic B beat to a product at 605.7 MHz, exactly on Mic C: the worst channel sees its noise floor rise by 20.3 dB. Switching all four to the low-intermod mode lowers the transmitter-side product by an assumed 6 dB and the worst rise to 14.8 dB. The 6 dB is an assumption standing in for a trade-report claim of about 30 percent more compatible channels. Based on published specs, some figures assumed.',
+    build: () => ({
+      scene: make('mic', (s) => {
+        s.stage = { width: 16, depth: 10 };
+        const ant = { type: 'body', gainDbi: -3, orientation: { az: 0, el: 90 } };
+        const plan = [[606.1, 'Mic A', 3, 3], [606.5, 'Mic B', 5, 6], [605.7, 'Mic C', 9, 4], [607.4, 'Mic D', 6, 8]];
+        s.imd = {
+          enabled: true, preset: 'iem-combiner-no-isolation',
+          transmitters: plan.map(([f, name, x, y]) => createImdTransmitter({ name, freqMHz: f, powerDbm: 10, pos: { x, y, z: 1.5 }, antenna: ant, fmPreset: 'sennheiser-skm5200ii', lowIntermod: false })),
+          rxAntennaPos: { x: 14, y: 5, z: 2.5 }, rxAntenna: { type: 'paddle', gainDbi: 2, orientation: { az: 270, el: 0 } },
+          combiner: { type: 'hybrid', isolationDb: 25, lossDb: 3.5 }, pim: { preset: 'none', levelDbc: null },
+          channelBwKHz: 200, wantedFreqMHz: null,
+        };
+      }),
+    }),
+  },
+  {
+    id: 'fm-deviation-compare',
+    title: 'FM deviation compared: +-40, +-45, +-75 and +-12.5 kHz (assumed figures)',
+    note: 'The same link and the same 15 kHz audio at a -80 dBm input: Carson bandwidth is 110 kHz at +-40 kHz (SKM 5200-II class), 120 kHz at +-45 kHz (UR4D class), 180 kHz for +-75 kHz broadcast FM and 31 kHz for +-12.5 kHz narrowband two-way (3 kHz audio, so not directly comparable). Above threshold the audio SNR rises 20 log10 of the deviation ratio, 1.0 dB for +-45 and 5.5 dB for +-75 kHz against +-40 kHz, while the threshold CNR stays near 10 dB and the threshold input level rises from -107.6 to -105.4 dBm. All fit a 200 kHz channel (broadcast uses 90 percent) and leave a 220 to 290 kHz gap to a neighbour 400 kHz away, where the receiver rejection is 75 dB. Deviation of the broadcast and narrowband systems, the audio bandwidths, the receiver noise figure and the absence of a tone-key above the audio are assumed.',
+    build: () => ({
+      scene: make('mic', (s, l) => {
+        s.stage = { width: 20, depth: 12 };
+        s.environment.floor = 'wood';
+        l.freqMHz = 600;
+        l.tx.antenna = omni();
+        l.rx.antenna = omni();
+        l.tx.pos = { x: 2, y: 6, z: 1.5 };
+        l.rx.pos = { x: 17, y: 6, z: 2 };
+        l.rx.diversity.antennaB.pos = { x: 17, y: 5.4, z: 2 };
+        l.chain = [createChainItem('cable', { cableType: 'rg58', lengthM: 5 })];
+        Object.assign(l, applyFmPreset(l, 'sennheiser-skm5200ii'));
+        Object.assign(l, applyFmPreset(l, 'sennheiser-em3732ii'));
+      }),
+    }),
+  },
+  {
+    id: 'fm-deviation-g3-vs-skm',
+    title: 'Deviation compared: +-24 (G3 / 2000 class), +-40 and +-45 kHz (assumed figures)',
+    note: 'Three analogue FM systems carry the same 15 kHz audio at a -80 dBm input, compared at nominal deviation: the Sennheiser G3 / 2000 class at +-24 kHz needs 78 kHz of Carson bandwidth, the SKM 5200-II class at +-40 kHz needs 110 kHz and the UR4D class at +-45 kHz needs 120 kHz. Above threshold the audio SNR is 4.4 dB better at +-40 kHz and 5.5 dB better at +-45 kHz than at +-24 kHz (20 log10 of the deviation ratio), at the price of a threshold input level that rises from -109.1 to -107.6 and -107.2 dBm. All three use at most 60 percent of a 200 kHz channel and leave 322, 290 and 280 kHz to a neighbour 400 kHz away. Peak deviation of the G3 is twice its nominal figure, so its real occupied bandwidth is wider than this nominal estimate; the 15 kHz audio bandwidth, the receiver noise figure and the nominal-deviation reading are assumed.',
+    build: () => ({
+      scene: make('mic', (s, l) => {
+        s.stage = { width: 20, depth: 12 };
+        s.environment.floor = 'wood';
+        l.freqMHz = 590;
+        l.tx.antenna = omni();
+        l.rx.antenna = omni();
+        l.tx.pos = { x: 2, y: 6, z: 1.5 };
+        l.rx.pos = { x: 17, y: 6, z: 2 };
+        l.rx.diversity.antennaB.pos = { x: 17, y: 5.4, z: 2 };
+        l.chain = [createChainItem('cable', { cableType: 'rg58', lengthM: 5 })];
+        Object.assign(l, applyFmPreset(l, 'sennheiser-sk300g3'));
+        Object.assign(l, applyFmPreset(l, 'sennheiser-em300g3'));
+      }),
     }),
   },
 ];

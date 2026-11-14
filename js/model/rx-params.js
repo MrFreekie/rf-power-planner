@@ -15,6 +15,8 @@
 //  - Diversity combining in Rayleigh fading: Brennan, "Linear diversity combining techniques" (1959);
 //    Jakes (1974). Gains below are computed from the standard closed forms for 2 branches.
 
+import { FM_RX_PRESETS } from './fm-presets.js';
+
 export const IM3_SLOPE = 3;                // dB of IM3 level per dB of input level (3:1)
 export const IIP3_MINUS_P1DB_DB = 9.6;     // approx, memoryless cubic nonlinearity
 
@@ -80,7 +82,8 @@ export const BAND_RX_PRESETS = Object.freeze({
   'rx-2g4-typical': bandPreset('rx-2g4-typical', '2.4 GHz receiver, typical (illustrative)', -90, 2000, 14, 7, { p1dBDbm: -20, iip3Dbm: -10, maxInputDbm: -10 }),
   'rx-5g8-typical': bandPreset('rx-5g8-typical', '5.8 GHz receiver, typical (illustrative)', -88, 2000, 14, 9, { p1dBDbm: -20, iip3Dbm: -10, maxInputDbm: -10 }),
 });
-export const RX_PRESETS = Object.freeze({ ...UHF_RX_PRESETS, ...BAND_RX_PRESETS });
+// Analogue FM equipment presets (fm-presets.js) register themselves here: one data entry there adds a receiver preset.
+export const RX_PRESETS = Object.freeze({ ...UHF_RX_PRESETS, ...BAND_RX_PRESETS, ...FM_RX_PRESETS });
 
 /** Suggested receiver preset id for a link kind at a carrier: VHF below 300 MHz, 2.4 / 5.8 GHz bands, else the UHF presets. */
 export function rxPresetForFreq(kind, freqMHz) {

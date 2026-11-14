@@ -20,6 +20,7 @@
 import { solveLink, antennaGainDb, chainItemLossDb, cascadeChainIip3Dbm } from './rf.js';
 import { RX_PRESETS, RX_DEFAULTS } from './rx-params.js';
 import { absolutePos } from './floor.js';
+import { FM_PRESETS, fmLowIntermodDb } from './fm-presets.js';
 import {
   IMD_PRESETS, COMBINER_PRESETS, TX_REVERSE_IM_CONVERSION_DB, TX_REVERSE_IM_5TH_EXTRA_DB, PIM_JUNCTIONS, PIM_REFERENCE_DBM,
   NEAR_FIELD_FLOOR_WAVELENGTHS, SPEED_OF_LIGHT_M_S, coordinationRules, coupledNoiseDbm,
@@ -117,10 +118,16 @@ function combinerOf(scene) {
   };
 }
 
-function conversionDb(scene) {
+// Conversion loss of transmitter `a`'s output stage. A transmitter with an analogue FM equipment preset (a.fmPreset) uses that
+// preset's paConversionDb; a.lowIntermod adds the preset's low-intermod improvement (fm-presets.js, assumed size). Otherwise the
+// scene preset / class-AB default, as before.
+function conversionDb(scene, a) {
   const { preset } = imdOf(scene);
-  if (preset && Number.isFinite(preset.paConversionDb)) return preset.paConversionDb;
-  return TX_REVERSE_IM_CONVERSION_DB['class-ab'];
+  const fm = a && a.fmPreset && FM_PRESETS[a.fmPreset];
+  let base = fm && Number.isFinite(fm.params.paConversionDb) ? fm.params.paConversionDb
+    : preset && Number.isFinite(preset.paConversionDb) ? preset.paConversionDb : TX_REVERSE_IM_CONVERSION_DB['class-ab'];
+  if (a && a.lowIntermod && a.fmPreset) base += fmLowIntermodDb(a.fmPreset, true);
+  return base;
 }
 
 function rxAntenna(scene) {
@@ -230,7 +237,6 @@ export function frontEndImd(scene, rxPoint, orders = [3, 5]) {
 export function txReverseImd(scene, rxPoint) {
   const tx = txOf(scene);
   const comb = combinerOf(scene);
-  const conv = conversionDb(scene);
   if (tx.length < 2) return [];
   const lv = toneLevels(scene, rxPoint);
   const out = [];
@@ -243,7 +249,7 @@ export function txReverseImd(scene, rxPoint) {
       for (const order of [3, 5]) {
         const fMHz = order === 3 ? 2 * a.freqMHz - b.freqMHz : 3 * a.freqMHz - 2 * b.freqMHz;
         if (!(fMHz > 0)) continue;
-        const atPaOut = pIn - conv - (order === 5 ? TX_REVERSE_IM_5TH_EXTRA_DB : 0);
+        const atPaOut = pIn - conversionDb(scene, a) - (order === 5 ? TX_REVERSE_IM_5TH_EXTRA_DB : 0);
         const levelDbm = atPaOut - (comb.shared ? comb.lossDb : 0) + lv[ia].pathGainDb;
         out.push({
           fMHz, order, label: order === 3 ? `2f${ia + 1}-f${ib + 1}` : `3f${ia + 1}-2f${ib + 1}`,

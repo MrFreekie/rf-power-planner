@@ -20,6 +20,8 @@ const IMD_PRESETS = [['mic-rack-typical', 'Mic rack, typical'], ['iem-combiner-n
 import { createChainItem } from '../model/scene.js';
 import { dispAxis, internalAxis, dispRange, COORD_HINT } from './coords.js';
 import { txLimitHint, getCoordRegion } from './region.js';
+import { txPresetOptions, powerOptionChoices, currentPowerOption, lowIntermodAvailable, presetNotes, txFigures, rxFigures, tuningHint, rxPresetChoices, isFmRxPreset, LOW_IM_LABEL } from './fmui.js';
+import { setTxFmPreset, setTxPowerOption, setTxLowIntermod, setRxFmPreset, setImdTransmitterFm } from '../actions.js';
 import { noiseOptions, noiseValue, noiseFromChoice, noiseHint, interferenceApplies, interferenceOptions, interferenceValue, interferenceHint, rxPresetOffer } from './noise.js';
 import {
   setPath, setLinkField, setLinkKind, setUnits, addChainItem, removeChainItem, moveChainItem,
@@ -308,6 +310,22 @@ export function mountInspector({ container, store }) {
         set: (cc, v, o) => { const d = powerUiToDbm(v, cc.pu); if (Number.isFinite(d)) linkSet('tx.powerDbm')(cc, d, o); },
       }),
       txLimitRow(),
+      selectField({
+        key: 'tx-fm', label: 'Equipment preset', options: () => txPresetOptions(),
+        get: (cc) => cc.link.tx.fmPreset || '', set: (cc, v) => setTxFmPreset(store, cc.link.id, v || null),
+      }),
+      selectField({
+        key: 'tx-fm-pow', label: 'Power option',
+        options: (cc) => { const o = powerOptionChoices(cc.link.tx.fmPreset); return currentPowerOption(cc.link) === 'custom' ? [...o, ['custom', 'Custom (edited)']] : o; },
+        get: (cc) => currentPowerOption(cc.link), set: (cc, v) => { if (v !== 'custom') setTxPowerOption(store, cc.link.id, v); },
+        visible: (cc) => !!cc.link.tx.fmPreset,
+      }),
+      selectField({
+        key: 'tx-fm-li', label: LOW_IM_LABEL, options: [['off', 'Off'], ['on', 'On']],
+        get: (cc) => (cc.link.tx.lowIntermod ? 'on' : 'off'), set: (cc, v) => setTxLowIntermod(store, cc.link.id, v === 'on'),
+        visible: (cc) => lowIntermodAvailable(cc.link.tx.fmPreset),
+      }),
+      fmBlock((cc) => cc.link.tx.fmPreset, (cc) => cc.link, cc2 => cc2.link.freqMHz),
       antennaFields('tx', 'tx'),
       posFields('tx'),
     );
@@ -336,10 +354,11 @@ export function mountInspector({ container, store }) {
     );
     rb.append(
       selectField({
-        key: 'rx-preset', label: 'Receiver preset', options: Object.entries(RX_PRESETS).map(([id, p]) => [id, p.label || id]),
+        key: 'rx-preset', label: 'Receiver preset', options: () => rxPresetChoices(),
         get: (cc) => cc.link.rx.rxPreset || (cc.link.kind === 'iem' ? 'iem-bodypack-typical' : 'mic-receiver-typical'),
-        set: (cc, v) => setNested(cc, 'rx.rxPreset', v),
+        set: (cc, v) => { if (isFmRxPreset(v)) setRxFmPreset(store, cc.link.id, v); else setNested(cc, 'rx.rxPreset', v); },
       }),
+      fmBlock((cc) => (isFmRxPreset(cc.link.rx.rxPreset) ? cc.link.rx.rxPreset : null), (cc) => cc.link, null),
       presetOffer(),
       numberField({
         key: 'rx-maxin', label: 'Max input', min: -60, max: 20, step: 1, unit: 'dBm', decimals: 1,
@@ -579,6 +598,12 @@ export function mountInspector({ container, store }) {
         textField({ key: k('name'), label: 'Name', get: (cc) => T(cc)?.name, set: (cc, v, o) => updateImdTransmitter(store, t.id, { name: v }, o) }),
         numberField({ key: k('f'), label: 'Frequency', min: 100, max: 6000, step: 0.025, unit: 'MHz', decimals: 3, get: (cc) => T(cc)?.freqMHz ?? 0, set: (cc, v, o) => updateImdTransmitter(store, t.id, { freqMHz: v }, o) }),
         numberField({ key: k('p'), label: 'Power', min: -10, max: 40, step: 1, unit: 'dBm', decimals: 1, get: (cc) => T(cc)?.powerDbm ?? 0, set: (cc, v, o) => updateImdTransmitter(store, t.id, { powerDbm: v }, o) }),
+        selectField({ key: k('fm'), label: 'Equipment preset', options: () => txPresetOptions(), get: (cc) => T(cc)?.fmPreset || '', set: (cc, v) => setImdTransmitterFm(store, t.id, { fmPreset: v || null }) }),
+        selectField({
+          key: k('li'), label: LOW_IM_LABEL, options: [['off', 'Off'], ['on', 'On']],
+          get: (cc) => (T(cc)?.lowIntermod ? 'on' : 'off'), set: (cc, v) => setImdTransmitterFm(store, t.id, { lowIntermod: v === 'on' }),
+          visible: (cc) => lowIntermodAvailable(T(cc)?.fmPreset),
+        }),
       );
       box.append(fields);
       body.append(box);
@@ -645,6 +670,36 @@ export function mountInspector({ container, store }) {
   }
 
   /** Inline offer (never automatic) to switch the receiver preset when the carrier moves into VHF, 2.4 GHz or 5.8 GHz or back. */
+  /** Notes, figures with text "assumed"/"sourced" badges and the tuning hint for an FM preset. get(cc) gives the preset id. */
+  function fmBlock(getId, getLink, getFreq) {
+    const box = el('div', 'fm-block');
+    let sig = '';
+    updaters.push((cc) => {
+      const id = getId(cc);
+      box.hidden = !id;
+      if (!id) { sig = ''; return; }
+      const link = getLink(cc);
+      const freq = getFreq ? getFreq(cc) : null;
+      const rx = isFmRxPreset(id);
+      const figs = rx ? rxFigures(id) : txFigures(id, link);
+      const tune = rx || freq === null ? null : tuningHint(id, freq);
+      const s = JSON.stringify([id, figs, tune]);
+      if (s === sig) return;
+      sig = s;
+      box.textContent = '';
+      const ul = el('ul', 'fm-figs');
+      for (const f of figs) {
+        const li = el('li', null, `${f.label}: ${f.value} `);
+        li.append(el('span', f.assumed ? 'fm-badge fm-assumed' : 'fm-badge fm-sourced', f.word));
+        ul.append(li);
+      }
+      box.append(ul);
+      if (tune) box.append(el('p', tune.warn ? 'hint fm-warn' : 'hint', (tune.warn ? 'Tuning: ' : '') + tune.text));
+      for (const t of presetNotes(id)) box.append(el('p', 'hint', t));
+    });
+    return box;
+  }
+
   function presetOffer() {
     const row = el('div', 'hint insp-offer');
     const txt = el('span');
