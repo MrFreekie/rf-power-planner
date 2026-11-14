@@ -259,3 +259,21 @@ test('UK VHF draft IR channel plans: 200 kHz channels 1-7 and 50 kHz channels 10
   const r = coordinateFrequencies({ mics: 2, regionId: 'uk', channelPlan: 'uk-vhf-200k', seed: 2 });
   assert.equal(r.ok, true, JSON.stringify(r.failure));
 });
+
+test('notes match the tool: 863-865 holds 3 intermod-free channels, ch38 plan 4, 826-832 is 100 mW draft everywhere', async () => {
+  const { BAND_SOURCES } = await import('../js/model/bands.js');
+  const ok = (n) => coordinateFrequencies({ regionId: 'uk', rangeIds: ['uk-863-865'], mics: n, seed: 1 }).ok;
+  assert.equal(ok(3), true);
+  assert.equal(ok(4), false);
+  const r863 = REGIONS.uk.ranges.find((r) => r.id === 'uk-863-865');
+  assert.ok(/up to 3 intermod-free/.test(r863.note), r863.note);
+  assert.ok(!/about 4/.test(r863.note));
+  const ch = CHANNEL_38_PLAN.uncoordinated;
+  assert.deepEqual([...ch.intermodFreeMHz], [607.5, 609.15, 609.95, 613.5]);
+  assert.ok(/Only 4 of the 10/.test(ch.note));
+  assert.equal(checkIntermod(ch.intermodFreeMHz).ok ?? true, true);
+  const r826 = REGIONS.uk.ranges.find((r) => r.id === 'uk-826-832');
+  assert.deepEqual([r826.maxPowerMw, r826.powerBasis, r826.confidence ?? r826.verified], [100, 'EIRP', r826.confidence ?? r826.verified]);
+  assert.ok(!/Inconsistent|20 mW for other/.test(r826.note));
+  assert.ok(/draft/i.test(r826.note));
+});

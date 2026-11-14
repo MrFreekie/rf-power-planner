@@ -156,3 +156,16 @@ test('imd examples validate and solve; contrasts hold (isolators, distance, freq
   assert.ok(countHits(bad) > countHits(good), countHits(bad) + ' vs ' + countHits(good));
   assert.equal(countHits(good), 0);
 });
+
+test('isolator example: reverse product falls by isolation difference minus combiner loss difference (1 dB per dB), not 3', async () => {
+  const { txReverseImd } = await import('../js/model/imd.js');
+  const lvl = (id) => {
+    const sc = buildExample(id).scene;
+    const p = txReverseImd(sc).find((x) => x.order === 3 && Math.abs(x.fMHz - 605.6) < 0.01);
+    return p.levelDbm;
+  };
+  const drop = lvl('imd-iem-no-isolation') - lvl('imd-iem-isolators');
+  // (50 - 15) isolation dB less (3.5 - 2) dB lower insertion loss on the way out = 33.5 dB; tolerance 0.1 dB
+  assert.ok(Math.abs(drop - 33.5) < 0.1, String(drop));
+  assert.ok(/33\.5 dB/.test(buildExample('imd-iem-isolators').note));
+});

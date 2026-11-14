@@ -51,7 +51,9 @@ const ukRange = (id, fromMHz, toMHz, licenceClass, power, note, extra = {}) => O
  */
 export const CHANNEL_38_PLAN = Object.freeze({
   rangeId: 'uk-ch38', fromMHz: 606.5, toMHz: 613.5, licenceClass: 'shared', source: 'ofcom-licensing-updates', asOf: '2026-05-29',
-  uncoordinated: Object.freeze({ id: 'uk-ch38-uncoordinated', label: 'Channel 38 suggested 10-channel plan (shared licence)', freqsMHz: Object.freeze([606.6, 607.5, 608.15, 609.15, 609.95, 610.55, 611.25, 612.3, 613.15, 613.5]), verified: false, confidence: 'semi' }),
+  uncoordinated: Object.freeze({ id: 'uk-ch38-uncoordinated', label: 'Channel 38 suggested 10-channel plan (shared licence)', freqsMHz: Object.freeze([606.6, 607.5, 608.15, 609.15, 609.95, 610.55, 611.25, 612.3, 613.15, 613.5]), verified: false, confidence: 'semi',
+    intermodFreeMHz: Object.freeze([607.5, 609.15, 609.95, 613.5]),
+    note: 'Only 4 of the 10 channels (607.5, 609.15, 609.95 and 613.5 MHz) are free of third-order intermod when used together; run all 10 and the coordination tool reports conflicts. Use the 10 as a pool of candidates, not as 10 simultaneous channels.' }),
   coordinated: Object.freeze({ id: 'uk-ch38-coordinated', label: 'Channel 38 coordinated spot frequencies', freqsMHz: Object.freeze([606.7, 607.0]), verified: false, confidence: 'semi' }),
 });
 
@@ -86,10 +88,10 @@ export const REGIONS = Object.freeze({
         'UHF TV band (interleaved spectrum). TV channels are 8 MHz and the top or bottom 500 kHz of a channel is not always usable. Coordinated use up to 1 W (high power); shared-licence low power 10 mW; channels in use for TV at a venue must be avoided.', { highPower: true }),
       ukRange('uk-821-826', 821.5, 826, 'exempt', pw(20, 100, 'EIRP', 'draft', 'ir2030-draft', '100 mW EIRP body-worn, 20 mW EIRP other (draft IR 2030, IR2030/35/1).', { irRef: 'IR2030/35/1' }),
         'Licence-exempt UK-wide from 29 Apr 2026 (SI 2026/396, which carries no limits). Limits from the draft IR 2030.'),
-      ukRange('uk-826-832', 826, 832, 'exempt', pw(100, 100, 'EIRP', 'draft', 'ir2030-draft', 'Draft IR shows 100 mW EIRP with no body-worn split (IR2030/35/2); earlier statement text suggested 20 mW for other use. Inconsistent: draft IR shows 100 mW, check final IR 2030.', { irRef: 'IR2030/35/2' }),
+      ukRange('uk-826-832', 826, 832, 'exempt', pw(100, 100, 'EIRP', 'draft', 'ir2030-draft', 'Draft IR shows 100 mW EIRP with no body-worn split (IR2030/35/2); draft IR 2030 figure used for every use (earlier statement text that suggested 20 mW is not used). Draft, check final IR 2030.', { irRef: 'IR2030/35/2' }),
         'Licence-exempt UK-wide from 29 Apr 2026 (SI 2026/396, which carries no limits). Draft IR shows 100 mW; check final IR 2030.'),
       ukRange('uk-863-865', 863, 865, 'exempt', pw(10, 10, 'ERP', 'verified', 'ofcom-licence-exempt', '10 mW ERP. The draft IR 2030 agrees: radio mics IR2030/24/3, wireless audio 26/3; 864.8-865.0 MHz is a separate row, also 10 mW ERP, not airborne.', { irRef: 'IR2030/24/3, 26/3' }),
-        'Licence-exempt, usable 863.1-864.9 MHz, about 4 simultaneous channels.', { segments: Object.freeze([Object.freeze({ fromMHz: 863.1, toMHz: 864.9 })]) }),
+        'Licence-exempt, usable 863.1-864.9 MHz, at default spacing the coordination tool places up to 3 intermod-free channels at once (4 or more fail).', { segments: Object.freeze([Object.freeze({ fromMHz: 863.1, toMHz: 864.9 })]) }),
       ukRange('uk-1785-1805', 1785, 1805, 'exempt', pw(20, 50, 'EIRP', 'draft', 'ir2030-draft', '50 mW EIRP body-worn OR devices using the Spectrum Scanning Procedure (SSP), 20 mW EIRP other (draft IR 2030, IR2030/35/3). Channel bandwidth 10 MHz (inferred).', { sspMw: 50, irRef: 'IR2030/35/3', channelBwMHz: 10 }),
         'Licence-exempt UK-wide from 29 Apr 2026 (SI 2026/396), 1785-1805 MHz. The draft IR says 1785-1804.8 MHz, the Ofcom statement 1785-1805: 1785-1805 is used here.'),
       ukRange('uk-960-1154', 960, 1154, 'coordinated', pw(50, 50, 'ERP', 'unverified', 'ofcom-licensing-updates', 'Coordinated only, under 50 mW; ERP/EIRP basis not stated. 976.5-979.5 MHz: indoors 50 mW, not available outdoors since 11 Mar 2025.'),

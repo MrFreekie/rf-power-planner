@@ -250,8 +250,9 @@ export const noiseSquelchOpen = ({ rf }, rfThresh = 0.3) => rf >= rfThresh;
 
 // ---- link presets for 'Use this scene's numbers' -----------------------------------------------
 /** Map the current link/result onto lab parameters (read-only). All inputs optional. */
-export function labFromLink({ kind = 'mic', digital = false, channelBwKhz = 200, cnrDb = null, snrDb = null } = {}) {
-  const dev = kind === 'iem' ? 48 : 40; // illustrative default when the scene does not carry a deviation figure
+export function labFromLink({ kind = 'mic', digital = false, channelBwKhz = 200, cnrDb = null, snrDb = null, devKhz = null } = {}) {
+  // nominal deviation of the selected transmitter preset when the scene carries one, else an illustrative default
+  const dev = Number.isFinite(devKhz) && devKhz > 0 ? devKhz : kind === 'iem' ? 48 : 40;
   const out = { mode: digital ? 'digital' : 'fm', devKhz: dev, channelKhz: channelBwKhz, cnrDb: Number.isFinite(cnrDb) ? cnrDb : null };
   const s = Number.isFinite(snrDb) ? snrDb : cnrDb;
   out.snrDb = Number.isFinite(s) ? clamp(Math.round(s), -5, 40) : 25;

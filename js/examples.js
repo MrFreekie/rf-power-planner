@@ -347,7 +347,7 @@ export const EXAMPLES = [
   {
     id: 'imd-iem-isolators',
     title: 'IEM combiner with isolators: same transmitters',
-    note: 'The same three transmitters, now through an isolated combiner with circulators. Each interferer is knocked down by 50 dB before it reaches the other amplifiers, so the reverse intermodulation falls by about the same amount.',
+    note: 'The same three transmitters, now through an isolated combiner with circulators. The isolators cut each interferer by 50 dB instead of 15 before it reaches the other amplifiers. The product made in an amplifier grows one decibel per decibel of interferer (the own carrier of the transmitter is not reduced), so it falls by the 35 dB isolation difference less 1.5 dB because this combiner loses 1.5 dB less on the way out: about 33.5 dB, not 100 dB. The 3 dB per dB rule belongs to products made in the receiver, where every carrier is lowered.',
     build: () => ({
       scene: imdScene('iem', 605.6, [
         ['IEM A (wanted)', 605.6, 10, 1.0, 1.0, 1.5], ['IEM B', 606.0, 10, 1.2, 1.0, 1.5], ['IEM C', 606.4, 10, 1.4, 1.0, 1.5],

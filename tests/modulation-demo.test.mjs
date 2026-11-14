@@ -97,6 +97,10 @@ test('link mapping and channel fit', () => {
   assert.equal(M.labFromLink({ digital: true, snrDb: 17.4 }).snrDb, 17);
   assert.equal(M.labFromLink({ kind: 'iem' }).mode, 'fm');
   assert.equal(M.labFromLink({ snrDb: 99 }).snrDb, 40);
+  assert.equal(M.labFromLink({ devKhz: 45 }).devKhz, 45);   // preset nominal deviation wins
+  assert.equal(M.labFromLink({ devKhz: 24, kind: 'iem' }).devKhz, 24);
+  assert.equal(M.labFromLink({ kind: 'iem' }).devKhz, 48);   // no preset: class default
+  assert.equal(M.labFromLink({ devKhz: null }).devKhz, 40);
   assert.equal(M.channelFit(180).status, 'pass'); assert.equal(M.channelFit(195).status, 'marginal'); assert.equal(M.channelFit(210).fits, false);
 });
 

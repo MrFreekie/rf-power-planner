@@ -7,6 +7,7 @@ import * as M from '../model/modulation-demo.js';
 import { stereoBlend, pilotStep, audioSnrDb } from '../model/mpx.js';
 import * as AP from '../model/audio-processing.js';
 import { fmDeviationComparison } from '../model/fm-deviation.js';
+import { getFmPreset } from '../model/fm-presets.js';
 
 const MODES = [
   { id: 'am', label: 'AM' }, { id: 'fm', label: 'FM' }, { id: 'digital', label: 'Digital' },
@@ -127,7 +128,7 @@ export function mountModLab({ container, store, openButton }) {
       add(msgSel(), slider('fm.dev', 'Deviation', 1, 100, 0.5, P.fm, 'dev', 'kHz', (v) => '+-' + fmt(v, 1)), slider('fm.fm', 'Modulation frequency', 0.3, 15, 0.1, P.fm, 'fm', 'kHz', (v) => fmt(v, 1)), sweepCtl('Auto-sweep the deviation'),
         button('Set index to 2.405', () => { P.sweep = false; syncSweep(); P.fm.dev = clamp(+(M.BESSEL_NULL * P.fm.fm).toFixed(1), 1, 100); syncInputs(); }, 'Sets the deviation so that the modulation index is 2.405, where the carrier disappears (first zero of J0)'),
         check('Deviation compare', P.fm, 'compare', () => buildCompare()),
-        slider('fm.inputDbm', 'Input level (compare table)', -100, -40, 1, P.fm, 'inputDbm', 'dBm', (v) => fmt(v, 0), () => buildCompare()));
+        slider('fm.inputDbm', 'Input level (compare table)', -100, -20, 1, P.fm, 'inputDbm', 'dBm', (v) => fmt(v, 0), () => buildCompare()));
       const pr = el('div', 'ml-presets', null, { role: 'group', 'aria-label': 'Deviation presets' });
       for (const d of M.DEVIATION_PRESETS) pr.append(button(`+-${d.devKhz} kHz`, () => { P.sweep = false; syncSweep(); P.fm.dev = d.devKhz; syncInputs(); }, d.label));
       add(pr);
@@ -217,16 +218,18 @@ export function mountModLab({ container, store, openButton }) {
       const cas = r && r.cascade, floor = cas && cas.noiseFloorDbm;
       const cnr = r && Number.isFinite(r.inputPowerDbm) && Number.isFinite(floor) ? r.inputPowerDbm - floor : null;
       const dig = link.modulation && link.modulation.type === 'digital';
-      const lab = M.labFromLink({ kind: link.kind, digital: dig, channelBwKhz: cas && cas.bandwidthKHz, cnrDb: cnr });
+      const devOf = (id) => { const q = id ? getFmPreset(id) : null; return q && q.params && Number.isFinite(q.params.deviationKhz) ? { dev: q.params.deviationKhz, label: q.label } : null; };
+      const pd = devOf(link.tx && link.tx.fmPreset) || devOf(link.rx && link.rx.rxPreset), presetDev = pd ? pd.dev : null;
+      const lab = M.labFromLink({ devKhz: presetDev, kind: link.kind, digital: dig, channelBwKhz: cas && cas.bandwidthKHz, cnrDb: cnr });
       P.sweep = false; syncSweep();
-      if (r && Number.isFinite(r.inputPowerDbm)) P.fm.inputDbm = clamp(Math.round(r.inputPowerDbm), -100, -40);
+      if (r && Number.isFinite(r.inputPowerDbm)) P.fm.inputDbm = clamp(Math.round(r.inputPowerDbm), -100, -20);
       if (cas && Number.isFinite(cas.systemNfDb)) P.fm.nfDb = cas.systemNfDb;
       if (dig) { P.dig.snr = lab.snrDb; const o = link.modulation.digital && link.modulation.digital.fixedOrder; P.dig.mode = o === 2 ? 'BPSK' : o === 16 ? '16QAM' : 'QPSK'; }
       else P.fm.dev = lab.devKhz;
       if (cnr !== null) { P.mpx.cnr = clamp(Math.round(cnr), 5, 45); P.pre.cnr = P.mpx.cnr; }
       const want = dig ? 'digital' : (P.mode === 'ms' || P.mode === 'pre') ? P.mode : link.kind === 'iem' && link.mpx && link.mpx.enabled && P.mode === 'mpx' ? 'mpx' : P.mode === 'mpx' ? 'mpx' : P.mode === 'digital' || P.mode === 'fm' ? (dig ? 'digital' : 'fm') : 'fm';
       if (want !== P.mode) setMode(want); else { syncInputs(); buildCompare(); changed(); }
-      status.textContent = `Pre-set from ${link.name || 'the selected link'}: input ${r ? fmt(r.inputPowerDbm, 1) : '-'} dBm, carrier-to-noise ${cnr === null ? '-' : fmt(cnr, 1)} dB, channel ${fmt(lab.channelKhz, 0)} kHz. The deviation is an illustrative class value, the scene does not store one.`;
+      status.textContent = `Pre-set from ${link.name || 'the selected link'}: input ${r ? fmt(r.inputPowerDbm, 1) : '-'} dBm, carrier-to-noise ${cnr === null ? '-' : fmt(cnr, 1)} dB, channel ${fmt(lab.channelKhz, 0)} kHz. ${pd ? `The deviation, +-${fmt(lab.devKhz, 0)} kHz, is the nominal figure of the ${pd.label} preset.` : 'The deviation is an illustrative class value, the scene does not store one.'}`;
     } catch (err) { console.error(err); status.textContent = 'Could not read the scene numbers.'; }
   }
   sceneBtn.addEventListener('click', useScene);
@@ -250,7 +253,7 @@ export function mountModLab({ container, store, openButton }) {
     if (cmp.hidden) return;
     let rows = [], foot = '';
     try {
-      const res = fmDeviationComparison({ inputDbm: P.fm.inputDbm, noiseFigureDb: P.fm.nfDb });
+      const res = fmDeviationComparison({ inputDbm: P.fm.inputDbm, noiseFigureDb: P.fm.nfDb, includeG3: true, includePSM: true });
       rows = res.systems.map((s) => ({ label: s.label, dev: s.deviationKhz, beta: s.modulationIndex, bw: s.carsonBwKhz, fit: s.fit.find((f) => f.channelKhz === 200) || s.fit[0], imp: s.fmImprovementDb, thr: s.thresholdInputDbm, above: s.aboveThresholdDb, snr: s.audioSnrDb, below: s.belowThreshold, conf: s.confidence }));
       foot = res.assumedFigures && res.assumedFigures.length ? 'Assumed figures: ' + res.assumedFigures.join('; ') + '.' : '';
     } catch (err) {
