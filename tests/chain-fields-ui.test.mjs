@@ -42,3 +42,16 @@ test('mono view uses the model audio band, not a hard-coded 15 kHz', () => {
   assert.match(monoNotes({ audioBandwidthHz: 12000, notes: [] })[0], /0 to 12 kHz/);
   assert.doesNotMatch(fs.readFileSync(new URL('../js/view/spectraMono.js', import.meta.url), 'utf8'), /AUDIO 0-15 kHz/);
 });
+
+test('RF view subcarriers: tone key and data from the mono model, below the carrier, none without a model result', async () => {
+  const { rfSubcarriers, monoInputs } = await import('../js/view/spectraMono.js');
+  const { monoBasebandSpectrum } = await import('../js/model/spectrum-views.js');
+  const l = createDefaultScene().links[0]; l.telemetry = { ...(l.telemetry || {}), enabled: true };
+  const m = monoBasebandSpectrum(monoInputs(l, null, null, 0, 120));
+  const subs = rfSubcarriers(m, 40, -50);
+  assert.ok(subs.some((s) => s.name === 'tone key' && Math.abs(s.offsetKhz - 32.768) < 1e-6));
+  assert.ok(subs.some((s) => s.name === 'data'));
+  assert.ok(subs.every((s) => s.levelDbm < -50 && Number.isFinite(s.levelDbm)));
+  assert.deepEqual(rfSubcarriers(null, 40, -50), []);
+  assert.deepEqual(rfSubcarriers(m, NaN, -50), []);
+});

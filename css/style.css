@@ -121,6 +121,9 @@ input[type="number"] { width: 6.5em; }
 button { cursor: pointer; }
 button:hover:not(:disabled) { background: var(--paper-2); }
 button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+/* selected + hover: stay dark (light text on a slightly lighter ink), never the pale hover fill that hid the label */
+button[aria-pressed="true"]:hover:not(:disabled),
+.spectra-tabs button[aria-selected="true"]:hover:not(:disabled) { background: color-mix(in srgb, var(--ink) 82%, var(--paper)); color: var(--paper); }
 button:disabled { opacity: 0.45; cursor: default; }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; box-shadow: 0 0 0 4px var(--paper); }
 
@@ -719,3 +722,9 @@ summary { min-height: 24px; }
 .ci-preset { margin: 4px 0 0; }
 #readout-extra dd[data-severity="warning"] { color: var(--warn-text); }
 #readout-extra dd { font-size: 13px; }
+
+/* extra budget rows (polarisation, match, p2p): compact stacked rows so the last row is never cut off; the panel scrolls with room below */
+#readout-extra > div { display: block; padding: 3px 0; }
+#readout-extra dt { font-size: 12px; }
+#readout-extra dd { text-align: left; font-weight: 600; overflow-wrap: anywhere; }
+@media (min-width: 1100px) { #leftpanel .panel-body { padding-bottom: 28px; scroll-padding-bottom: 28px; } }

@@ -15,8 +15,8 @@ import { mpxMessage, modeText, SPEC_DB } from './mpx.js';
 import { rxState } from '../rxTracker.js';
 import { distortMpxSpectrum, resolveAudioBandwidthHz } from '../model/spectrum-views.js';
 import { drawDistortionBadge, drawProductMarker, distortionAria } from './distortionDraw.js';
-import { drawMonoMpx, isStereoMpx, monoInputs, monoSummary, monoNotes } from './spectraMono.js';
-export { drawMonoMpx, isStereoMpx, monoInputs, monoSummary, monoNotes };
+import { drawMonoMpx, isStereoMpx, monoInputs, monoSummary, monoNotes, rfSubcarriers } from './spectraMono.js';
+export { drawMonoMpx, isStereoMpx, monoInputs, monoSummary, monoNotes, rfSubcarriers };
 
 export const SPECTRA = Object.freeze([
   { id: 'audio', label: 'Audio spectrum' },
@@ -141,6 +141,8 @@ export function rfSummary(s, inp) {
   const bw = fin(s.bwKhz) ? `${Math.round(s.bwKhz)} kHz` : '-';
   let t = `RF spectrum of this link's carrier only (${inp.mode === 'digital' ? 'digital, flat-topped' : 'analogue FM'}): received level ${sgn(inp.rxLevelDbm)} dBm, ${sgn(s.marginToNoiseDb)} dB above the receiver channel noise floor ${sgn(inp.noiseFloorDbm, 0)} dBm (the plot shows power per ${fin(s.rbwKhz) ? Math.round(s.rbwKhz) : '-'} kHz resolution bandwidth, so the noise trace sits lower), occupied bandwidth ${bw} in a ${Math.round(inp.channelBwKhz)} kHz receiver channel.`;
   if (s.clipsAtFilter) t += ' The signal is wider than the receiver filter and is clipped by it.';
+  if (inp.subcarriers && inp.subcarriers.length) t += ` Control subcarriers marked at plus and minus their offset: ${inp.subcarriers.map((c) => `${c.name} ${+c.offsetKhz.toFixed(1)} kilohertz`).join(', ')}; levels illustrative.`;
+  if (inp.mode === 'digital') t += ' Digital signal shown as a flat-topped block.';
   return t;
 }
 
@@ -236,6 +238,9 @@ export function drawAudio(ctx, w, h, th, a, inp, hoverX) {
 /** Fixed RF spectrum axis limits, dBm per RBW. */
 export const RF_SPECTRUM_TOP_DBM = -20, RF_SPECTRUM_BOTTOM_DBM = -120;
 
+/** Label of the centre line: the link carrier in MHz. */
+export function rfCentreLabel(inp) { return fin(inp && inp.carrierMHz) ? `fc ${+inp.carrierMHz.toFixed(3)} MHz` : 'fc'; }
+
 /** RF spectrum panel. s = rfSpectrum result, inp = the arguments it was made from. */
 export function drawRf(ctx, w, h, th, s, inp, hoverX) {
   if (!s || !s.freqsMHz || !s.freqsMHz.length) { note(ctx, w, h, th, 'No received level for this link, so there is no RF spectrum to show.'); return; }
@@ -255,7 +260,20 @@ export function drawRf(ctx, w, h, th, s, inp, hoverX) {
     ctx.beginPath(); ctx.moveTo(a, f.T); ctx.lineTo(a, f.T + f.ph); ctx.moveTo(b, f.T); ctx.lineTo(b, f.T + f.ph); ctx.stroke(); ctx.setLineDash([]);
     haloText(ctx, th, 'receiver channel', (a + b) / 2, f.T + f.ph - 5, { align: 'center', px: 11, color: th.blue });
   }
+  // centre line at the carrier, labelled with the link frequency
+  { const cx = f.X(0); if (cx >= f.L && cx <= f.L + f.pw) {
+    ctx.strokeStyle = th.inkSoft; ctx.lineWidth = 1; ctx.setLineDash([2, 3]);
+    ctx.beginPath(); ctx.moveTo(Math.round(cx) + 0.5, f.T); ctx.lineTo(Math.round(cx) + 0.5, f.T + f.ph); ctx.stroke(); ctx.setLineDash([]);
+    haloText(ctx, th, rfCentreLabel(inp), cx + 4, f.T + 26, { px: 11, color: th.inkSoft });
+  } }
   curve(ctx, f, xs, s.levelsDbm, { stroke: s.clipsAtFilter ? th.marginal : th.ink, fill: th.ink });
+  // control subcarriers (tone key, data, pilot): FM sidebands at +- their frequency, marked and named; digital shows its block instead
+  for (const sc of inp.subcarriers || []) for (const sign of [1, -1]) {
+    const x = f.X(sign * sc.offsetKhz);
+    if (x < f.L || x > f.L + f.pw || !fin(sc.levelDbm)) continue;
+    drawProductMarker(ctx, th, x, f.Y(Math.max(sc.levelDbm, yMin + 2)), sign > 0 ? `${sc.name} ${+sc.offsetKhz.toFixed(1)} kHz` : '', { color: th.blue });
+  }
+  if (inp.mode === 'digital') haloText(ctx, th, `digital block ${fin(s.bwKhz) ? Math.round(s.bwKhz) : '-'} kHz`, f.L + f.pw / 2, f.Y(s.carrierLevelDbm ?? inp.rxLevelDbm) + 16, { align: 'center', px: 11, color: th.inkSoft });
   curve(ctx, f, [xMin, xMax], [s.noiseDbm, s.noiseDbm], { stroke: th.fail, dash: [5, 3] });
   haloText(ctx, th, `noise in RBW ${sgn(s.noiseDbm, 0)} dBm`, f.L + f.pw - 4, f.Y(s.noiseDbm) - 4, { align: 'right', px: 11, color: th.fail });
   haloText(ctx, th, `rx ${sgn(inp.rxLevelDbm)} dBm  margin ${sgn(s.marginToNoiseDb)} dB  BW ${fin(s.bwKhz) ? Math.round(s.bwKhz) : '-'} kHz`, f.L + 4, f.T + 12, { px: 11, weight: '600' });
@@ -469,6 +487,12 @@ export function mountSpectra({ container, store, now = () => performance.now() }
         const inp = rfInputs(scene, link, r, t, Math.max(120, Math.min(400, Math.round(w - 52))));
         if (inp && dist) inp.distortion = dist;
         let s = null; if (inp) { try { s = model.rfSpectrum(inp); } catch (e) { console.warn(e); } }
+        if (inp && s && inp.mode !== 'digital' && model.monoBasebandSpectrum) { // tone key, data subcarrier and pilot ride on the carrier
+          try {
+            const mi = monoInputs(link, mst, r, t, 120); mi.stereo = isStereoMpx(link);
+            inp.subcarriers = rfSubcarriers(model.monoBasebandSpectrum(mi), inp.devKhz, inp.rxLevelDbm);
+          } catch (e) { console.warn(e); }
+        }
         res = { s, inp, dist };
       }
     } else if (link && isStereoMpx(link)) { if (mst) res = { st: mst, link, dist }; }

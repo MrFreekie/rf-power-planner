@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { spectraLayout, TABS_BELOW_PX, SPECTRA, nearestIndex, niceTicks, rfInputs, audioInputs, linkDeviationKhz, audioSummary, rfSummary, mpxSummary, drawMpx, drawAudio, drawRf, AUDIO_BANDS, AUDIO_BINS, audioAxis, bandLabel, hzText, nearestBand, pickLabels, logResample } from '../js/view/spectra.js';
+import { spectraLayout, TABS_BELOW_PX, SPECTRA, nearestIndex, niceTicks, rfInputs, audioInputs, linkDeviationKhz, audioSummary, rfSummary, mpxSummary, drawMpx, drawAudio, drawRf, rfCentreLabel, AUDIO_BANDS, AUDIO_BINS, audioAxis, bandLabel, hzText, nearestBand, pickLabels, logResample } from '../js/view/spectra.js';
 import { audioSpectrum, rfSpectrum } from '../js/model/spectrum-views.js';
 import { createDefaultScene } from '../js/model/scene.js';
 import { solveLink } from '../js/model/rf.js';
@@ -78,6 +78,9 @@ test('drawing: audio (mic and stereo IEM), RF (FM and digital, clipping warning)
   const inp = { ...rfInputs(sc, link, r, 0), devKhz: 400 };
   const c = fakeCtx(); drawRf(c, 300, 250, th, rfSpectrum(inp), inp);
   assert.ok(c.calls.some((x) => String(x[1]).includes('CLIPS AT FILTER')));
+  const cc = fakeCtx(); drawRf(cc, 300, 250, th, rfSpectrum(inp), inp);
+  assert.equal(rfCentreLabel(inp), `fc ${+link.freqMHz.toFixed(3)} MHz`);
+  assert.ok(cc.calls.some((x) => x[1] === rfCentreLabel(inp)), 'centre label is drawn');
   const c2 = fakeCtx(); drawRf(c2, 300, 250, th, null, inp); assert.ok(c2.calls.some((x) => String(x[1]).includes('No received level')));
   const c3 = fakeCtx(); drawMpx(c3, 400, 250, th, { state: { mode: 'stereo', blend: 0, pilotLocked: true, cnrDb: 30, pilotLevelDb: -20 }, link: { id: 'x' } });
   assert.ok(c3.calls.some((x) => String(x[1]).includes('PILOT')));

@@ -5,7 +5,7 @@ import { setFont, haloText } from './util.js';
 import { SPEC_DB } from './mpx.js';
 import { dataConfig } from '../telemetryTracker.js';
 import { drawDistortionBadge, drawProductMarker } from './distortionDraw.js';
-import { resolveAudioBandwidthHz, audioBandLabel, monoCaption } from '../model/spectrum-views.js';
+import { resolveAudioBandwidthHz, audioBandLabel, monoCaption, besselJ } from '../model/spectrum-views.js';
 
 const fin = (v) => typeof v === 'number' && Number.isFinite(v);
 
@@ -33,6 +33,24 @@ export function monoInputs(link, mst, r, t, nBins = 240, dcOverride = null) {
     dataConfig: dataOn ? { enabled: true, subcarrierKHz: khz, injectionFrac: dc && fin(dc.injectionFrac) ? dc.injectionFrac : undefined } : { enabled: false },
     cnrDb, nBins, fMaxKhz: Math.max(60, dataOn ? khz + 8 : 60), t, preEmphasisTauUs: 50,
   };
+}
+
+/**
+ * Subcarriers for the small RF view: each present marker of monoBasebandSpectrum (tone key, data subcarrier, stereo pilot) rides on
+ * the carrier as FM sidebands at +-freq. Level = rx level + 20 log10 |J1(beta)|, beta = injection x deviation / freq (injection from the
+ * marker's dB relative to full deviation). Illustrative, like the baseband view. Pure; returns [] without a model result.
+ */
+export function rfSubcarriers(m, devKhz, rxLevelDbm) {
+  if (!m || !Array.isArray(m.markers) || !fin(devKhz) || !fin(rxLevelDbm)) return [];
+  const out = [];
+  for (const k of m.markers) {
+    if (!k.present || !fin(k.freqKhz) || k.freqKhz <= 0 || !fin(k.levelDb)) continue;
+    const beta = (10 ** (k.levelDb / 20)) * devKhz / k.freqKhz;
+    const j1 = Math.abs(besselJ(1, beta));
+    if (!(j1 > 0)) continue;
+    out.push({ name: k.name === 'Data subcarrier' ? 'data' : k.name === 'Tone key' ? 'tone key' : 'pilot', offsetKhz: k.freqKhz, levelDbm: rxLevelDbm + 20 * Math.log10(j1), status: k.status });
+  }
+  return out;
 }
 
 export function monoSummary(m, inp) {

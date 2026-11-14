@@ -167,7 +167,7 @@ export function createSideView(canvas, store) {
       const cy = vp.worldToScreen(0, -scene.ceiling.heightM).y;
       if (cy > 0 && cy < h) {
         ctx.save(); ctx.setLineDash([12, 4, 2, 4]); ctx.strokeStyle = th.ink; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(w, cy); ctx.stroke(); ctx.restore();
-        haloText(ctx, th, `CEILING ${fmtLen(scene.ceiling.heightM, scene.units)} (${scene.ceiling.material})`, w - 8, cy - 5, { align: 'right', px: 11, color: th.inkSoft });
+        haloText(ctx, th, `CEILING ${fmtLen(scene.ceiling.heightM, scene.units)} (${scene.ceiling.material})`, w - 8, cy + 14, { align: 'right', px: 11, color: th.inkSoft }); // under the line, clear of the distance-axis label
       }
     }
 
@@ -291,7 +291,7 @@ export function createSideView(canvas, store) {
         ctx.fillStyle = hotT ? th.ink : th.paper; ctx.beginPath(); ctx.moveTo(tx, ty - 6); ctx.lineTo(tx + 6, ty); ctx.lineTo(tx, ty + 6); ctx.lineTo(tx - 6, ty); ctx.closePath(); ctx.fill(); ctx.stroke();
       }
       ctx.restore();
-      if (selected || tilt !== 0) haloText(ctx, th, `tilt ${tilt > 0 ? '+' : ''}${Math.round(tilt)}\u00b0`, tx + (bs >= 0 ? 10 : -10), ty - 8, { align: bs >= 0 ? 'left' : 'right', px: 12, color: th.inkSoft });
+      if (selected || tilt !== 0) haloText(ctx, th, `tilt ${tilt > 0 ? '+' : ''}${Math.round(tilt)}\u00b0`, tx, ty - 12, { align: 'center', px: 12, color: th.inkSoft }); // above the tip, clear of the height label
       if (selected) handles.push({ kind: 'tilt', role, itemId: e.id, linkId: link.id, sx: tx, sy: ty, r: 11, wx: s, wy: -(z + fl), flipS: bs < 0, el });
     }
   }
