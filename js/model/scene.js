@@ -8,7 +8,7 @@ const MODELS = ['two-ray', 'free-space'];
 const POLARISATIONS = ['vertical', 'horizontal'];
 const LINK_KINDS = ['mic', 'iem', 'p2p'];
 const ANTENNA_TYPES = ['dipole', 'quarterwave', 'paddle', 'helical', 'cardioid', 'omni', 'logperiodic', 'body', 'helical-cp', 'yagi', 'custom'];
-const AUDIO_SOURCES = ['speech', 'tone', 'pink', 'stereo-demo', 'off'];
+const AUDIO_SOURCES = ['speech', 'tone', 'pink', 'stereo-demo', 'off', ...AUDIO_SOURCE_IDS.filter((id) => !['tone', 'pink'].includes(id))]; // legacy meter names plus the global catalogue ids
 export const RX_PRESET_IDS = Object.keys(RX_PRESETS); // includes the analogue FM equipment presets (fm-presets.js)
 export const DIVERSITY_MODES = ['switching', 'true', 'ratio'];
 export const defaultRxPreset = (kind) => (kind === 'iem' ? 'iem-bodypack-typical' : 'mic-receiver-typical');
@@ -21,6 +21,7 @@ export const defaultDiversity = (pos, _antennaA) => ({
   antennaB: { pos: { x: Math.round((pos.x - 0.6) * 1000) / 1000, y: pos.y, z: pos.z }, antenna: null, chain: null, orientation: null },
   hysteresisDb: 3, switchMs: 30,
 });
+import { AUDIO_SOURCE_IDS, TONE_HZ_LIMITS } from './audio-source.js';
 import { validateVenue, packUnderlay, unpackUnderlay } from './venue-underlay.js';
 import { MATERIAL_TRANSMISSION } from './zones-params.js';
 import { EXTRA_CHAIN_KINDS, CHAIN_PRESETS, DC_MODES, FILTER_TYPES } from './chain-presets.js';
@@ -475,6 +476,9 @@ export function validateScene(scene) {
       errors.push(`stage.heightM must be between ${STAGE_LIMITS.heightM[0]} and ${STAGE_LIMITS.heightM[1]} m`);
     }
   }
+  // Global audio source (audio-source.js): optional; absent means the default by link kind (mic voice, IEM music), so older files are unchanged.
+  if (scene.audioSource !== undefined && scene.audioSource !== null && !(typeof scene.audioSource === 'string' && AUDIO_SOURCE_IDS.includes(scene.audioSource))) errors.push(`audioSource must be one of ${AUDIO_SOURCE_IDS.join('|')}`);
+  if (scene.audioToneHz !== undefined && scene.audioToneHz !== null && !(isNum(scene.audioToneHz) && scene.audioToneHz >= TONE_HZ_LIMITS[0] && scene.audioToneHz <= TONE_HZ_LIMITS[1])) errors.push(`audioToneHz must be between ${TONE_HZ_LIMITS[0]} and ${TONE_HZ_LIMITS[1]} Hz`);
   const env = scene.environment;
   if (!isObj(env)) errors.push('environment must be an object');
   else {
@@ -579,7 +583,17 @@ export function validateScene(scene) {
         checkPos(t.pos, `${p}.pos`, errors);
         checkAntenna(t.antenna, `${p}.antenna`, errors);
         checkFmTx(t, p, errors);
+        for (const k of ['h2Dbc', 'harmonicFilterDb']) if (t[k] !== undefined && !inRange(t[k], 0, 200)) errors.push(`${p}.${k} must be between 0 and 200`);
       });
+      for (const k of ['iip2Dbm', 'iip4Dbm']) if (m[k] !== undefined && !inRange(m[k], -100, 200)) errors.push(`imd.${k} must be between -100 and 200`);
+      if (m.bands !== undefined) {
+        if (!Array.isArray(m.bands) || m.bands.length > 16) errors.push('imd.bands must be an array of at most 16 {name, loMHz, hiMHz}');
+        else m.bands.forEach((b, i) => { if (!isObj(b) || typeof b.name !== 'string' || b.name.length > 80 || !isFreq(b.loMHz) || !isFreq(b.hiMHz) || b.hiMHz <= b.loMHz) errors.push(`imd.bands[${i}] must be {name, loMHz, hiMHz} with hiMHz > loMHz`); });
+      }
+      for (const k of ['filterBefore', 'filterAfter']) {
+        const f = m[k];
+        if (f !== undefined && (!isObj(f) || !isFreq(f.passLoMHz) || !isFreq(f.passHiMHz) || f.passHiMHz <= f.passLoMHz || (f.rejectionDb !== undefined && !inRange(f.rejectionDb, 0, 200)))) errors.push(`imd.${k} must be {passLoMHz, passHiMHz, rejectionDb?}`);
+      }
       checkPos(m.rxAntennaPos, 'imd.rxAntennaPos', errors);
       if (m.rxAntenna !== undefined) checkAntenna(m.rxAntenna, 'imd.rxAntenna', errors);
       const c = m.combiner;

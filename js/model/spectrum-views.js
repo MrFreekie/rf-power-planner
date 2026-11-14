@@ -3,6 +3,7 @@
 // the planner's own numbers (rx level, noise floor) come from the caller. The MPX view uses mpxSpectrum from mpx.js.
 import { emphasisMagnitudeDb } from './audio-processing.js';
 import { mpxSpectrum } from './mpx.js';
+import { AUDIO_SOURCES, clipFraction, clipFractionGaussian, defaultAudioSource, erfcPos, normalizeAudioSource, sourceLinesHz, sourceSpectrumDb } from './audio-source.js';
 import { FM_PRESETS } from './fm-presets.js';
 
 const L10 = Math.log10;
@@ -60,38 +61,6 @@ export const audioBandLabel = (hz) => `AUDIO 0-${+(hz / 1000).toFixed(1)} kHz`;
 /** Caption for the mono baseband view with the link's audio ceiling. */
 export const monoCaption = (hz) => `Mono carries only the programme audio (0 to ${+(hz / 1000).toFixed(1)} kHz) plus a control tone. Stereo FM adds a 19 kHz pilot and a difference (L-R) signal around 38 kHz.`;
 
-// Voice level in dB below full scale at f (Hz): a smooth envelope for a speech-like source.
-function voiceDb(f, t) {
-  const f0 = 130 + 18 * Math.sin(0.9 * t) + 6 * Math.sin(2.3 * t + 1); // slow pitch movement
-  const shift = 1 + 0.08 * Math.sin(0.7 * t + 0.5); // formants drift a little
-  let d = -26 - 6 * Math.max(0, octaves(f, 250)); // -6 dB/octave above ~250 Hz
-  if (f < 90) d -= 24 * octaves(90, Math.max(f, 1)); // high-pass below 90 Hz
-  d += 7 * gauss(Math.log2(f), Math.log2(500 * shift), 0.28);
-  d += 5 * gauss(Math.log2(f), Math.log2(1500 * shift), 0.28);
-  d += 4 * gauss(Math.log2(f), Math.log2(2500 * shift), 0.28);
-  d += 8 * gauss(Math.log2(f), Math.log2(6000), 0.32) * (0.5 + 0.5 * Math.max(0, Math.sin(1.7 * t))); // sibilance comes and goes
-  if (f > 8000) d -= 24 * octaves(f, 8000); // steep above 8 kHz
-  if (f < 4000) d += 3 * Math.cos(TWO_PI * f / f0) * Math.min(1, 800 / Math.max(f, 1)); // harmonic comb, strongest low down
-  d += 3 * Math.sin(0.6 * t + 1.3); // breathing
-  return d;
-}
-
-// Music level for one channel (0 = L, 1 = R): pink-like tilt, strong bass, roll-off near 17 kHz, channel-specific instruments.
-function musicDb(f, t, ch) {
-  let d = -24 - 3 * Math.max(0, octaves(f, 100)); // -3 dB/octave per Hz (pink) from 100 Hz
-  d += 9 * gauss(Math.log2(f), Math.log2(70), 0.45) * (0.8 + 0.2 * Math.sin(TWO_PI * 0.45 * t + ch)); // kick and bass
-  if (f < 35) d -= 24 * octaves(35, Math.max(f, 1));
-  if (ch === 0) { // left: bass guitar and a rhythm guitar
-    d += 8 * gauss(Math.log2(f), Math.log2(110), 0.4) + 7 * gauss(Math.log2(f), Math.log2(800), 0.5) - 1.5 * octaves(f, 1000);
-  } else { // right: keys and hi-hat
-    d += 8 * gauss(Math.log2(f), Math.log2(2500), 0.5) + 10 * gauss(Math.log2(f), Math.log2(9000), 0.45) * (0.6 + 0.4 * Math.sin(TWO_PI * 0.7 * t));
-    d -= 6 * gauss(Math.log2(f), Math.log2(110), 0.4) + 1.5 * octaves(f, 1000);
-  }
-  if (f > 16000) d -= 48 * octaves(f, 16000); // typical IEM mix roll-off
-  d += 2 * Math.sin(TWO_PI * 0.2 * t + 2 * ch);
-  return d;
-}
-
 /**
  * audioSpectrum({ kind, stereo, nBins, fMaxHz, t, preEmphasisTauUs, deEmphasised })
  *   -> { freqsHz, levelsDb, levelsDbR (or null), floorDb, peakHz, notes }
@@ -100,15 +69,17 @@ function musicDb(f, t, ch) {
  * preEmphasisTauUs > 0 adds the pre-emphasis boost emphasisMagnitudeDb(f, tau) (dB), unless deEmphasised is true (the audio
  * as heard after de-emphasis, so the boost is undone). FM stereo IEM audio is cut above 15 kHz (steeply) as in FM broadcast.
  */
-export function audioSpectrum({ kind = 'mic', stereo = false, nBins = 256, fMaxHz = 20000, t = 0, preEmphasisTauUs = 0, deEmphasised = false, distortion, audioBandwidthHz } = {}) {
+export function audioSpectrum({ kind = 'mic', stereo = false, nBins = 256, fMaxHz = 20000, t = 0, preEmphasisTauUs = 0, deEmphasised = false, distortion, audioBandwidthHz, source, toneHz } = {}) {
   const n = Math.min(8192, Math.max(2, Math.floor(nBins)));
   const isIem = kind === 'iem';
+  const sid = normalizeAudioSource(source) || defaultAudioSource(isIem ? 'iem' : 'mic'); // the global audio source; the default by link kind is the old behaviour
+  const binHz = fMaxHz / (n - 1);
   const freqsHz = Array.from({ length: n }, (_, i) => (i / (n - 1)) * fMaxHz);
   const pre = preEmphasisTauUs > 0 && !deEmphasised;
   const abw = Number.isFinite(audioBandwidthHz) && audioBandwidthHz > 0 ? audioBandwidthHz : 0;
   const chan = (ch) => freqsHz.map((f, i) => {
     const ff = Math.max(f, 20); // avoid log of zero at DC; DC itself is shown at the 20 Hz level
-    let d = isIem ? musicDb(ff, t, ch) : voiceDb(ff, t);
+    let d = sourceSpectrumDb(sid, ff, t, ch, { toneHz, binHz });
     d += 1.5 * wobble(i, t, ch); // fine fluctuation, +-1.5 dB
     if (isIem && stereo && f > FM_AUDIO_LIMIT_HZ && !(abw && abw > FM_AUDIO_LIMIT_HZ)) d -= 60 * octaves(f, FM_AUDIO_LIMIT_HZ) + 20;
     if (abw && f > abw) d -= 60 * octaves(f, abw) + 20; // explicit audio ceiling: steep low-pass
@@ -123,16 +94,16 @@ export function audioSpectrum({ kind = 'mic', stereo = false, nBins = 256, fMaxH
   let harmonics = null;
   if (dn) { // overload simulation: harmonic lines, IM skirts (music-like source), raised floor
     const f0 = freqsHz[pk];
-    const a = applyAudioDistortion(levelsDb, freqsHz, f0, dn, isIem, fMaxHz);
+    const a = applyAudioDistortion(levelsDb, freqsHz, f0, dn, AUDIO_SOURCES[sid].musicLike, fMaxHz);
     levelsDb = a.levels; harmonics = a.harmonics;
-    if (levelsDbR) levelsDbR = applyAudioDistortion(levelsDbR, freqsHz, f0, dn, isIem, fMaxHz).levels;
+    if (levelsDbR) levelsDbR = applyAudioDistortion(levelsDbR, freqsHz, f0, dn, AUDIO_SOURCES[sid].musicLike, fMaxHz).levels;
   }
-  const notes = ['Simulated source, not real audio: ' + (isIem ? 'music-like' : 'voice-like') + ' spectrum shape, illustrative levels.'];
+  const notes = ['Simulated source, not real audio: ' + (source === undefined ? (isIem ? 'music-like' : 'voice-like') : AUDIO_SOURCES[sid].label.toLowerCase()) + ' spectrum shape, illustrative levels.'];
   if (pre) notes.push(`Pre-emphasis of ${preEmphasisTauUs} us applied (adds ${emphasisMagnitudeDb(10000, preEmphasisTauUs, 'pre').toFixed(1)} dB at 10 kHz).`);
   if (isIem && stereo) notes.push('FM stereo audio is limited to 15 kHz.');
   if (abw) notes.push(`Audio ceiling ${+(abw / 1000).toFixed(1)} kHz: a steep low-pass set by the design of the link (the 15 kHz limit applies only to FM stereo).`);
   if (dn) notes.push(...distortionNotes(dn));
-  const out = { freqsHz, levelsDb, levelsDbR, floorDb: AUDIO_SPECTRUM_FLOOR_DB, peakHz: freqsHz[pk], notes };
+  const out = { freqsHz, levelsDb, levelsDbR, floorDb: AUDIO_SPECTRUM_FLOOR_DB, peakHz: freqsHz[pk], notes, source: sid };
   if (abw) out.audioBandwidthHz = abw;
   if (dn) { out.harmonics = harmonics; out.distortion = dn.echo; }
   return out;
@@ -308,7 +279,7 @@ const DATA_INJECTION = 0.05;
  * 'standard' (pilot), 'assumed' (tone key), 'illustrative'. Deterministic from t.
  */
 export function monoBasebandSpectrum({
-  kind = 'mic', stereo = false, pilotLocked = true, toneKeyKhz, dataConfig, cnrDb = 40, nBins = 256, fMaxKhz = 100, t = 0, preEmphasisTauUs = 0, distortion, audioBandwidthHz,
+  kind = 'mic', stereo = false, pilotLocked = true, toneKeyKhz, dataConfig, cnrDb = 40, nBins = 256, fMaxKhz = 100, t = 0, preEmphasisTauUs = 0, distortion, audioBandwidthHz, source, toneHz,
 } = {}) {
   const isIem = kind === 'iem';
   const abwHz = Number.isFinite(audioBandwidthHz) && audioBandwidthHz >= AUDIO_BANDWIDTH_LIMITS_HZ[0] && audioBandwidthHz <= AUDIO_BANDWIDTH_LIMITS_HZ[1]
@@ -317,9 +288,9 @@ export function monoBasebandSpectrum({
   const base = mpxSpectrum({ cnrDb: Number.isFinite(cnrDb) ? cnrDb : 40, blend: 0, pilotLevelDb: -200 }, { points: Math.min(4096, Math.max(8, Math.floor(nBins))), maxKHz: maxKhz, seed: Math.floor(Math.max(0, t) * 2) });
   const freqKhz = base.freqKHz, n = freqKhz.length;
   // programme: audioSpectrum on a fine grid up to 15 kHz, scaled so its peak (before pre-emphasis) is -8 dB
-  const aud = audioSpectrum({ kind: isIem ? 'iem' : 'mic', stereo: false, nBins: 512, fMaxHz: abwHz, t });
+  const aud = audioSpectrum({ kind: isIem ? 'iem' : 'mic', stereo: false, nBins: 512, fMaxHz: abwHz, t, source, toneHz });
   const peak = Math.max(...aud.levelsDb);
-  const pre = audioSpectrum({ kind: isIem ? 'iem' : 'mic', stereo: false, nBins: 512, fMaxHz: abwHz, t, preEmphasisTauUs });
+  const pre = audioSpectrum({ kind: isIem ? 'iem' : 'mic', stereo: false, nBins: 512, fMaxHz: abwHz, t, preEmphasisTauUs, source, toneHz });
   const at = (f) => { // linear interpolation of the programme; steep low-pass skirt just above the audio ceiling, nothing beyond
     if (f < 0.03) return -Infinity;
     const x = (f * 1000) / abwHz * 511;
@@ -365,7 +336,7 @@ export function monoBasebandSpectrum({
   const ceilKhz = abwHz / 1000;
   const notes = [
     `Audio ceiling ${+ceilKhz.toFixed(1)} kHz (a low-pass set by the design${audioBandwidthHz === undefined ? ', assumed' : ''}); the control tone sits above it${tk !== null && tk > ceilKhz ? `, leaving a gap of ${(tk - ceilKhz).toFixed(1)} kHz` : ''}.`,
-    'Programme audio is simulated, not real: ' + (isIem ? 'music-like mono' : 'voice-like') + ' shape, illustrative levels.',
+    'Programme audio is simulated, not real: ' + (source === undefined ? (isIem ? 'music-like mono' : 'voice-like') : aud.source) + ' shape, illustrative levels.',
     'Noise rises with frequency (FM triangular noise), the same law as the stereo MPX view.',
     isIem ? 'The 19 kHz stereo pilot is a standard of FM stereo; it is absent for a mono IEM.' : 'The tone-key frequency of a mic system is not published: the marker is illustrative.',
   ];
@@ -375,9 +346,9 @@ export function monoBasebandSpectrum({
     const lines = markers.filter((m) => m.present).map((m) => ({ name: m.name, freqKhz: m.freqKhz, levelDb: m.levelDb }));
     const r = distortMpxSpectrum({ freqKhz, levelDb, noiseDb: base.noiseDb }, distortion, lines, { programmeDb: -8, programmeMaxKhz: ceilKhz });
     notes.push(...distortionNotes(dn));
-    return { freqKhz, levelDb: r.levelDb, noiseDb: base.noiseDb, markers, bands: { programme: [0.03, ceilKhz], ...(tk !== null && tk > ceilKhz ? { gap: [ceilKhz, tk] } : {}) }, audioBandwidthHz: abwHz, audioCeilingKhz: ceilKhz, notes, products: r.products, distortion: r.distortion };
+    return { freqKhz, levelDb: r.levelDb, noiseDb: base.noiseDb, markers, bands: { programme: [0.03, ceilKhz], ...(tk !== null && tk > ceilKhz ? { gap: [ceilKhz, tk] } : {}) }, audioBandwidthHz: abwHz, audioCeilingKhz: ceilKhz, source: aud.source, notes, products: r.products, distortion: r.distortion };
   }
-  return { freqKhz, levelDb, noiseDb: base.noiseDb, markers, bands: { programme: [0.03, ceilKhz], ...(tk !== null && tk > ceilKhz ? { gap: [ceilKhz, tk] } : {}) }, audioBandwidthHz: abwHz, audioCeilingKhz: ceilKhz, notes };
+  return { freqKhz, levelDb, noiseDb: base.noiseDb, markers, bands: { programme: [0.03, ceilKhz], ...(tk !== null && tk > ceilKhz ? { gap: [ceilKhz, tk] } : {}) }, audioBandwidthHz: abwHz, audioCeilingKhz: ceilKhz, source: aud.source, notes };
 }
 
 // ---------------------------------------------------------------- overload distortion (illustrative simulation)
@@ -393,20 +364,14 @@ export function monoBasebandSpectrum({
 const clampN = (x, lo, hi, dflt = 0) => (Number.isFinite(x) ? Math.min(hi, Math.max(lo, x)) : dflt);
 
 // erfc for x >= 0, Abramowitz and Stegun 7.1.26 (absolute error below 1.5e-7).
-function erfcPos(x) {
-  const t = 1 / (1 + 0.3275911 * x);
-  return t * (0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429)))) * Math.exp(-x * x);
-}
-
 /**
  * clipFractionFromOverdrive(overdriveDb) -> fraction of samples clipped, 0..1. A programme with a 3-sigma crest factor whose limiter
  * threshold sits overdriveDb below the programme peak clips erfc(k/sqrt(2)) - erfc(3/sqrt(2)) with k = 3 * 10^(-od/20) (0 at od <= 0,
  * continuous, monotonic). ASSUMED Gaussian programme statistics.
  */
-export function clipFractionFromOverdrive(overdriveDb) {
-  if (!Number.isFinite(overdriveDb) || overdriveDb <= 0) return 0;
-  const k = 3 * 10 ** (-Math.min(overdriveDb, 60) / 20);
-  return Math.min(1, Math.max(0, erfcPos(k / Math.SQRT2) - erfcPos(3 / Math.SQRT2)));
+export function clipFractionFromOverdrive(overdriveDb, source) {
+  if (source !== undefined && normalizeAudioSource(source)) return clipFraction(source, overdriveDb); // the global audio source's own crest factor
+  return clipFractionGaussian(overdriveDb); // 3-sigma crest, the original
 }
 
 /**
@@ -420,12 +385,12 @@ export function clipFractionFromOverdrive(overdriveDb) {
  *   tx thd = min(30, 150 * clipFraction) percent, tx imd3Dbc = 20 log10(tx thd / 100); total thd = hypot(rx, tx), imd3Dbc = the larger.
  * active when compression >= 0.1 dB, level 'overload', desense >= 0.5 dB or clipFraction > 0. Non-finite input counts as 0.
  */
-export function distortionFromLink({ overload, txOverdriveDb, txClipFraction } = {}) {
+export function distortionFromLink({ overload, txOverdriveDb, txClipFraction, audioSource } = {}) {
   const o = overload && typeof overload === 'object' ? overload : {};
   const comp = clampN(o.compressionDb, 0, 60);
   const pct = clampN(o.distortionPct, 0, 99);
   const desense = clampN(o.desenseDb, 0, 120);
-  const clip = Number.isFinite(txClipFraction) ? clampN(txClipFraction, 0, 1) : clipFractionFromOverdrive(txOverdriveDb);
+  const clip = Number.isFinite(txClipFraction) ? clampN(txClipFraction, 0, 1) : clipFractionFromOverdrive(txOverdriveDb, audioSource);
   const rxThd = Math.min(30, Math.max((1 - 10 ** (-comp / 20)) / 3 * 100, 0.5 * pct));
   const rxActive = comp >= 0.1 || o.level === 'overload' || desense >= 0.5;
   const txActive = clip > 0;
@@ -439,7 +404,7 @@ export function distortionFromLink({ overload, txOverdriveDb, txClipFraction } =
   const severity = !active ? 'none' : (o.level === 'overload' || thd >= 10) ? 'red' : 'amber';
   const notes = [];
   if (rxActive) notes.push('Receiver front-end overload: compression, IM3 and desensitisation come from the planner overload state; the thd mapping is illustrative.');
-  if (txActive) notes.push('Transmit limiter clipping: clip fraction from the assumed Gaussian programme model (illustrative).');
+  if (txActive) notes.push(normalizeAudioSource(audioSource) ? `Transmit limiter clipping: clip fraction from the ${AUDIO_SOURCES[normalizeAudioSource(audioSource)].label} source (crest factor ${AUDIO_SOURCES[normalizeAudioSource(audioSource)].crestDb.toFixed(1)} dB, illustrative).` : 'Transmit limiter clipping: clip fraction from the assumed Gaussian programme model (illustrative).');
   return {
     active, source, severity, compressionDb: comp, thdPercent: thd, imd3Dbc: Math.max(rxActive ? rxImd : -120, txImd),
     clipFraction: clip, desenseDb: rxActive ? desense : 0, rxActive, txActive, clipKind: txActive ? 'hard' : 'soft', notes,
@@ -466,7 +431,7 @@ function distortionNotes(dn) {
 }
 
 // Harmonic amplitude weights a_k (k = 2..), normalised so sqrt(sum a_k^2) = 1: soft clip ~ k^-1.5 all harmonics, hard clip odd only ~ 1/k.
-function harmonicWeights(hard, kMax) {
+export function harmonicWeights(hard, kMax) {
   const ks = [];
   for (let k = 2; k <= kMax; k++) if (!hard || k % 2 === 1) ks.push(k);
   const raw = ks.map((k) => (hard ? 1 / k : k ** -1.5));

@@ -1,7 +1,10 @@
 // Virtual audio source for the meters. Deterministic (a function of time and seed only) and pure. Levels are dBFS.
 
+import { AUDIO_SOURCE_IDS, levelGenerator, normalizeAudioSource } from './audio-source.js';
+
 export const AUDIO_FLOOR_DB = -90;
-export const AUDIO_KINDS = ['speech', 'tone', 'pink', 'stereo-demo', 'off'];
+// Legacy meter names plus every id of the global audio source catalogue (audio-source.js); 'speech' is the voice, 'off' is silence.
+export const AUDIO_KINDS = ['speech', 'tone', 'pink', 'stereo-demo', 'off', ...AUDIO_SOURCE_IDS.filter((id) => !['tone', 'pink'].includes(id))];
 
 const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
 const TAU = 2 * Math.PI;
@@ -45,9 +48,13 @@ export function createAudioSource({ kind = 'speech', seed = 0 } = {}) {
         return { rmsDb, peakDb: Math.min(-6, rmsDb + crest) };
       };
       break;
-    default:
+    default: {
+      const sid = normalizeAudioSource(kind);
+      if (sid === 'silence' && kind === 'silence') { level = () => ({ rmsDb: AUDIO_FLOOR_DB, peakDb: AUDIO_FLOOR_DB }); break; }
+      if (sid && sid !== 'silence') { level = levelGenerator(sid, seed); break; }
       kind = 'off';
       level = () => ({ rmsDb: AUDIO_FLOOR_DB, peakDb: AUDIO_FLOOR_DB });
+    }
   }
   return { kind, level };
 }
@@ -62,7 +69,7 @@ export function createAudioSource({ kind = 'speech', seed = 0 } = {}) {
 export function createStereoSource({ kind = 'speech', seed = 0 } = {}) {
   const sh = (v, db) => (v <= AUDIO_FLOOR_DB ? v : Math.min(0, v + db));
   const shift = (lv, db) => ({ rmsDb: sh(lv.rmsDb, db), peakDb: sh(lv.peakDb, db) });
-  if (kind === 'tone') {
+  if (kind === 'tone' || kind === 'sweep' || kind === 'two-tone') {
     return { kind, l: () => ({ rmsDb: -18, peakDb: -15 }), r: () => ({ rmsDb: -24, peakDb: -21 }) };
   }
   if (kind === 'stereo-demo') {

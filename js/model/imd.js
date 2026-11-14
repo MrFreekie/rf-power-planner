@@ -32,6 +32,8 @@ import { solveLink, antennaGainDb, chainItemLossDb, cascadeChainIip3Dbm } from '
 import { RX_PRESETS, RX_DEFAULTS } from './rx-params.js';
 import { absolutePos } from './floor.js';
 import { FM_PRESETS, fmLowIntermodDb } from './fm-presets.js';
+import { evenOrderProducts, radiatedHarmonics, DEFAULT_IIP2_DBM } from './imd-even.js';
+export { evenOrderFrequencies, evenOrderProducts, radiatedHarmonics, IIP2_PRESETS } from './imd-even.js';
 import {
   IMD_PRESETS, COMBINER_PRESETS, TX_REVERSE_IM_CONVERSION_DB, TX_REVERSE_IM_5TH_EXTRA_DB, PIM_JUNCTIONS, PIM_REFERENCE_DBM,
   NEAR_FIELD_FLOOR_WAVELENGTHS, SPEED_OF_LIGHT_M_S, coordinationRules, coupledNoiseDbm,
@@ -279,6 +281,42 @@ export function frontEndImd(scene, rxPoint, orders = [3, 5]) {
     const levelDbm = sum - (p.order - 1) * iip + 20 * Math.log10(multiplicity(p.terms) / REF_MULT[p.order]) + (chain.length ? chainGainDb : 0);
     return { ...p, source: 'front-end', levelDbm };
   });
+}
+
+
+// ---------------------------------------------------------------- even-order products (imd-even.js)
+
+/**
+ * evenOrderImd(scene, rxPoint) -> { products, harmonics, inBandCount, bandHitCount, worst }
+ * Second and fourth order products of the transmitter tones in the receiver front end (or the shared booster ahead of it), from
+ * scene.imd.iip2Dbm (default 30 dBm, assumed), iip4Dbm (default iip2 + 15), bands [{ name, loMHz, hiMHz }] (other bands the system uses),
+ * filterBefore / filterAfter { passLoMHz, passHiMHz, rejectionDb } (a bandpass ahead of / behind the nonlinear stage). The wanted channel is the
+ * first link's frequency. Tone levels are those at the antenna terminals when imd.rxChain exists (a booster is the nonlinear stage) else at the
+ * receiver input. `harmonics` are the second harmonics the transmitters radiate (tx.h2Dbc default 50 dB, tx.harmonicFilterDb), arriving with the
+ * fundamental's level minus 6 dB of extra path loss. Needs at least one transmitter for harmonics and two for products.
+ */
+export function evenOrderImd(scene, rxPoint) {
+  const tx = txOf(scene);
+  const { imd } = imdOf(scene);
+  const link = (scene.links || [])[0];
+  const wanted = link ? { freqMHz: link.freqMHz, bwKHz: bwKHz(scene) } : null;
+  const bands = Array.isArray(imd.bands) ? imd.bands : [];
+  const lv = tx.length ? toneLevels(scene, rxPoint) : [];
+  const chain = (imd.rxChain) || [];
+  const tones = tx.map((t, i) => ({ freqMHz: t.freqMHz, levelDbm: chain.length ? lv[i].antennaDbm : lv[i].levelDbm }));
+  const nf = tx.length ? noiseFloor(scene, rxPoint).thermalDbm : undefined; // receiver noise floor (kTB plus noise figure)
+  const products = tx.length < 1 ? [] : evenOrderProducts(tones, {
+    iip2Dbm: Number.isFinite(imd.iip2Dbm) ? imd.iip2Dbm : DEFAULT_IIP2_DBM, iip4Dbm: imd.iip4Dbm, wanted, bands,
+    filterBefore: imd.filterBefore, filterAfter: imd.filterAfter, noiseFloorDbm: nf,
+  }).filter((p) => tx.length > 1 || p.kind === 'harmonic');
+  const harmonics = radiatedHarmonics(tx.map((t, i) => ({ freqMHz: t.freqMHz, carrierDbm: lv[i].antennaDbm, h2Dbc: t.h2Dbc, filterDb: t.harmonicFilterDb })), { bands, wanted, noiseFloorDbm: nf });
+  const all = [...products, ...harmonics];
+  return {
+    products, harmonics,
+    inBandCount: all.filter((p) => p.severity === 'critical').length,
+    bandHitCount: all.filter((p) => p.severity === 'warning').length,
+    worst: products.length ? products[0] : null,
+  };
 }
 
 // ---------------------------------------------------------------- transmitter reverse IM
@@ -533,6 +571,7 @@ export function imdSummary(scene, rxPoint) {
   const levels = lv.map((x) => x.levelDbm);
   const checks = coordinationCheck(scene, rxPoint);
   const nf = tx.length ? noiseFloor(scene, rxPoint) : { riseDb: 0 };
+  const ev = evenOrderImd(scene, rxPoint);
   return {
     perTx,
     meanThroughLossDb: perTx.length ? perTx.reduce((s, x) => s + x.throughLossDb, 0) / perTx.length : 0,
@@ -551,6 +590,7 @@ export function imdSummary(scene, rxPoint) {
     // common on an evenly spaced grid and are usually 70+ dB below the wanted carrier (severity 'info').
     inChannelByOrder: checks.reduce((o, c) => { o[c.product.order] = (o[c.product.order] || 0) + 1; return o; }, {}),
     inChannelThirdOrderCount: checks.filter((c) => c.product.order === 3).length,
+    evenInBandCount: ev.inBandCount, evenBandHitCount: ev.bandHitCount, worstEvenProductDbm: ev.worst ? ev.worst.levelDbm : null,
   };
 }
 

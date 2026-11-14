@@ -10,6 +10,7 @@
 
 import { MPX_DEFAULTS } from './mpx-params.js';
 import { captureState } from './interferer.js';
+import { programmeProfile } from './audio-source.js';
 
 // Used only to back-fill fields missing from the supplied config.
 const FALLBACK = {
@@ -230,6 +231,10 @@ export function mpxSpectrum(state, opts = {}) {
   const cnr = fin(state && state.cnrDb, 40);
   const blend = clamp01(fin(state && state.blend, 0));
   const pilotDb = fin(state && state.pilotLevelDb, SPECTRUM_FLOOR_DB);
+  // Optional programme { source, t, toneHz } (global audio source, audio-source.js): the L+R band takes the source's own spectral shape scaled so its
+  // peak sits at the usual programme level (-8 dB); a tone or sweep draws a line (one bin wide) instead. Without it the flat tilted band is unchanged.
+  const prog = opts.programme && opts.programme.source !== undefined ? programmeProfile(opts.programme.source, opts.programme) : null;
+  const binKHz = maxKHz / (n - 1);
   const levelDb = new Array(n);
   const noiseDb = new Array(n);
   for (let i = 0; i < n; i++) {
@@ -237,7 +242,10 @@ export function mpxSpectrum(state, opts = {}) {
     let p = 0;
     // L+R baseband
     const lpr = band(f, 0.03, 15, 1);
-    if (lpr > 0) p += lpr * pwr(-8 - 2 * Math.min(1, f / 15));
+    if (prog) {
+      if (prog.isLine) { for (const ln of prog.lines) if (Math.abs(f - ln.fHz / 1000) <= binKHz / 2 && f <= 15) p += pwr(-8 + ln.relDb); }
+      else if (lpr > 0 && !prog.silent) p += lpr * pwr(-8 + prog.relDb(f * 1000));
+    } else if (lpr > 0) p += lpr * pwr(-8 - 2 * Math.min(1, f / 15));
     // L-R DSB-SC around 38 kHz
     const lmr = band(f, 23, 53, 1);
     if (lmr > 0 && blend > 0) p += lmr * blend * blend * pwr(-12 - 2 * Math.min(1, Math.abs(f - 38) / 15));
@@ -262,6 +270,7 @@ export function mpxSpectrum(state, opts = {}) {
     noiseDb,
     bands: { lpr: [0.03, 15], pilot: 19, lmr: [23, 53] },
     pilotIndex: pilotIdx,
+    ...(prog ? { programmeSource: prog.id } : {}),
     // The displayed noise is the composite (pre-improvement) noise relative to the signal, NOT reduced
     // by the FM improvement that audioSnrDb includes. Kept this way so L-R visibly sinks first.
     exaggeratedNoise: true,

@@ -5,7 +5,8 @@ import { applyFmPreset } from './model/fm-presets.js';
 import { solveLink, chainLossDb } from './model/rf.js';
 import { overloadStep } from './model/overload.js';
 import { RX_PRESETS } from './model/rx-params.js';
-import { imdSummary } from './model/imd.js';
+import { imdSummary, evenOrderImd } from './model/imd.js';
+import { toneMpxReport } from './model/tone-mpx.js';
 import { createDefaultScene, createDefaultLink, createChainItem, createReflector, createBranch, createZone, createDefaultImd, createImdTransmitter, createPlatform, createAudience, createCeiling, createChainItemFromPreset, newId, syncScene, migrateAntennaPolarisation } from './model/scene.js';
 
 const omni = (el = 90, polarisation = 'vertical') => ({ type: 'omni', gainDbi: 0, orientation: { az: 0, el }, polarisation });
@@ -401,6 +402,71 @@ export function videoWallReport(scene) {
   const w = r.wallNoise;
   const wall = r.paths.find((p) => p.kind === 'wall');
   return { rxPowerDbm: r.rxPowerDbm, marginDb: r.marginDb, noiseDbm: w ? w.dbm : -Infinity, riseDb: w ? w.riseDb : 0, marginChangeDb: w ? w.marginChangeDb : 0, floorDbm: r.cascade.noiseFloorDbm, wallLossDb: r.paths[0].wallLossDb || 0, distanceToWallM: w ? w.walls[0].distanceM : null, reflectionDb: wall ? wall.gainDb - r.paths[0].gainDb : null };
+}
+
+/**
+ * Even-order intermodulation examples (item 23). evenScene(id, { fixed }) with fixed false (default) or true for the version with the fix.
+ *   'wideband':   mics on 500 and 700 MHz 3 m from a receive antenna with a wideband booster (IIP2 30 dBm, assumed) ahead of a 600 MHz receiver:
+ *                 the difference (200 MHz, in an assumed VHF band) and sum (1200 MHz) products; fixed: a 470-698 MHz bandpass (40 dB, assumed) after the booster.
+ *   'vhf-uhf':    a 190 MHz VHF mic and a 475 MHz UHF mic into one wideband booster, receiver on 665 MHz: f1 + f2 = 665 MHz lands in the wanted channel;
+ *                 fixed: a 470-698 MHz bandpass (60 dB, assumed) BEFORE the booster removes the VHF tone.
+ *   'harmonic':   a 902 MHz IEM transmitter 1.5 m from a 1795 MHz IEM bodypack: its second harmonic (50 dBc, assumed) lands at 1804 MHz in the wanted channel
+ *                 band; fixed: 60 dB of low-pass on the transmitter output (assumed).
+ *   'narrow-uhf': two UHF mics 8.2 MHz apart into a narrow-band receiver: sum near 1220 MHz and difference 8.2 MHz fall outside everything; only IM3 matters.
+ */
+export function evenScene(id, { fixed = false } = {}) {
+  const cfg = {
+    wideband: { f: 600.1, kind: 'mic', txs: [['Mic 500', 500.0, 14], ['Mic 700', 700.0, 14]], iip2: 30, bands: [{ name: 'VHF band 174-216 MHz', loMHz: 174, hiMHz: 216 }], booster: true },
+    'vhf-uhf': { f: 665.0, kind: 'mic', txs: [['VHF mic', 190.0, 14], ['UHF mic', 475.0, 14]], iip2: 30, bands: [], booster: true },
+    harmonic: { f: 1795.0, kind: 'iem', txs: [['UHF IEM', 902.0, 17]], iip2: 35, bands: [{ name: 'IEM band 1785-1805 MHz', loMHz: 1785, hiMHz: 1805 }], booster: false },
+    'narrow-uhf': { f: 606.1, kind: 'mic', txs: [['Mic A', 606.1, 14], ['Mic B', 614.3, 14]], iip2: 40, bands: [{ name: 'VHF band 174-216 MHz', loMHz: 174, hiMHz: 216 }], booster: false },
+  }[id];
+  if (!cfg) return null;
+  return imdScene(cfg.kind, cfg.f, cfg.txs.map(([n, f, p]) => [n, f, p, 7.5, 6.5, 1.5]), { preset: 'mic-rack-typical' }, (s, l, m) => {
+    s.environment.model = 'free-space';
+    s.stage = { width: 20, depth: 14 };
+    l.rx.pos = { x: 10, y: 6.5, z: 1.5 }; m.rxAntennaPos = { x: 10, y: 6.5, z: 1.5 };
+    m.rxAntenna = { type: 'omni', gainDbi: 0, orientation: { az: 0, el: 90 } };
+    if (id === 'harmonic') m.transmitters[0].pos = { x: 8.5, y: 6.5, z: 1.5 };
+    m.iip2Dbm = cfg.iip2; m.bands = cfg.bands;
+    if (cfg.booster) m.rxChain = [createChainItem('booster', { gainDb: 12, nfDb: 4 })];
+    if (fixed && id === 'wideband') m.filterAfter = { passLoMHz: 470, passHiMHz: 698, rejectionDb: 40 };
+    if (fixed && id === 'vhf-uhf') m.filterBefore = { passLoMHz: 470, passHiMHz: 698, rejectionDb: 60 };
+    if (id === 'harmonic') m.filterBefore = { passLoMHz: 1700, passHiMHz: 1900, rejectionDb: 40 }; // the 1.8 GHz bodypack never sees the 902 MHz carrier
+    if (fixed && id === 'harmonic') m.transmitters[0].harmonicFilterDb = 60;
+  });
+}
+
+/**
+ * Programme tone against the MPX tones (item 32 and 32a). TONE_MPX_EXAMPLES: id -> { kind: 'iem'|'mic', source, toneHz, settings } where settings are the
+ * toneMpxReport() slider values (tone frequency kHz, tone level percent of peak deviation, pilot injection percent, overload level dB, mono).
+ * toneMpxScene(id) builds the scene (audioSource and audioToneHz set to match) and toneMpxExampleReport(id) the report the notes quote.
+ *   'products':  1 kHz sine at 40 percent of 75 kHz (30 kHz, beta 30) plus the 10 percent pilot (beta 0.395): baseband products and two-tone FM sidebands.
+ *   'beat':      a 19.3 kHz tone getting past the audio filter beats with the pilot at 300 Hz.
+ *   'sweep':     a sweep captured at 17 kHz (the filter is only 21 dB down there, assumed).
+ *   'tone-key':  mono mic, 10.9 kHz tone overloaded: the third harmonic falls at 32.7 kHz in the tone-key window.
+ *   'overdev':   a 95 percent tone plus the pilot reaches 104 percent of peak deviation.
+ * All filter, nonlinearity and window figures are assumed (flag U); see tone-mpx.js.
+ */
+export const TONE_MPX_EXAMPLES = Object.freeze({
+  products: { kind: 'iem', source: 'tone', toneHz: 1000, settings: { toneKhz: 1, tonePct: 40, pilotPct: 10, overloadDb: -6 } },
+  beat: { kind: 'iem', source: 'tone', toneHz: 19300, settings: { toneKhz: 19.3, tonePct: 40, pilotPct: 9, overloadDb: -6 } },
+  sweep: { kind: 'iem', source: 'sweep', toneHz: 17000, settings: { toneKhz: 17, tonePct: 40, pilotPct: 9, overloadDb: -6 } },
+  'tone-key': { kind: 'mic', source: 'tone', toneHz: 10900, settings: { toneKhz: 10.9, tonePct: 60, pilotPct: 9, overloadDb: 0, mono: true } },
+  overdev: { kind: 'iem', source: 'tone', toneHz: 1000, settings: { toneKhz: 1, tonePct: 95, pilotPct: 9, overloadDb: 0 } },
+});
+export function toneMpxScene(id) {
+  const c = TONE_MPX_EXAMPLES[id];
+  if (!c) return null;
+  const s = createDefaultScene();
+  s.links = [createDefaultLink(c.kind)];
+  s.links[0].audio = { source: c.source, gainDb: 0 };
+  s.audioSource = c.source; s.audioToneHz = c.toneHz;
+  return s;
+}
+export function toneMpxExampleReport(id) {
+  const c = TONE_MPX_EXAMPLES[id];
+  return c ? toneMpxReport(c.settings) : null;
 }
 
 const ANTENNAS_GAIN = { yagi: 10, paddle: 7, body: -3 };
@@ -890,6 +956,60 @@ export const EXAMPLES = [
     title: 'Video wall: solid metal, mesh and carbon fibre construction',
     note: 'Same stage and class A noise, a receiver 2.5 m behind the wall: crossing loss is 40.0 dB for solid metal, 27.9 dB for 10 mm metal mesh and 28.9 dB for carbon mesh, and the noise reaching it is -94.2, -72.2 and -75.2 dBm (rear loss 25, 3 and 6 dB), leaving margins of 19.4, -2.6 and 0.4 dB. Seen from FOH the metal and metal mesh both reflect at -3.5 dB and carbon at -9.5 dB. Holes of 100 mm (a coarse curtain) shield only 7.9 dB at 606 MHz, so a mesh wall is no free pass at UHF. All construction figures are assumed.',
     build: () => ({ scene: videoWallScene({ preset: 'class-a', construction: 'mesh-metal', rx: 'back' }) }),
+  },
+  {
+    id: 'even-wideband-booster',
+    title: 'Even-order products: 500 and 700 MHz mics on a wideband booster',
+    note: 'Two mics on 500 and 700 MHz, 2.5 m from the receive antenna, drive a wideband booster (IIP2 +30 dBm, assumed): the sum (1200 MHz) and difference (200 MHz) products are both -88.7 dBm, 24.3 dB over the receiver noise floor, and fall 2 dB per dB of input against 3 dB for IM3. Neither lands in the 600 MHz channel, but the 200 MHz one sits in a VHF band the system also uses. A 470-698 MHz bandpass behind the booster (40 dB, assumed) takes both to -128.7 dBm, 15.7 dB under the floor.',
+    build: () => ({ scene: evenScene('wideband') }),
+  },
+  {
+    id: 'even-vhf-uhf-booster',
+    title: 'Even-order products: VHF and UHF mics into one booster',
+    note: 'A 190 MHz VHF mic and a 475 MHz UHF mic share one wideband booster and the receiver listens on 665 MHz: f1 + f2 is exactly 665 MHz, -76.9 dBm in the wanted channel and 36.1 dB over the floor. A 470-698 MHz bandpass in front of the booster (60 dB, assumed) removes the VHF tone before it can mix and drops the product to -136.9 dBm. Separate antennas or a filter ahead of any shared gain stage is the fix.',
+    build: () => ({ scene: evenScene('vhf-uhf') }),
+  },
+  {
+    id: 'even-second-harmonic',
+    title: 'Even-order products: a 902 MHz IEM transmitter and a 1.8 GHz bodypack',
+    note: 'A 902 MHz IEM transmitter 1.5 m from a 1795 MHz bodypack radiates a second harmonic 50 dB down (assumed), arriving at -74.1 dBm in the 1785-1805 MHz band, 38.9 dB over the floor. A 60 dB low-pass on the transmitter output (assumed) takes it to -134.1 dBm, 21.1 dB under the floor. The bodypack filter keeps the 902 MHz carrier itself out of the receiver, so the harmonic is the only even-order problem.',
+    build: () => ({ scene: evenScene('harmonic') }),
+  },
+  {
+    id: 'even-narrow-uhf-good',
+    title: 'Even-order products: narrow-band UHF, the good case',
+    note: 'Two UHF mics 8.2 MHz apart into a narrow-band receiver (IIP2 +40 dBm, assumed) give a sum near 1220 MHz and a difference of 8.2 MHz at -99.2 dBm, none in the wanted channel or any other band the system uses. Only the third-order product 2f1-f2 at -72.8 dBm matters here. Keep the wanted bands apart by more than an octave and even order products stay out of band.',
+    build: () => ({ scene: evenScene('narrow-uhf') }),
+  },
+  {
+    id: 'tone-pilot-products',
+    title: 'Programme tone and the 19 kHz pilot: where the products come from',
+    note: 'A 1 kHz sine at 40 percent of 75 kHz peak deviation (30 kHz, beta 30) rides with the 10 percent pilot (7.5 kHz, beta 0.395). In the baseband the two only add, but a limiter 6 dB under its nominal drive (assumed) puts products at 18 and 20 kHz (-49.5 dB), 17 and 21 kHz (-60.2 dB) and 37 and 39 kHz (-72.4 dB), and the pilot cubed lands at 57 kHz (-94.3 dB) in the RDS band. In the RF the FM itself adds sidebands at fc +- n x 1 kHz +- m x 19 kHz with weights J_n(30) J_m(0.395), filling about 102 kHz. Cures: a low-pass before the limiter, no limiting of the composite, and a pilot-notched limiter.',
+    build: () => ({ scene: toneMpxScene('products') }),
+  },
+  {
+    id: 'tone-pilot-beat',
+    title: 'Programme tone near the pilot: a 19.3 kHz tone beats with it',
+    note: 'A 19.3 kHz tone leaks past the 15 kHz audio low-pass, which is only 41.4 dB down there (assumed filter), leaving it 28.4 dB under the 9 percent pilot. It beats with the pilot at 300 Hz, inside the decoder loop bandwidth (assumed), wobbling the pilot phase by up to 2.2 degrees and costing stereo separation. A tone above 23 kHz would fold down through the L-R demodulator instead (25 kHz appears at 13 kHz). Keep the tone at 15 kHz or lower, steepen the filter or notch the pilot region.',
+    build: () => ({ scene: toneMpxScene('beat') }),
+  },
+  {
+    id: 'tone-sweep-pilot',
+    title: 'Swept tone through the MPX: the moment it reaches the pilot',
+    note: 'A swept tone passes 17 kHz where the assumed filter is only 21.2 dB down, leaving it 8.2 dB under the pilot and wobbling its phase by up to 22.8 degrees at a 2000 Hz beat. This is where the stereo decoder flickers or drops lock. The same sweep above 23 kHz folds down by 38 kHz through the L-R path. The cure is a steeper audio filter with the limiter placed after it.',
+    build: () => ({ scene: toneMpxScene('sweep') }),
+  },
+  {
+    id: 'tone-key-harmonics',
+    title: 'Mono mic: a 10.9 kHz tone overloaded lands its third harmonic on the tone-key',
+    note: 'A 10.9 kHz tone at 60 percent deviation with the stage at its nominal limit (0 dB) has a third harmonic at 32.7 kHz, -36.6 dB under 100 percent modulation. The assumed 32.768 kHz tone-key window is 1 kHz wide, so the harmonic sits inside it and can hold the squelch open or mute it. Tone-key frequencies are not published for real systems, so check on the bench. Cures: low-pass the audio after the limiter, back off the level, or notch the tone-key frequency.',
+    build: () => ({ scene: toneMpxScene('tone-key') }),
+  },
+  {
+    id: 'tone-overdeviation',
+    title: 'Overdeviation: a loud tone plus the pilot passes 100 percent',
+    note: 'A 1 kHz tone at 95 percent of peak deviation plus the 9 percent pilot sums to 104 percent, 0.3 dB over the limit, so the limiter clips (beta 71). The third harmonic sits at -28.4 dB, the J0 J0 carrier term falls to -33.9 dB as the Bessel weights spread over about 186 kHz, and products at 18 and 20 kHz reach -36.9 dB. The pilot cubed lands at 57 kHz (-86.2 dB) in the RDS band. Limit the programme before the pilot is added and keep the tone below 91 percent.',
+    build: () => ({ scene: toneMpxScene('overdev') }),
   },
   {
     id: 'p2p-wireless-snake',

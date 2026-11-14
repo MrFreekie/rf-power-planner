@@ -2,6 +2,7 @@
 // This is NOT the link budget. Carrier frequencies on screen are scaled down; spectra use real kHz.
 
 import { audioSnrDb, stereoBlend } from './mpx.js';
+import { AUDIO_SOURCE_IDS, AUDIO_SOURCE_LABELS, modulationTones, normalizeAudioSource } from './audio-source.js';
 
 export const TAU = 2 * Math.PI;
 export const CHANNEL_KHZ = 200;
@@ -13,18 +14,23 @@ const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
 // ---- messages: sums of tones, so the phase integral (needed for FM) is exact ------------------
 // freq is in units of the base tone (1 = the modulation frequency slider).
+// The tone lists live in the global audio source (audio-source.js) so one catalogue serves every consumer. The lab's three original
+// messages keep their names: sine = the 'tone' source, twotone = 'two-tone', speech = 'voice'.
 const TONES = {
-  sine: [{ a: 1, f: 1, ph: 0 }],
-  twotone: [{ a: 0.6, f: 1, ph: 0 }, { a: 0.4, f: 1.75, ph: 1.1 }],
-  // "speech-like": formant-ish partials with beating pairs that make a syllable-like swelling envelope
-  speech: [
-    { a: 0.30, f: 0.45, ph: 0 }, { a: 0.30, f: 0.55, ph: 0.4 },
-    { a: 0.22, f: 1.0, ph: 1.3 }, { a: 0.22, f: 1.12, ph: 2.0 },
-    { a: 0.16, f: 1.9, ph: 0.7 }, { a: 0.12, f: 2.3, ph: 2.6 }, { a: 0.08, f: 3.1, ph: 4.0 },
-  ],
+  sine: modulationTones('tone'),
+  twotone: modulationTones('two-tone'),
+  speech: modulationTones('voice'),
 };
-export const MESSAGE_KINDS = Object.freeze(Object.keys(TONES));
-export const MESSAGE_LABELS = Object.freeze({ sine: 'Sine tone', twotone: 'Two tones', speech: 'Speech-like' });
+for (const id of AUDIO_SOURCE_IDS) if (!(id in TONES)) TONES[id] = modulationTones(id); // every catalogue id is also a kind (tone, two-tone, voice share the lists above)
+/** The lab's selectable messages (peak-normalised, never silent). Every catalogue id except silence also works as a kind: see messageKindFor. */
+export const MESSAGE_KINDS = Object.freeze(['sine', 'twotone', 'speech']);
+export const MESSAGE_SOURCE_KINDS = Object.freeze(AUDIO_SOURCE_IDS.filter((id) => id !== 'silence'));
+/** messageKindFor(audioSourceId) -> the message kind that carries that source's tones ('sine' for tone and sweep, 'twotone', 'speech' for voice, else the id). */
+export function messageKindFor(id) {
+  const sid = normalizeAudioSource(id) || 'voice';
+  return { tone: 'sine', sweep: 'sine', 'two-tone': 'twotone', voice: 'speech' }[sid] || sid;
+}
+export const MESSAGE_LABELS = Object.freeze({ sine: 'Sine tone', twotone: 'Two tones', speech: 'Speech-like', ...AUDIO_SOURCE_LABELS });
 
 const normCache = {};
 function norm(kind) { // peak of the raw sum over a long span, so |message| <= 1
