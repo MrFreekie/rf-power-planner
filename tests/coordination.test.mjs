@@ -140,7 +140,9 @@ test('score and margin of a generated plan follow the definition (tolerance 0.05
 
 test('regions: UK/EU/US tables, power limits, TV channels, blocked ranges', () => {
   assert.ok(REGIONS.uk.ranges.some((r) => r.fromMHz === 470 && r.toMHz === 694));
-  assert.ok(REGIONS.uk.ranges.some((r) => r.fromMHz === 823 && r.toMHz === 832));
+  // UK 823-832 became 821.5-826 and 826-832 (licence-exempt UK-wide from 29 Apr 2026, SI 2026/396)
+  assert.ok(REGIONS.uk.ranges.some((r) => r.fromMHz === 821.5 && r.toMHz === 826 && r.licenceClass === 'exempt'));
+  assert.ok(REGIONS.uk.ranges.some((r) => r.fromMHz === 826 && r.toMHz === 832 && r.licenceClass === 'exempt'));
   assert.ok(REGIONS.uk.ranges.some((r) => r.fromMHz === 863 && r.toMHz === 865));
   assert.ok(REGIONS.us.ranges.some((r) => r.fromMHz === 470 && r.toMHz === 608));
   assert.ok(REGIONS.us.ranges.some((r) => r.fromMHz === 614 && r.toMHz === 698));
@@ -155,7 +157,8 @@ test('regions: UK/EU/US tables, power limits, TV channels, blocked ranges', () =
   assert.deepEqual(tvChannelRange('us', 37), { channel: 37, fromMHz: 608, toMHz: 614 });
   assert.equal(tvChannelAt('uk', 481), 22);
   assert.deepEqual(tvChannelsToBlocked('uk', [21, 23]), [{ fromMHz: 470, toMHz: 478, label: 'TV channel 21' }, { fromMHz: 486, toMHz: 494, label: 'TV channel 23' }]);
-  assert.equal(regionBand('uk', ['uk-863-865'])[0].startMHz, 863);
+  assert.equal(regionBand('uk', ['uk-863-865'])[0].startMHz, 863.1); // usable segment 863.1-864.9 MHz (was the whole 863-865)
+  assert.equal(regionBand('uk', ['uk-863-865'])[0].endMHz, 864.9);
   assert.match(BANDS_DISCLAIMER, /Check your national regulator/);
 });
 
@@ -190,4 +193,69 @@ test('performance: 12 mics + 4 IEMs in the UK UHF band finish well under 5 s and
   assert.ok(Date.now() - t0 < 5000, `took ${Date.now() - t0} ms`);
   assert.equal(r.ok, true);
   assert.ok(bruteMinDistanceKHz(r.frequencies.map((x) => x.freqMHz)) >= COORDINATION_DEFAULTS.guardKHz - 1e-6);
+});
+
+// ---- UK band data from Ofcom pages and the draft IR 2030 (each figure is data; see bands.js BAND_SOURCES)
+import { powerLimitDetailFor, CHANNEL_38_PLAN, CHANNEL_PLANS, BAND_SOURCES, typicalTxDbm, bandLimitDbm } from '../js/model/bands.js';
+
+test('UK power model: detail per range with handheld / body-worn figures, unit, verification and source', () => {
+  const d = (f) => powerLimitDetailFor('uk', f);
+  assert.deepEqual([d(823).handheldMw, d(823).bodyWornMw, d(823).unit, d(823).rangeId], [20, 100, 'EIRP', 'uk-821-826']);
+  assert.deepEqual([d(830).handheldMw, d(830).bodyWornMw, d(830).rangeId], [100, 100, 'uk-826-832']);
+  assert.match(d(830).note, /check final IR 2030/);
+  assert.deepEqual([d(1790).handheldMw, d(1790).bodyWornMw, d(1790).unit, d(1790).licenceClass], [20, 50, 'EIRP', 'exempt']);
+  assert.deepEqual([d(864).handheldMw, d(864).unit, d(864).verified], [10, 'ERP', true]);
+  assert.deepEqual([d(174.4).handheldMw, d(174.4).bodyWornMw, d(174.4).unit], [10, 50, 'ERP']);
+  assert.deepEqual([d(2440).handheldMw, d(2440).unit, d(2440).genericSrdMw], [10, 'EIRP', 100]);
+  assert.equal(d(5800).handheldMw, 25);
+  assert.match(d(5800).note, /not audio-PMSE specific/);
+  assert.equal(d(823).verified, 'draft');
+  assert.equal(d(823).source, 'ir2030-draft');
+  assert.equal(d(823).asOf, '2025-12-11');
+  assert.equal(BAND_SOURCES['ofcom-licence-exempt'].asOf, '2023-03-16');
+  assert.equal(BAND_SOURCES['ofcom-licensing-updates'].asOf, '2026-05-29');
+  assert.equal(BAND_SOURCES['ofcom-statement'].asOf, '2025-10-27');
+  assert.equal(powerLimitDetailFor('uk', 750), null);
+  // EU ranges have no power model: both figures = maxPowerMw, unverified planner estimate
+  assert.deepEqual([powerLimitDetailFor('eu', 600).handheldMw, powerLimitDetailFor('eu', 600).verified, powerLimitDetailFor('eu', 600).source], [50, false, 'planner-estimate']);
+  // the old API stays and carries the planner default
+  assert.equal(powerLimitFor('uk', 2440).maxPowerMw, 10);
+  assert.equal(powerLimitFor('uk', 1790).licenceClass, 'exempt');
+  // Tx guidance never exceeds the regional limit: UK 2.4 GHz audio PMSE 10 mW EIRP = 10 dBm (the generic profile says 13 dBm for IEM)
+  assert.equal(bandLimitDbm('uk', 2440).maxDbm, 10);
+  assert.equal(typicalTxDbm('iem', 2440, 'uk'), 10);
+  assert.equal(typicalTxDbm('iem', 2440), 13);
+});
+
+test('UK 1785-1805 is licence-exempt, 703-790 is excluded, ch38 and 960-1154 are optional ranges', () => {
+  assert.ok(REGIONS.uk.ranges.some((r) => r.id === 'uk-1785-1805' && r.licenceClass === 'exempt'));
+  assert.ok(!regionBand('uk').some((s) => s.rangeId === 'uk-ch38' || s.rangeId === 'uk-960-1154'), 'optional ranges are not in the default plan');
+  assert.deepEqual(regionBand('uk', ['uk-960-1154']).map((s) => [s.startMHz, s.endMHz]), [[1015, 1016], [1044, 1045], [1075, 1076], [1104, 1105]]);
+  assert.ok(REGIONS.uk.blocked.some((b) => b.fromMHz === 703 && b.toMHz === 790));
+  const r = coordinateFrequencies({ mics: 3, regionId: 'uk', rangeIds: ['uk-960-1154'], outdoor: true, seed: 3 });
+  assert.equal(r.ok, true);
+  for (const f of r.frequencies) assert.ok(!(f.freqMHz > 976.5 && f.freqMHz < 979.5));
+  assert.equal(powerLimitDetailFor('uk', 606.7).rangeId, 'uk-ch38', 'ch38 resolves before the whole TV band');
+});
+
+test('channel 38 plan preset: candidates are exactly the plan frequencies', () => {
+  assert.deepEqual([...CHANNEL_38_PLAN.uncoordinated.freqsMHz], [606.6, 607.5, 608.15, 609.15, 609.95, 610.55, 611.25, 612.3, 613.15, 613.5]);
+  assert.deepEqual([...CHANNEL_38_PLAN.coordinated.freqsMHz], [606.7, 607.0]);
+  const r = coordinateFrequencies({ mics: 3, regionId: 'uk', channelPlan: 'uk-ch38-uncoordinated', seed: 5 });
+  assert.equal(r.ok, true, JSON.stringify(r.failure));
+  for (const f of r.frequencies) assert.ok(CHANNEL_38_PLAN.uncoordinated.freqsMHz.includes(f.freqMHz), String(f.freqMHz));
+  assert.ok(r.minProductDistanceKHz >= r.guardKHz);
+  assert.ok(r.notes.some((n) => /fixed channel plan/.test(n)));
+  // the two coordinated spots (300 kHz apart) cannot hold 3 mics, and with the default guard hold at most 2 only if their products clear it
+  const two = coordinateFrequencies({ mics: 3, regionId: 'uk', channelPlan: CHANNEL_PLANS['uk-ch38-coordinated'].id });
+  assert.equal(two.ok, false);
+});
+
+test('UK VHF draft IR channel plans: 200 kHz channels 1-7 and 50 kHz channels 10-35', () => {
+  assert.deepEqual([...CHANNEL_PLANS['uk-vhf-200k'].freqsMHz], [173.8, 174, 174.2, 174.4, 174.6, 174.8, 175]);
+  const p = CHANNEL_PLANS['uk-vhf-50k'].freqsMHz;
+  assert.equal(p.length, 26);
+  assert.deepEqual([p[0], p[25]], [173.8, 175.05]);
+  const r = coordinateFrequencies({ mics: 2, regionId: 'uk', channelPlan: 'uk-vhf-200k', seed: 2 });
+  assert.equal(r.ok, true, JSON.stringify(r.failure));
 });

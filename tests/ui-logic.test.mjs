@@ -315,3 +315,75 @@ test('IEM bodypack-side chain: add, move, remove through actions (target rx)', (
   store.undo(); store.undo(); store.undo();
   assert.deepEqual(store.getScene().links[0].rx.chain.map((x) => x.kind), ['booster']);
 });
+
+import { licenceInfo, verificationInfo, powerLine, limitText, txLimitHint, getCoordRegion, setCoordRegion, onCoordRegion } from '../js/ui/region.js';
+import { plansFor, rangeCards, isLimitWarning } from '../js/ui/coordination.js';
+import { powerLimitDetailFor } from '../js/model/bands.js';
+
+test('regulatory presentation: licence text, verification warnings, power lines', () => {
+  for (const c of ['exempt', 'shared', 'coordinated', 'high-power']) assert.ok(licenceInfo(c).label && licenceInfo(c).meaning.length > 20, c);
+  assert.match(licenceInfo('exempt').meaning, /No licence needed/);
+  assert.match(licenceInfo('high-power').meaning, /1 W/);
+  const d = powerLimitDetailFor('uk', 174);
+  assert.equal(powerLine(d), 'handheld 10 mW / body-worn 50 mW ERP');
+  const v = verificationInfo(d);
+  assert.equal(v.level, 'draft'); assert.equal(v.warn, true); assert.match(v.label, /Draft IR 2030/); assert.match(v.sourceText, /2025-12-11/);
+  const un = verificationInfo(powerLimitDetailFor('uk', 610));
+  assert.equal(un.level, 'unverified'); assert.match(un.label, /Unverified/);
+  const ok = verificationInfo(powerLimitDetailFor('uk', 864));
+  assert.equal(ok.level, 'verified'); assert.equal(ok.warn, false);
+  assert.equal(powerLine(powerLimitDetailFor('uk', 864)), '10 mW ERP');
+  assert.equal(verificationInfo(null).level, 'unverified');
+});
+
+test('result rows use the body-worn column for mics only, and mark draft or unverified figures', () => {
+  assert.equal(limitText('uk', 174.2, { bodyWorn: false }), '10 mW ERP (draft)');
+  assert.equal(limitText('uk', 174.2, { bodyWorn: true, kind: 'mic' }), '50 mW ERP (draft)');
+  assert.equal(limitText('uk', 174.2, { bodyWorn: true, kind: 'iem' }), '10 mW ERP (draft)');
+  assert.equal(limitText('uk', 864, { bodyWorn: true }), '10 mW ERP');
+  assert.equal(limitText('uk', 610, { bodyWorn: true }), '10 mW ERP (unverified)');
+  assert.equal(limitText('uk', 3000, {}), '-');
+  const { result } = runCoordination({ regionId: 'uk', bandGroup: 'vhf', mics: 2, iems: 1, channelPlan: 'uk-vhf-200k', seed: 1 });
+  const hand = describeResult(result, { regionId: 'uk', bodyWorn: false });
+  const body = describeResult(result, { regionId: 'uk', bodyWorn: true });
+  assert.ok(hand.every((r) => /^10 mW ERP/.test(r.limitText)));
+  assert.deepEqual(body.map((r) => r.limitText.slice(0, 5)), ['50 mW', '50 mW', '10 mW']); // two mics, one IEM
+});
+
+test('coordination panel: channel plans, optional ranges, outdoor, result notes', () => {
+  assert.deepEqual(plansFor('uk', 'uhf').map((p) => p[0]), ['uk-ch38-uncoordinated', 'uk-ch38-coordinated']);
+  assert.deepEqual(plansFor('uk', 'vhf').map((p) => p[0]), ['uk-vhf-200k', 'uk-vhf-50k']);
+  assert.deepEqual(plansFor('eu', 'uhf'), []);
+  const names = (g, r) => rangeCards('uk', g, r).map((c) => c.name);
+  assert.ok(!names('uhf', '').includes('606.5-613.5 MHz'), 'optional ranges are not in the default list');
+  assert.deepEqual(names('uhf', 'uk-ch38'), ['606.5-613.5 MHz']);
+  assert.deepEqual(names('uhf', 'uk-960-1154'), ['960-1154 MHz']);
+  const ch38 = rangeCards('uk', 'uhf', 'uk-ch38')[0];
+  assert.equal(ch38.licenceClass, 'shared'); assert.equal(ch38.verification.warn, true);
+  const run = runCoordination({ regionId: 'uk', bandGroup: 'uhf', mics: 3, iems: 0, channelPlan: 'uk-ch38-uncoordinated', seed: 1 });
+  assert.equal(run.result.ok, true);
+  const allowed = [606.6, 607.5, 608.15, 609.15, 609.95, 610.55, 611.25, 612.3, 613.15, 613.5];
+  assert.ok(run.result.frequencies.every((f) => allowed.includes(f.freqMHz)));
+  assert.ok(run.result.notes.some(isLimitWarning));
+  const hi = runCoordination({ regionId: 'uk', rangeId: 'uk-960-1154', bandGroup: 'uhf', mics: 2, iems: 0, outdoor: true, seed: 1 });
+  assert.ok(hi.result.frequencies.every((f) => f.freqMHz < 976.5 || f.freqMHz > 979.5));
+  assert.equal(isLimitWarning('Planning estimate only'), false);
+});
+
+test('Tx power limit hint: UK limit text, warning when above, region shared with the panel', () => {
+  const h = txLimitHint('uk', 174.2, 10, 0); // 10 dBm = 10 mW EIRP = 7.8 mW ERP
+  assert.match(h.text, /United Kingdom limit for this band: 10 mW handheld \/ 50 mW body-worn ERP, draft IR 2030\./);
+  assert.equal(h.over, false);
+  const mid = txLimitHint('uk', 174.2, 15, 0); // 31.6 mW EIRP -> 19.2 mW ERP: above handheld, under body-worn
+  assert.equal(mid.over, false); assert.match(mid.text, /only for a body-worn transmitter/);
+  const over = txLimitHint('uk', 174.2, 20, 2); // 22 dBm EIRP -> 19.85 dBm ERP = 96 mW
+  assert.equal(over.over, true); assert.match(over.text, /above that limit/);
+  assert.equal(txLimitHint('uk', 3000, 10, 0), null);
+  assert.equal(txLimitHint('uk', NaN, 10, 0), null);
+  assert.equal(txLimitHint('uk', 864, 20, 0).over, true); // 100 mW EIRP = 61 mW ERP vs 10 mW
+  assert.equal(getCoordRegion(), 'uk');
+  let seen = null; const off = onCoordRegion((id) => { seen = id; });
+  setCoordRegion('us'); assert.equal(seen, 'us'); assert.equal(getCoordRegion(), 'us');
+  setCoordRegion('nowhere'); assert.equal(getCoordRegion(), 'us');
+  setCoordRegion('uk'); off();
+});

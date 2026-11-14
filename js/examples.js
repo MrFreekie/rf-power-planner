@@ -543,13 +543,13 @@ export const EXAMPLES = [
   {
     id: 'band-2g4',
     title: 'Same stage at 2.4 GHz',
-    note: 'The same link at 2.4 GHz: free-space loss is 60.1 dB (effective 58.4 dB), 21.6 dB more than at 200 MHz, and the cable costs 5.4 dB, so the margin is 45.2 dB. The shorter wavelength also makes the multipath pattern finer as the mic moves, and real 2.4 GHz systems often add antenna gain to recover some of the loss.',
+    note: 'The same link at 2.4 GHz: free-space loss is 60.1 dB (effective 58.4 dB), 21.6 dB more than at 200 MHz, and the cable costs 5.4 dB, so the margin is 45.2 dB. The shorter wavelength also makes the multipath pattern finer as the mic moves, and the transmit power is 14 dBm in all three versions so only frequency differs; a UK audio PMSE 2.4 GHz system is limited to 10 mW EIRP (draft IR 2030), about 4 dB less.',
     build: () => ({ scene: make('mic', (s, l) => sameStage(s, l, 2400)), walk: SAME_STAGE_WALK }),
   },
   {
     id: 'wifi-busy-2g4',
     title: '2.4 GHz link in a busy Wi-Fi venue',
-    note: 'A 2.4 GHz link 104 m across a venue with busy Wi-Fi, 10 dB fade margin and a 10 dBm transmitter. Busy Wi-Fi raises the noise floor by about 20 dB at 2.4 GHz (to -87.6 dBm), which turns an 11.2 dB margin into -8.8 dB: a fail. At 5.8 GHz the same venue would add only about 12 dB. Set the interference option to None and the same link passes; the signal level has not changed, only the noise floor.',
+    note: 'A 2.4 GHz link 104 m across a venue with busy Wi-Fi, 10 dB fade margin and a 10 dBm (10 mW) transmitter, the UK audio PMSE limit (draft IR 2030). Busy Wi-Fi raises the noise floor by about 20 dB at 2.4 GHz (to -87.6 dBm), which turns an 11.2 dB margin into -8.8 dB: a fail. At 5.8 GHz the same venue would add only about 12 dB. Set the interference option to None and the same link passes; the signal level has not changed, only the noise floor.',
     build: () => ({
       scene: make('mic', (s, l) => {
         sameStage(s, l, 2400);

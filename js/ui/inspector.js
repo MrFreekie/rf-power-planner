@@ -19,6 +19,7 @@ const IMD_PRESETS = [['mic-rack-typical', 'Mic rack, typical'], ['iem-combiner-n
   ['iem-combiner-isolated', 'IEM combiner, isolated'], ['pim-corroded-connector', 'PIM: corroded connector']];
 import { createChainItem } from '../model/scene.js';
 import { dispAxis, internalAxis, dispRange, COORD_HINT } from './coords.js';
+import { txLimitHint, getCoordRegion } from './region.js';
 import { noiseOptions, noiseValue, noiseFromChoice, noiseHint, interferenceApplies, interferenceOptions, interferenceValue, interferenceHint, rxPresetOffer } from './noise.js';
 import {
   setPath, setLinkField, setLinkKind, setUnits, addChainItem, removeChainItem, moveChainItem,
@@ -306,6 +307,7 @@ export function mountInspector({ container, store }) {
         get: (cc) => dbmToUnit(cc.link.tx.powerDbm, cc.pu),
         set: (cc, v, o) => { const d = powerUiToDbm(v, cc.pu); if (Number.isFinite(d)) linkSet('tx.powerDbm')(cc, d, o); },
       }),
+      txLimitRow(),
       antennaFields('tx', 'tx'),
       posFields('tx'),
     );
@@ -627,6 +629,19 @@ export function mountInspector({ container, store }) {
     });
     form.append(rise, button('Remove platform', 'plat-remove', () => { removePlatform(store, id); store.select(null); }, { cls: 'danger' }));
     body.append(form);
+  }
+
+  /** Small hint under the Tx power field: the regional power limit for this band (UK by default) and a warning, never a block. */
+  function txLimitRow() {
+    const p = el('p', 'hint insp-txlimit');
+    updaters.push((cc) => {
+      const h = txLimitHint(getCoordRegion(), cc.link.freqMHz, cc.link.tx.powerDbm, cc.link.tx.antenna && cc.link.tx.antenna.gainDbi);
+      p.hidden = !h;
+      if (!h) return;
+      p.textContent = (h.over ? 'Warning: ' : '') + h.text;
+      p.dataset.over = String(h.over);
+    });
+    return p;
   }
 
   /** Inline offer (never automatic) to switch the receiver preset when the carrier moves into VHF, 2.4 GHz or 5.8 GHz or back. */

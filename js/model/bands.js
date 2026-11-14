@@ -8,7 +8,62 @@
 
 export const BANDS_DISCLAIMER =
   'Planning estimates only. Band edges, power limits and licensing differ by country and change over time. '
-  + 'Check your national regulator and licence before using any frequency.';
+  + 'Check your national regulator and licence before using any frequency. '
+  + 'UK figures follow Ofcom PMSE pages (licence-exempt page 16 Mar 2023, licensing updates 29 May 2026, statement 27 Oct 2025, SI 2026/396 of 29 Apr 2026) '
+  + 'and the DRAFT UK IR 2030 (published 11 Dec 2025, Table 3.14; the final as-made IR was not read). Items marked verified:\'draft\' come from that draft only; '
+  + 'items marked verified:false (UHF power defaults, 694-703 MHz, 960-1154 MHz, shared-licence VHF and others) are inferred or from search snippets and still need checking.';
+
+/**
+ * Sources cited by the data. `urlPath` is the Ofcom page path (null = not recorded yet: fill in with a one-line edit once the research
+ * agent has the exact path). asOf = the page date. Every range's power model names one of these ids, so the UI can cite it.
+ */
+export const BAND_SOURCES = Object.freeze({
+  'ofcom-licence-exempt': Object.freeze({ id: 'ofcom-licence-exempt', title: 'Ofcom: licence-exempt use of wireless microphones', publisher: 'Ofcom', urlPath: null, asOf: '2023-03-16' }),
+  'ofcom-licensing-updates': Object.freeze({ id: 'ofcom-licensing-updates', title: 'Ofcom: PMSE licensing updates', publisher: 'Ofcom', urlPath: null, asOf: '2026-05-29' }),
+  'ofcom-statement': Object.freeze({ id: 'ofcom-statement', title: 'Ofcom: PMSE statement', publisher: 'Ofcom', urlPath: null, asOf: '2025-10-27' }),
+  'ir2030-draft': Object.freeze({ id: 'ir2030-draft', title: 'Ofcom draft UK Interface Requirement 2030 (Table 3.14); the final as-made IR has not been read', publisher: 'Ofcom', urlPath: null, asOf: '2025-12-11' }),
+  'si-2026-396': Object.freeze({ id: 'si-2026-396', title: 'SI 2026/396 (audio PMSE licence exemption, in force 29 Apr 2026)', publisher: 'UK Government', urlPath: null, asOf: '2026-04-29' }),
+  'planner-estimate': Object.freeze({ id: 'planner-estimate', title: 'Planner estimate (no regulator source recorded)', publisher: null, urlPath: null, asOf: null }),
+});
+
+/** Licence classes: 'exempt' (no licence), 'shared' (UK shared mic licence, uncoordinated), 'coordinated', 'high-power' (coordinated, up to 1 W). */
+export const LICENCE_CLASSES = Object.freeze(['exempt', 'shared', 'coordinated', 'high-power']);
+
+/**
+ * Power model of a range: { handheldMw, bodyWornMw, unit: 'ERP'|'EIRP', verified: true | 'draft' | false, confidence: 'verified'|'draft'|'semi'|'unverified', source: BAND_SOURCES id, note, irRef?, highPowerMw? }.
+ * 'draft' = read from the draft UK IR 2030 (11 Dec 2025) only.
+ * To change a figure (for example after the IR2030 research lands) edit the one line that builds the range below.
+ */
+const pw = (handheldMw, bodyWornMw, unit, confidence, source, note, extra = {}) =>
+  Object.freeze({ handheldMw, bodyWornMw, unit, verified: confidence === 'verified' ? true : confidence === 'draft' ? 'draft' : false, confidence, source, note, ...extra });
+
+/** UK range builder: planner default power (maxPowerMw / powerBasis) = the handheld figure unless `maxPowerMw` is given. */
+const ukRange = (id, fromMHz, toMHz, licenceClass, power, note, extra = {}) => Object.freeze({
+  id, fromMHz, toMHz, use: ['mic', 'iem'], licenceClass,
+  licence: licenceClass === 'exempt' ? 'exempt' : 'licensed',
+  maxPowerMw: power.handheldMw, powerBasis: power.unit, power, note, ...extra,
+});
+
+/**
+ * Channel 38 (606.5-613.5 MHz), UK shared mic licence: non-protected and uncoordinated. `uncoordinated` is the suggested 10-channel plan,
+ * `coordinated` the only two spot frequencies available when ch38 is coordinated. Use as a coordination preset:
+ * coordinateFrequencies({ regionId: 'uk', channelPlan: 'uk-ch38-uncoordinated' | 'uk-ch38-coordinated' | CHANNEL_38_PLAN.uncoordinated.freqsMHz }).
+ */
+export const CHANNEL_38_PLAN = Object.freeze({
+  rangeId: 'uk-ch38', fromMHz: 606.5, toMHz: 613.5, licenceClass: 'shared', source: 'ofcom-licensing-updates', asOf: '2026-05-29',
+  uncoordinated: Object.freeze({ id: 'uk-ch38-uncoordinated', label: 'Channel 38 suggested 10-channel plan (shared licence)', freqsMHz: Object.freeze([606.6, 607.5, 608.15, 609.15, 609.95, 610.55, 611.25, 612.3, 613.15, 613.5]), verified: false, confidence: 'semi' }),
+  coordinated: Object.freeze({ id: 'uk-ch38-coordinated', label: 'Channel 38 coordinated spot frequencies', freqsMHz: Object.freeze([606.7, 607.0]), verified: false, confidence: 'semi' }),
+});
+
+/** Named channel plans for coordinateFrequencies({ channelPlan }): id -> { id, label, freqsMHz, verified }. */
+const r3 = (x) => Math.round(x * 1000) / 1000;
+export const CHANNEL_PLANS = Object.freeze({
+  [CHANNEL_38_PLAN.uncoordinated.id]: CHANNEL_38_PLAN.uncoordinated,
+  [CHANNEL_38_PLAN.coordinated.id]: CHANNEL_38_PLAN.coordinated,
+  // Draft IR 2030 VHF channels: IR2030/24/2 centre = 173.6 + 0.2 n MHz (n 1-7), IR2030/24/1 centre = 173.3 + 0.05 n MHz (n 10-35).
+  'uk-vhf-200k': Object.freeze({ id: 'uk-vhf-200k', label: 'UK VHF licence-exempt, 200 kHz channels 1-7 (173.8-175.0 MHz)', freqsMHz: Object.freeze(Array.from({ length: 7 }, (_, i) => r3(173.6 + 0.2 * (i + 1)))), verified: 'draft', confidence: 'draft' }),
+  'uk-vhf-50k': Object.freeze({ id: 'uk-vhf-50k', label: 'UK VHF licence-exempt, 50 kHz channels 10-35 (173.8-175.05 MHz)', freqsMHz: Object.freeze(Array.from({ length: 26 }, (_, i) => r3(173.3 + 0.05 * (i + 10)))), verified: 'draft', confidence: 'draft' }),
+});
 
 /**
  * range = { id, fromMHz, toMHz, use: ['mic'|'iem'...], maxPowerMw, powerBasis: 'ERP'|'EIRP', licence: 'licensed'|'exempt'|'varies', note }
@@ -24,15 +79,42 @@ export const REGIONS = Object.freeze({
     rasterKHz: 25,
     minSpacingKHz: 300,
     ranges: Object.freeze([
-      Object.freeze({ id: 'uk-uhf-470-694', fromMHz: 470, toMHz: 694, use: ['mic', 'iem'], maxPowerMw: 50, powerBasis: 'ERP', licence: 'licensed', note: 'UHF TV band (PMSE, interleaved spectrum); channels in use for TV at a venue must be avoided.' }),
-      Object.freeze({ id: 'uk-823-832', fromMHz: 823, toMHz: 832, use: ['mic', 'iem'], maxPowerMw: 20, powerBasis: 'EIRP', licence: 'licensed', note: 'Duplex gap, often shared with IEM; local conditions vary.' }),
-      Object.freeze({ id: 'uk-863-865', fromMHz: 863, toMHz: 865, use: ['mic', 'iem'], maxPowerMw: 10, powerBasis: 'ERP', licence: 'exempt', note: 'Licence-exempt band, very little room.' }),
-      Object.freeze({ id: 'uk-vhf-174-216', group: 'vhf', fromMHz: 174, toMHz: 216, use: ['mic', 'iem'], maxPowerMw: 10, powerBasis: 'ERP', licence: 'varies', note: 'VHF is TV Band III (174-216 MHz); DAB and digital TV occupy most of it in many countries, so use bandIIIChannelsToBlocked / dabBlocksToBlocked to exclude what is on air at the venue. UK PMSE VHF use is mostly limited to channel 70 (173.8-175.0 MHz).' }),
-      Object.freeze({ id: 'uk-2g4', group: '2g4', fromMHz: 2400, toMHz: 2483.5, use: ['mic', 'iem'], maxPowerMw: 100, powerBasis: 'EIRP', licence: 'exempt', hopping: true, note: '2.4 GHz ISM, shared with Wi-Fi and Bluetooth; systems hop on their own (EN 300 328 class).' }),
-      Object.freeze({ id: 'uk-5g8', group: '5g8', fromMHz: 5725, toMHz: 5875, use: ['mic', 'iem'], maxPowerMw: 25, powerBasis: 'EIRP', licence: 'exempt', hopping: true, note: '5.8 GHz ISM / short-range device band, shared with Wi-Fi 5 GHz channels 149-165.' }),
+      // Order matters: rangeAt() returns the first range containing a frequency, so ch38 precedes the whole UHF TV band.
+      ukRange('uk-ch38', 606.5, 613.5, 'shared', pw(10, 10, 'ERP', 'unverified', 'ofcom-licensing-updates', 'Shared UK mic licence, non-protected, uncoordinated; 10 mW is the low-power mic figure, not stated for ch38 itself.'),
+        'TV channel 38 (606.5-613.5 MHz): shared licence, no protection from other users. Suggested plan and the coordinated spot frequencies are in CHANNEL_38_PLAN.', { optional: true, plans: ['uk-ch38-uncoordinated', 'uk-ch38-coordinated'] }),
+      ukRange('uk-uhf-470-694', 470, 694, 'coordinated', pw(50, 50, 'ERP', 'unverified', 'ofcom-statement', 'Low-power mic 10 mW; high-power coordinated up to 1 W. The 50 mW planner default is neither: it is kept from the earlier table.', { highPowerMw: 1000, lowPowerMw: 10 }),
+        'UHF TV band (interleaved spectrum). TV channels are 8 MHz and the top or bottom 500 kHz of a channel is not always usable. Coordinated use up to 1 W (high power); shared-licence low power 10 mW; channels in use for TV at a venue must be avoided.', { highPower: true }),
+      ukRange('uk-821-826', 821.5, 826, 'exempt', pw(20, 100, 'EIRP', 'draft', 'ir2030-draft', '100 mW EIRP body-worn, 20 mW EIRP other (draft IR 2030, IR2030/35/1).', { irRef: 'IR2030/35/1' }),
+        'Licence-exempt UK-wide from 29 Apr 2026 (SI 2026/396, which carries no limits). Limits from the draft IR 2030.'),
+      ukRange('uk-826-832', 826, 832, 'exempt', pw(100, 100, 'EIRP', 'draft', 'ir2030-draft', 'Draft IR shows 100 mW EIRP with no body-worn split (IR2030/35/2); earlier statement text suggested 20 mW for other use. Inconsistent: draft IR shows 100 mW, check final IR 2030.', { irRef: 'IR2030/35/2' }),
+        'Licence-exempt UK-wide from 29 Apr 2026 (SI 2026/396, which carries no limits). Draft IR shows 100 mW; check final IR 2030.'),
+      ukRange('uk-863-865', 863, 865, 'exempt', pw(10, 10, 'ERP', 'verified', 'ofcom-licence-exempt', '10 mW ERP. The draft IR 2030 agrees: radio mics IR2030/24/3, wireless audio 26/3; 864.8-865.0 MHz is a separate row, also 10 mW ERP, not airborne.', { irRef: 'IR2030/24/3, 26/3' }),
+        'Licence-exempt, usable 863.1-864.9 MHz, about 4 simultaneous channels.', { segments: Object.freeze([Object.freeze({ fromMHz: 863.1, toMHz: 864.9 })]) }),
+      ukRange('uk-1785-1805', 1785, 1805, 'exempt', pw(20, 50, 'EIRP', 'draft', 'ir2030-draft', '50 mW EIRP body-worn OR devices using the Spectrum Scanning Procedure (SSP), 20 mW EIRP other (draft IR 2030, IR2030/35/3). Channel bandwidth 10 MHz (inferred).', { sspMw: 50, irRef: 'IR2030/35/3', channelBwMHz: 10 }),
+        'Licence-exempt UK-wide from 29 Apr 2026 (SI 2026/396), 1785-1805 MHz. The draft IR says 1785-1804.8 MHz, the Ofcom statement 1785-1805: 1785-1805 is used here.'),
+      ukRange('uk-960-1154', 960, 1154, 'coordinated', pw(50, 50, 'ERP', 'unverified', 'ofcom-licensing-updates', 'Coordinated only, under 50 mW; ERP/EIRP basis not stated. 976.5-979.5 MHz: indoors 50 mW, not available outdoors since 11 Mar 2025.'),
+        'Coordinated use only. New slots 1015-1016, 1044-1045, 1075-1076 and 1104-1105 MHz; the segments list is these slots.',
+        { optional: true, segments: Object.freeze([[1015, 1016], [1044, 1045], [1075, 1076], [1104, 1105]].map(([fromMHz, toMHz]) => Object.freeze({ fromMHz, toMHz }))) }),
+      ukRange('uk-vhf-173-175', 173.7, 175.1, 'exempt', pw(10, 50, 'ERP', 'draft', 'ir2030-draft', '10 mW ERP, 50 mW ERP body-worn (draft IR 2030, IR2030/24/2: 173.7-175.1 MHz, 200 kHz spacing, channels 1-7). IR2030/24/1 (173.775-175.075 MHz, 50 kHz spacing, channels 10-35) gives 10 mW ERP only.', { irRef: 'IR2030/24/1, 24/2' }),
+        'VHF licence-exempt: 200 kHz channels at 173.6 + 0.2 n MHz (173.8 ... 175.0, about 3 simultaneous) or 50 kHz channels at 173.3 + 0.05 n MHz (n 10-35); see CHANNEL_PLANS uk-vhf-200k and uk-vhf-50k.', { group: 'vhf' }),
+      ukRange('uk-vhf-175-176', 175.25, 176.6, 'shared', pw(10, 50, 'ERP', 'unverified', 'ofcom-licence-exempt', 'Shared UK mic licence VHF: 10 mW handheld / 50 mW body-worn, 200 kHz maximum bandwidth; ERP/EIRP not stated.'),
+        'Shared-licence VHF, 3 spots.', { group: 'vhf' }),
+      ukRange('uk-vhf-191-210', 191.9, 209.8, 'shared', pw(10, 50, 'ERP', 'unverified', 'ofcom-licence-exempt', 'Shared UK mic licence VHF: 10 mW handheld / 50 mW body-worn, 200 kHz maximum bandwidth; ERP/EIRP not stated.'),
+        'Shared-licence VHF inside TV Band III / DAB: use bandIIIChannelsToBlocked / dabBlocksToBlocked to exclude what is on air at the venue.', { group: 'vhf' }),
+      ukRange('uk-2g4', 2400, 2483.5, 'exempt', pw(10, 10, 'EIRP', 'draft', 'ir2030-draft', 'Audio PMSE 10 mW EIRP (IR2030/26/5, EN 300 422, not airborne). 100 mW EIRP applies only to the wideband-data rows (IR2030/7/1), not audio microphones; many commercial 2.4 GHz mic systems may use that wideband-data route, which this planner does not assume.', { genericSrdMw: 100, irRef: 'IR2030/26/5' }),
+        '2.4 GHz ISM, shared with Wi-Fi and Bluetooth; systems hop on their own. Audio PMSE limit 10 mW EIRP; 100 mW is the wideband-data limit.', { group: '2g4', hopping: true }),
+      ukRange('uk-5g8', 5725, 5875, 'exempt', pw(25, 25, 'EIRP', 'draft', 'ir2030-draft', 'Generic short-range-device 25 mW EIRP (IR2030/1/23); digitised speech/music is allowed on short-range indoor data links (IR2030/9/2). Generic SRD, not audio-PMSE specific: there is no audio-PMSE row for 5.8 GHz.', { irRef: 'IR2030/1/23, 9/2' }),
+        '5.8 GHz ISM / short-range device band, shared with Wi-Fi 5 GHz channels 149-165. Generic SRD limit, not audio-PMSE specific.', { group: '5g8', hopping: true }),
     ]),
-    blocked: Object.freeze([]),
-    notes: Object.freeze(['The 700 MHz band (694-791 MHz) is not available for wireless microphones in the UK.']),
+    blocked: Object.freeze([
+      Object.freeze({ fromMHz: 694, toMHz: 703, label: '694-703 MHz guard band (availability UNVERIFIED)', verified: false }),
+      Object.freeze({ fromMHz: 703, toMHz: 790, label: '703-790 MHz: not available for PMSE since 1 May 2020', verified: true }),
+      Object.freeze({ fromMHz: 976.5, toMHz: 979.5, label: '976.5-979.5 MHz: not available outdoors since 11 Mar 2025 (indoors 50 mW); applies when the request says outdoor', onlyOutdoor: true, verified: false }),
+    ]),
+    notes: Object.freeze([
+      'Audio PMSE became licence-exempt UK-wide on 29 Apr 2026 (SI 2026/396) for 821.5-826, 826-832 and 1785-1805 MHz.',
+      '703-790 MHz is not available for PMSE (since 1 May 2020); 694-703 MHz is a guard band (availability unverified).',
+    ]),
   }),
   eu: Object.freeze({
     id: 'eu',
@@ -150,13 +232,18 @@ const profileKey = (freqMHz) => (freqMHz >= 174 && freqMHz <= 240 ? 'vhf-174-216
 export const bandProfileAt = (freqMHz) => { const k = profileKey(freqMHz); return k ? { key: k, ...BAND_PROFILES[k] } : null; };
 
 /** Typical transmitter output (dBm) for a link kind at a carrier in the VHF / 2.4 / 5.8 GHz bands, else null. mic 15 / IEM 17 (VHF), 10 / 13 (2.4 GHz), 10 / 10 (5.8 GHz). */
-export function typicalTxDbm(kind, freqMHz) {
+export function typicalTxDbm(kind, freqMHz, regionId) {
   const p = bandProfileAt(freqMHz);
-  return p ? p.typicalTxDbm[kind === 'iem' ? 'iem' : 'mic'] : null;
+  if (!p) return null;
+  const t = p.typicalTxDbm[kind === 'iem' ? 'iem' : 'mic'];
+  const l = regionId ? bandLimitDbm(regionId, freqMHz) : null;
+  return l ? Math.min(t, l.maxDbm) : t; // with a region: never above that region's limit (UK 2.4 GHz audio PMSE: 10 dBm)
 }
 
 /** Regional power limit in dBm (transmitter-output basis of the profile) for the VHF / 2.4 / 5.8 GHz bands: { maxDbm, basis } or null. Planning estimate. */
 export function bandLimitDbm(regionId, freqMHz) {
+  const x = rangeAt(regionId, freqMHz);
+  if (x && x.power) return { maxDbm: mwToDbm(Math.max(x.power.handheldMw, x.power.bodyWornMw)), basis: `${x.power.unit}, ${x.power.confidence}: ${x.power.note}` }; // the region's own power model (UK)
   const p = bandProfileAt(freqMHz);
   const l = p && p.limits.find((x) => x.region === regionId);
   return l ? { maxDbm: l.maxDbm, basis: l.basis } : null;
@@ -177,13 +264,27 @@ export function rangeAt(regionId, freqMHz) {
 }
 
 /**
- * powerLimitFor(regionId, freqMHz) -> { maxPowerMw, maxPowerDbm, powerBasis, licence, rangeId, note } | null.
- * null when the region is unknown or the frequency lies outside every range of the region (nothing is assumed allowed there).
+ * powerLimitFor(regionId, freqMHz) -> { maxPowerMw, maxPowerDbm, powerBasis, licence, licenceClass, rangeId, note, verified } | null.
+ * The planner default (one number per range, the handheld figure). null when the region is unknown or the frequency lies outside every
+ * range of the region (nothing is assumed allowed there). Use powerLimitDetailFor for handheld / body-worn figures and the source.
  */
 export function powerLimitFor(regionId, freqMHz) {
   const x = rangeAt(regionId, freqMHz);
   if (!x) return null;
-  return { maxPowerMw: x.maxPowerMw, maxPowerDbm: mwToDbm(x.maxPowerMw), powerBasis: x.powerBasis, licence: x.licence, rangeId: x.id, note: x.note };
+  return { maxPowerMw: x.maxPowerMw, maxPowerDbm: mwToDbm(x.maxPowerMw), powerBasis: x.powerBasis, licence: x.licence, licenceClass: x.licenceClass || null, rangeId: x.id, note: x.note, verified: x.power ? x.power.verified : false };
+}
+
+/**
+ * powerLimitDetailFor(regionId, freqMHz) -> { handheldMw, bodyWornMw, unit: 'ERP'|'EIRP', verified, confidence, source, sourceTitle, urlPath, asOf, note,
+ *   rangeId, licenceClass, highPowerMw? , ...extras } | null. Ranges without a power model (EU / US tables) report maxPowerMw for both, verified false, source
+ * 'planner-estimate'.
+ */
+export function powerLimitDetailFor(regionId, freqMHz) {
+  const x = rangeAt(regionId, freqMHz);
+  if (!x) return null;
+  const p = x.power || { handheldMw: x.maxPowerMw, bodyWornMw: x.maxPowerMw, unit: x.powerBasis, verified: false, confidence: 'unverified', source: 'planner-estimate', note: x.note };
+  const src = BAND_SOURCES[p.source] || BAND_SOURCES['planner-estimate'];
+  return { ...p, sourceTitle: src.title, urlPath: src.urlPath, asOf: src.asOf, rangeId: x.id, licenceClass: x.licenceClass || null };
 }
 
 /** TV channel number to its frequency block { channel, fromMHz, toMHz } for a region ('uk', 'eu' 8 MHz, 'us' 6 MHz). null when unknown. */
@@ -209,13 +310,15 @@ export function tvChannelsToBlocked(regionId, channels) {
 
 /**
  * regionBand(regionId, rangeIds?, use?, group?) -> segments [{ startMHz, endMHz, rasterKHz, rangeId }] for coordinateFrequencies({ band }).
- * rangeIds omitted = every range of the region in `group` (default 'uhf', the original behaviour), filtered by `use` when given.
- * With rangeIds the group is not applied (the ids decide).
+ * rangeIds omitted = every non-`optional` range of the region in `group` (default 'uhf', the original behaviour), filtered by `use` when given.
+ * With rangeIds the group is not applied (the ids decide) and optional ranges can be named. A range with `segments` (usable sub-bands, for
+ * example 863.1-864.9 MHz or the 960-1154 MHz slots) yields one segment per entry instead of the whole range.
  */
 export function regionBand(regionId, rangeIds, use, group = 'uhf') {
   const r = REGIONS[regionId];
   if (!r) return [];
   return r.ranges
-    .filter((x) => (rangeIds ? rangeIds.includes(x.id) : rangeGroup(x) === group) && (!use || x.use.includes(use)))
-    .map((x) => ({ startMHz: x.fromMHz, endMHz: x.toMHz, rasterKHz: r.rasterKHz, rangeId: x.id }));
+    .filter((x) => (rangeIds ? rangeIds.includes(x.id) : rangeGroup(x) === group && !x.optional) && (!use || x.use.includes(use)))
+    .flatMap((x) => (x.segments || [{ fromMHz: x.fromMHz, toMHz: x.toMHz }])
+      .map((sg) => ({ startMHz: sg.fromMHz, endMHz: sg.toMHz, rasterKHz: r.rasterKHz, rangeId: x.id })));
 }

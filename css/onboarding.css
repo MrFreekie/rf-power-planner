@@ -80,3 +80,16 @@ abbr.gl:focus-visible { outline: 2px solid var(--focus, var(--ink, #1d2733)); ou
 .ob-wifi-ch[data-in-use="true"] { border: 2px solid var(--marginal, #d99a00); background: var(--marginal-bg, rgba(217, 154, 0, 0.14)); color: var(--ink, #1d2733); font-weight: 600; }
 .insp-offer { margin: 4px 0; }
 .insp-offer[hidden] { display: none; }
+
+/* ---- regulatory cards, warnings, Tx limit hint ---- */
+.ob-cards { list-style: none; margin: 6px 0; padding: 0; }
+.ob-card { padding: 5px 0; border-bottom: 1px solid var(--grid-major, #d2cbb7); }
+.ob-card-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; }
+.ob-badge { display: inline-block; padding: 0 6px; border: 1px solid var(--ink-soft, #5b6673); border-radius: 999px; font-size: 11px; letter-spacing: 0.03em; color: var(--ink, #1d2733); }
+.ob-badge[data-level="draft"], .ob-badge[data-level="unverified"] { border-width: 2px; border-color: var(--marginal, #d99a00); background: var(--marginal-bg, rgba(217, 154, 0, 0.14)); font-weight: 600; }
+.ob-warn { margin: 4px 0; padding: 4px 8px; border: 1px solid var(--marginal, #d99a00); border-left-width: 4px; background: var(--marginal-bg, rgba(217, 154, 0, 0.14)); color: var(--ink, #1d2733); font-size: 12px; }
+.ob-warn p { margin: 2px 0; }
+.ob-coord-notes { margin-top: 6px; }
+.insp-txlimit { margin: 2px 0 6px; }
+.insp-txlimit[hidden] { display: none; }
+.insp-txlimit[data-over="true"] { color: var(--warn-text, #8a6200); font-weight: 600; border-left: 3px solid var(--marginal, #d99a00); padding-left: 6px; }

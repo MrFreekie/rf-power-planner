@@ -70,7 +70,7 @@ test('bands: VHF, 2.4 and 5.8 GHz ranges exist for every region; default regionB
     assert.ok(regionBand(r).every((b) => b.startMHz >= 470), 'default is UHF');
   }
   assert.equal(powerLimitFor('eu', 2440).powerBasis, 'EIRP');
-  assert.ok(powerLimitFor('uk', 190));
+  assert.ok(powerLimitFor('uk', 174.4) && powerLimitFor('uk', 195), 'UK VHF: 173.7-175.1 exempt, 191.9-209.8 shared (190 MHz is in neither)');
   assert.equal(groupOfFreq(200), 'vhf'); assert.equal(groupOfFreq(600), 'uhf'); assert.equal(groupOfFreq(2440), '2g4'); assert.equal(groupOfFreq(5800), '5g8');
   assert.deepEqual(bandIIIChannelRange('eu', 5), { channel: 5, fromMHz: 174, toMHz: 181 });
   assert.deepEqual(bandIIIChannelRange('us', 8), { channel: 8, fromMHz: 180, toMHz: 186 });

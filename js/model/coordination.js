@@ -18,7 +18,7 @@
 
 import { productFrequencies } from './imd.js';
 import { coordinationRules } from './imd-params.js';
-import { REGIONS, BAND_GROUPS, WIFI_CHANNELS, regionBand, powerLimitFor, groupOfFreq, rangeGroup, BANDS_DISCLAIMER } from './bands.js';
+import { REGIONS, BAND_GROUPS, WIFI_CHANNELS, CHANNEL_PLANS, regionBand, powerLimitFor, groupOfFreq, rangeGroup, BANDS_DISCLAIMER } from './bands.js';
 
 export const COORDINATION_DEFAULTS = Object.freeze({
   channelBwKHz: 200,
@@ -308,7 +308,10 @@ function hoppingResult(base, tx, req, region, group) {
  *   transmitters          [{ id?, name?, kind: 'mic'|'iem', freqMHz?, locked? }]  locked + freqMHz keeps that frequency
  *   regionId              'uk' | 'eu' | 'us' (bands.js): supplies the band, raster, spacing, default blocked ranges
  *   band, iemBand         { startMHz, endMHz, rasterKHz? } or an array of them; iemBand defaults to band. Without band, regionId's ranges.
- *   rangeIds              limit a region to some of its range ids
+ *   rangeIds              limit a region to some of its range ids (also the way to pick `optional` ranges: uk-ch38, uk-960-1154)
+ *   channelPlan           fixed candidate frequencies instead of a raster: an array of MHz or a bands.js CHANNEL_PLANS id ('uk-ch38-uncoordinated',
+ *                         'uk-ch38-coordinated'); the intermod search then picks the largest intermod-free subset-sized set from them
+ *   outdoor               true applies the region's `onlyOutdoor` blocked ranges (UK 976.5-979.5 MHz)
  *   bandGroup             'uhf' (default) | 'vhf' | '2g4' | '5g8' (bands.js BAND_GROUPS). 2g4 / 5g8 are hopping bands: the result is an occupancy
  *                         report (mode 'occupancy', `occupancy`, req.wifiChannels = Wi-Fi channels in use), nothing is assigned. Unset: taken from the
  *                         transmitters' freqMHz when every one is >= 2000 MHz (or all < 300 MHz for vhf), else 'uhf' (the original behaviour)
@@ -333,7 +336,8 @@ export function coordinateFrequencies(req = {}) {
   const seed = req.seed ?? D.seed;
   const perLevel = Math.max(1, Math.floor(req.attemptsPerLevel || D.attemptsPerLevel));
   const budget = Number.isFinite(req.budget) ? req.budget : D.budget;
-  const blocked = [...(region && !req.ignoreRegionBlocked ? region.blocked : []), ...asArray(req.blocked)];
+  const blocked = [...(region && !req.ignoreRegionBlocked ? region.blocked.filter((b) => !b.onlyOutdoor || req.outdoor) : []), ...asArray(req.blocked)];
+  const fixedPlan = Array.isArray(req.channelPlan) ? req.channelPlan : (CHANNEL_PLANS[req.channelPlan] ? CHANNEL_PLANS[req.channelPlan].freqsMHz : null);
   const notes = [];
 
   const tx = normaliseTransmitters(req);
@@ -371,6 +375,13 @@ export function coordinateFrequencies(req = {}) {
   const needByKind = (k) => tx.filter((t) => t.kind === k && !t.locked).length;
   const grids = {};
   for (const k of kinds) {
+    if (fixedPlan) { // fixed channel plan: candidates are exactly these frequencies (minus blocked ranges)
+      const half = channelBwKHz / 2;
+      const list = [...new Set(fixedPlan.map(toK))].sort((a, b) => a - b).filter((c) => !blocked.some((b) => c > toK(b.fromMHz) - half && c < toK(b.toMHz) + half));
+      grids[k] = { segs: [], list, total: fixedPlan.length, blocked: fixedPlan.length - list.length };
+      if (!list.length) return fail('no-channels', 'No channel of the plan is usable after the blocked ranges.', { kind: k, rasterPoints: fixedPlan.length, blockedPoints: fixedPlan.length });
+      continue;
+    }
     const segs = bandOf(k);
     if (!segs.length) return fail('no-channels', `No band given for ${k === 'iem' ? 'IEMs' : 'microphones'}. Pass a band or a regionId.`, { kind: k });
     grids[k] = { segs, ...candidateGrid(segs, { rasterKHz, edgeGuardKHz, blocked, channelBwKHz }) };
@@ -472,6 +483,8 @@ export function coordinateFrequencies(req = {}) {
     const chk = checkIntermod(used, { guardKHz, minSpacingKHz: spacing, kinds: frequencies.map((f) => f.kind), orders: [3, 5] });
     if (winner.res && levelDone !== null && levelDone > 1) notes.push(`Found with ${levelDone}x the guard bandwidth, so there is extra clearance.`);
     if (chk.fifthOrderHits) notes.push(`${chk.fifthOrderHits} fifth-order product(s) fall inside the guard band; they are weaker than third order but check them if levels are high.`);
+    if (fixedPlan) notes.push('Candidates are the fixed channel plan; a plan can hold fewer intermod-free channels than it lists, and shared-licence channels are not protected from other users.');
+    if (frequencies.some((f) => f.powerLimit && f.powerLimit.verified !== true)) notes.push('Some power limits in this band are unverified or from a draft document (draft UK IR 2030, 11 Dec 2025): check the final rules before relying on them.');
     notes.push('Planning estimate only: check local licensing, power limits and the TV channels in use at the venue.');
     return {
       ...base, ok: true, frequencies, assignments: Object.fromEntries(frequencies.map((f) => [f.id, f.freqMHz])),
