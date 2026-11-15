@@ -1,11 +1,12 @@
 // assumptionsInUse / marginIsProven / confidenceSummary (js/model/assumptions-in-use.js): assumptions are listed only when they influenced the scene.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assumptionsInUse, assumptionsForLink, marginIsProven, confidenceSummary, PROVEN_BODY_WORN_MARGIN_DB } from '../js/model/assumptions-in-use.js';
+import { assumptionsInUse, assumptionsForLink, marginIsProven, confidenceSummary, combineSensitivity, PROVEN_BODY_WORN_MARGIN_DB } from '../js/model/assumptions-in-use.js';
 import { solveLink } from '../js/model/rf.js';
 import { boosterOverloadScene, weakTvScene, modeContrastScene } from '../js/examples.js';
 import { createDefaultScene, createDefaultLink } from '../js/model/scene.js';
 
+const near = (a, b, t) => assert.ok(Math.abs(a - b) <= t, `${a} vs ${b}`);
 const ids = (items) => items.map((x) => x.id);
 const omni = { type: 'omni', gainDbi: 0, orientation: { az: 0, el: 90 }, polarisation: 'vertical' };
 function cleanScene(body = 0, dist = 10) {
@@ -41,9 +42,9 @@ test('marginIsProven: body-worn under 10 dB is not proven; the same link with a 
   const m = marginIsProven(far.links[0], rf, undefined, far);
   assert.equal(m.proven, false); assert.equal(m.bodyWorn, true); assert.ok(m.reasons.some((x) => /body-worn/.test(x)));
   // not body-worn, but assumptions add up to more than the margin
-  const fake = [{ id: 'a', sensitivityDb: 4 }, { id: 'b', sensitivityDb: 4 }];
+  const fake = [{ id: 'a', sensitivityDb: 5 }, { id: 'b', sensitivityDb: 5 }];
   const v = marginIsProven({ kind: 'mic' }, { marginDb: 6 }, fake);
-  assert.equal(v.proven, false); assert.equal(v.sumSensitivityDb, 8); assert.ok(v.reasons.some((x) => /together/.test(x)));
+  assert.equal(v.proven, false); assert.equal(v.rssDb, 7.1); assert.equal(v.worstCaseDb, 10); assert.equal(v.sumSensitivityDb, v.rssDb); assert.ok(v.reasons.some((x) => /together/.test(x)));
   assert.equal(marginIsProven({ kind: 'mic' }, { marginDb: 12 }, fake).proven, true);
   assert.equal(marginIsProven({ kind: 'mic' }, { marginDb: -2 }, []).proven, false);
 });
@@ -81,4 +82,35 @@ test('every listed item carries the documented fields and no private wording', (
     assert.ok(x.flag === 'U' || x.flag === 'I'); assert.ok(x.sensitivityDb === null || Number.isFinite(x.sensitivityDb)); assert.ok(Array.isArray(x.linkIds));
     assert.ok(!/docs[\/]|research|agent|claude/i.test(`${x.label} ${x.effect} ${x.fix} ${x.value}`), x.id);
   }
+});
+
+test('combineSensitivity: independent items add as root sum of squares, one mechanism adds linearly up to the effect it explains', () => {
+  near(combineSensitivity([{ id: 'a', sensitivityDb: 3 }, { id: 'b', sensitivityDb: 4 }]).rssDb, 5, 0.05); // sqrt(9 + 16)
+  assert.equal(combineSensitivity([{ id: 'a', sensitivityDb: 3 }, { id: 'b', sensitivityDb: 4 }]).worstCaseDb, 7);
+  // correlated: 6 + 10 = 16 would exceed the 12 dB of floor rise they explain, so the group is capped at 12
+  const g = combineSensitivity([{ id: 'n1', group: 'f', sensitivityDb: 6, effectDb: 12 }, { id: 'n2', group: 'f', sensitivityDb: 10, effectDb: 12 }]);
+  assert.equal(g.rssDb, 12); assert.equal(g.worstCaseDb, 12);
+  const mixed = combineSensitivity([{ id: 'n1', group: 'f', sensitivityDb: 6, effectDb: 12 }, { id: 'n2', group: 'f', sensitivityDb: 6, effectDb: 12 }, { id: 'c', sensitivityDb: 5 }]);
+  near(mixed.rssDb, 13, 0.05); assert.equal(mixed.worstCaseDb, 17); // sqrt(12^2 + 5^2) = 13
+  assert.deepEqual(combineSensitivity([]), { rssDb: 0, worstCaseDb: 0 });
+});
+test('booster-overloaded example: root-sum-square 16.4 dB (worst case 19.5 dB), not 63 dB; every item is within the effect it explains', () => {
+  const sc = boosterOverloadScene('overloaded'), items = assumptionsInUse(sc);
+  const m = confidenceSummary(sc)[0];
+  near(m.rssDb, 16.4, 0.05); near(m.worstCaseDb, 19.5, 0.05); assert.equal(m.proven, false);
+  for (const x of items) if (Number.isFinite(x.effectDb)) assert.ok(x.sensitivityDb <= x.effectDb + 1e-9, x.id);
+  assert.equal(items.find((x) => x.id === 'noise-source-levels').sensitivityDb, 6);
+  assert.equal(items.find((x) => x.id === 'selectivity').sensitivityDb, 10);
+});
+
+import { bodyWornReport, EXAMPLES } from '../js/examples.js';
+test('body-worn examples: thin margin not proven, shortened twin proven, notes quote the asserted figures', () => {
+  const t = bodyWornReport('thin'), s = bodyWornReport('short');
+  near(t.marginDb, 8.6, 0.05); assert.equal(t.proven, false); assert.deepEqual(t.assumptionIds, ['body-loss', 'cross-polar-floor']);
+  near(t.rssDb, 7.1, 0.05); near(t.worstCaseDb, 10, 0.05); assert.ok(t.reasons.some((x) => /body-worn/.test(x)));
+  near(s.marginDb, 17.5, 0.05); assert.equal(s.proven, true); assert.deepEqual(s.assumptionIds, t.assumptionIds);
+  const a = EXAMPLES.find((e) => e.id === 'body-worn-thin-margin').note, b = EXAMPLES.find((e) => e.id === 'body-worn-proven-twin').note;
+  for (const x of ['70 m', '8.6 dB', '10 dB', '15 dB', '7.1 dB', '10.0 dB']) assert.ok(a.includes(x), x);
+  for (const x of ['25 m', '17.5 dB', '10 dB', '7.1 dB', '15 dB', '8.6 dB']) assert.ok(b.includes(x), x);
+  for (const n of [a, b]) { assert.match(n, /^(Problem|Best practice):/); assert.ok(n.split(/(?<=\.)\s/).length <= 4); }
 });

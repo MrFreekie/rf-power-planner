@@ -5,6 +5,8 @@ import { applyFmPreset } from './model/fm-presets.js';
 import { solveLink, chainLossDb } from './model/rf.js';
 import { overloadStep } from './model/overload.js';
 import { modeReport } from './model/digital-link.js';
+import { sweepLink } from './model/diversity.js';
+import { confidenceSummary } from './model/assumptions-in-use.js';
 import { squelchState } from './model/squelch.js';
 import { RX_PRESETS } from './model/rx-params.js';
 import { imdSummary, evenOrderImd } from './model/imd.js';
@@ -784,6 +786,46 @@ export function modeContrastScene(type = 'analog-fm', level = 'weak') {
 export function modeContrastReport(type, level) {
   const sc = modeContrastScene(type, level), l = sc.links[0], r = solveLink(sc, l);
   return { scene: sc, result: r, inputDbm: r.inputPowerDbm, ...modeReport(r.inputPowerDbm, l) };
+}
+
+/**
+ * Body-worn link with a thin margin (assumptions-in-use.js): bodyWornScene(variant) -> a bodypack on a performer (10 dB body loss, assumed) with a cross-polarised
+ * transmit antenna (horizontal against a vertical receive antenna, 15 dB floor, assumed), 10 dBm transmit power. variant 'thin' = receiver 70 m away, 'short' = 25 m.
+ */
+export function bodyWornScene(variant = 'thin') {
+  return make('mic', (s, l) => {
+    s.stage = { width: 120, depth: 20 }; s.environment.floor = 'wood'; s.environment.model = 'free-space'; s.environment.bodyLossDb = 10;
+    l.name = variant === 'short' ? 'Bodypack, receiver 25 m away' : 'Bodypack, receiver 70 m away'; l.freqMHz = 606.1; l.tx.powerDbm = 10;
+    const d = variant === 'short' ? 25 : 70;
+    l.tx.pos = { x: 3, y: 10, z: 1.2 }; l.tx.antenna = omni(90, 'horizontal'); l.rx.antenna = omni(90, 'vertical');
+    l.rx.pos = { x: 3 + d, y: 10, z: 1.5 }; l.rx.diversity.antennaB.pos = { x: 3 + d, y: 9.4, z: 1.5 };
+  });
+}
+export function bodyWornReport(variant) {
+  const sc = bodyWornScene(variant), c = confidenceSummary(sc)[0];
+  return { scene: sc, marginDb: c.marginDb, proven: c.proven, rssDb: c.rssDb, worstCaseDb: c.worstCaseDb, assumptionIds: c.assumptionIds, reasons: c.reasons };
+}
+
+/**
+ * Diversity combining with correlated and uncorrelated fades: diversityCombiningScene(variant) -> the two-ray geometry of the diversity examples (concrete floor,
+ * horizontal omni antennas, mic walking 8 m to 0.5 m from the receiver, one floor reflection). 'correlated': antenna B 0.05 m (0.1 wavelength) beside A, so both
+ * see the same fades; 'spaced': B 0.4 m (0.8 wavelength) above A, so its fade falls at a different distance. diversityCombiningReport(variant) sweeps the walk
+ * (400 samples) with sweepLink and returns the 1 percent fade-depth gains of switching, selection ('true') and maximal-ratio combining over a single antenna.
+ */
+export function diversityCombiningScene(variant = 'spaced') {
+  return make('mic', (s, l) => {
+    twoRay(s, l);
+    l.rx.diversity.enabled = true; l.rx.diversity.mode = 'true'; l.rx.diversity.hysteresisDb = 3;
+    l.rx.diversity.antennaB.pos = variant === 'correlated' ? { x: 11, y: 6.55, z: 1.0 } : { x: 11, y: 6.5, z: 1.4 };
+  });
+}
+export function diversityCombiningReport(variant) {
+  const sc = diversityCombiningScene(variant), l = sc.links[0];
+  const r = sweepLink(sc, l.id, { x: 8, y: 6.5, z: 1.75 }, { x: 0.5, y: 6.5, z: 1.75 }, 400);
+  return {
+    scene: sc, spacingLambda: r.spacingLambda, singleFadeDepthDb: r.stats.single.fadeDepthDb, ratioFadeDepthDb: r.stats.ratio.fadeDepthDb,
+    gain1pctDb: { switching: r.gain1pctDb.switching, selection: r.gain1pctDb.true, ratio: r.gain1pctDb.ratio }, gainMeanDb: { switching: r.gainMeanDb.switching, selection: r.gainMeanDb.true, ratio: r.gainMeanDb.ratio },
+  };
 }
 
 /**
@@ -1881,6 +1923,30 @@ export const EXAMPLES = [
     title: 'Digital mic at -107 dBm: the same level, the cliff',
     note: 'Compare: the same -107 dBm with a digital mic (fixed QPSK 3/4 in a 200 kHz channel, assumed) is 1.1 dB under the frame-error cliff and the audio is muted. The cliff is only 0.6 dB wide, from a frame error rate of 1e-3 at -105.6 dBm to 90 percent at -106.3 dBm, so the audio is perfect one moment and gone the next. At -85 dBm it is clean with 20.9 dB to spare. Digital is the better link until it fails, and then it fails all at once.',
     build: () => ({ scene: modeContrastScene('digital', 'weak') }),
+  },
+  {
+    id: 'body-worn-thin-margin',
+    title: 'Body-worn link with a thin margin: not proven',
+    note: 'Problem: a bodypack 70 m from the receiver has 8.6 dB of margin, with 10 dB of body loss and a 15 dB cross-polar floor (horizontal against vertical antennas) both assumed. A body-worn margin under 10 dB is not called proven, because body loss changes by several dB with posture. The assumptions could move it by about 7.1 dB (10.0 dB if every error went the wrong way). Shorten the path, align the antennas, or walk-test it.',
+    build: () => ({ scene: bodyWornScene('thin') }),
+  },
+  {
+    id: 'body-worn-proven-twin',
+    title: 'The same bodypack 25 m away: a proven margin',
+    note: 'Best practice: the same bodypack 25 m from the receiver has 17.5 dB of margin, over the 10 dB a body-worn link needs and over the 7.1 dB the assumptions could take off. It is called proven although the same assumed 10 dB body loss and 15 dB cross-polar floor are in it. Aligning the antennas would add margin again. Compare with the 70 m case, where the margin is 8.6 dB.',
+    build: () => ({ scene: bodyWornScene('short') }),
+  },
+  {
+    id: 'diversity-correlated-antennas',
+    title: 'Diversity with antennas 0.1 wavelength apart: the same fades',
+    note: 'Problem: antenna B sits 0.05 m (0.1 wavelength) from antenna A, so both see the same floor-reflection fade of 8.8 dB. Switching and selection combining gain 0.0 dB at the 1 percent level because there is nothing better to switch to. Maximal-ratio combining gains only its 3.0 dB for adding two copies of the same signal. Spacing the antennas fixes the fade, not combining.',
+    build: () => ({ scene: diversityCombiningScene('correlated'), walk: ACROSS }),
+  },
+  {
+    id: 'diversity-spaced-antennas',
+    title: 'Diversity with antennas 0.8 wavelength apart: combining modes compared',
+    note: 'Compare: antenna B is 0.4 m (0.8 wavelength) above A, so its fade falls at a different distance. At the 1 percent level switching gains 4.9 dB, selection 6.5 dB and maximal-ratio 8.8 dB over one antenna, and the worst fade shrinks from 8.8 dB to 4.3 dB with ratio combining. Switching trails selection because it waits for a 3 dB hysteresis before it moves. Compare with the 0.1 wavelength case, where none of this is available.',
+    build: () => ({ scene: diversityCombiningScene('spaced'), walk: ACROSS }),
   },
   {
     id: 'presenter-with-backup-bodypack',

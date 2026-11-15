@@ -149,3 +149,29 @@ test('sweepLink reports mean and 1 percent gains; coincident antennas give 0 and
   const sw2 = sweepLink(m.scene, m.link.id, { x: 2, y: 1, z: 1.5 }, { x: 9, y: 5, z: 1.5 }, 200);
   assert.ok(sw2.gain1pctDb.true >= 0 && sw2.gain1pctDb.ratio >= sw2.gain1pctDb.true - 1e-9);
 });
+
+// ---- combining modes with correlated and uncorrelated fades (examples diversity-correlated-antennas, diversity-spaced-antennas) ----
+import { diversityCombiningReport } from '../js/examples.js';
+import { EXAMPLES as EX2 } from '../js/examples.js';
+test('correlated antennas (0.1 wavelength): no fade gain from switching or selection, ratio only the 3.01 dB power sum', () => {
+  const r = diversityCombiningReport('correlated');
+  assert.ok(Math.abs(r.spacingLambda - 0.1) < 0.005);
+  assert.ok(Math.abs(r.singleFadeDepthDb - 8.8) < 0.05, `single fade ${r.singleFadeDepthDb}`);
+  assert.ok(Math.abs(r.gain1pctDb.switching) < 0.05 && Math.abs(r.gain1pctDb.selection) < 0.05);
+  assert.ok(Math.abs(r.gain1pctDb.ratio - 3.01) < 0.05, `ratio ${r.gain1pctDb.ratio}`); // 10 log10 2 = 3.0103 dB for two identical copies
+  assert.ok(Math.abs(r.ratioFadeDepthDb - r.singleFadeDepthDb) < 0.05, 'the fade is just as deep');
+});
+test('spaced antennas (0.8 wavelength): switching < selection < ratio gain at 1 percent, and ratio shrinks the worst fade', () => {
+  const r = diversityCombiningReport('spaced');
+  assert.ok(Math.abs(r.spacingLambda - 0.81) < 0.01);
+  const g = r.gain1pctDb;
+  assert.ok(Math.abs(g.switching - 4.9) < 0.05 && Math.abs(g.selection - 6.5) < 0.05 && Math.abs(g.ratio - 8.8) < 0.05, JSON.stringify(g));
+  assert.ok(g.switching < g.selection && g.selection < g.ratio);
+  assert.ok(Math.abs(r.ratioFadeDepthDb - 4.3) < 0.05, `ratio fade ${r.ratioFadeDepthDb}`);
+  assert.ok(Math.abs(r.singleFadeDepthDb - 8.8) < 0.05);
+  const a = EX2.find((e) => e.id === 'diversity-correlated-antennas').note, b = EX2.find((e) => e.id === 'diversity-spaced-antennas').note;
+  for (const x of ['0.05 m', '0.1 wavelength', '8.8 dB', '0.0 dB', '3.0 dB']) assert.ok(a.includes(x), x);
+  for (const x of ['0.4 m', '0.8 wavelength', '4.9 dB', '6.5 dB', '8.8 dB', '4.3 dB', '3 dB']) assert.ok(b.includes(x), x);
+  assert.match(a, /^Problem:/); assert.match(b, /^Compare:/);
+  for (const n of [a, b]) assert.ok(n.split(/(?<=\.)\s/).length <= 4);
+});
