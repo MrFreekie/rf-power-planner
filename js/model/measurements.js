@@ -6,7 +6,7 @@
 //   compareMeasurements(scene)             -> { points: [{ id, linkId, x, y, z, predictedDbm, measuredDbm, deltaDb }], n, skipped, meanDb, rmsDb, worst }
 //                                             deltaDb = measured - predicted (positive: the real link is stronger than the model says)
 //   suggestCalibration(scene)              -> { n, before, candidates, best, cautions, needed } (see below)
-//   importMeasurementsCsv(text, opts)      -> { points: [{ linkId?, x, y, z?, rxDbm, note?, t? }], errors: [string] }
+//   importMeasurementsCsv(text, opts)      -> { points: [{ linkId?, x, y, z?, rxDbm, note?, t? }], errors: [string], lines: [file line of each point] }
 //
 // suggestCalibration fits ONE offset at a time, each by least squares with bounds, and reports which one leaves the smallest residual:
 //   body-loss      environment.bodyLossDb        shifts every point by the same dB (body loss is a plain loss), fitted in closed form: new = old - mean(delta), 0..30 dB
@@ -49,7 +49,7 @@ const stats = (deltas) => {
   return { n, meanDb: mean, rmsDb: Math.sqrt(deltas.reduce((a, b) => a + b * b, 0) / n) };
 };
 
-/** compareMeasurements(scene) -> per point predicted, measured and delta, plus the mean, rms and the worst point. Points of an unknown link are counted in `skipped`. */
+/** compareMeasurements(scene) -> per point predicted, measured and delta, plus the mean, rms and the worst point. Points of an unknown link, with a bad number or with a non-finite predicted level are counted in `skipped`. */
 export function compareMeasurements(scene) {
   const list = scene && Array.isArray(scene.measurements) ? scene.measurements : [];
   const points = [];
@@ -58,6 +58,7 @@ export function compareMeasurements(scene) {
     const link = linkOf(scene, m && m.linkId);
     if (!link || !finite(m.x) || !finite(m.y) || !finite(m.rxDbm)) { skipped++; continue; }
     const predicted = solveAt(scene, link, m).inputPowerDbm;
+    if (!finite(predicted)) { skipped++; continue; } // a non-finite prediction (a muted or broken solve) would poison the mean and rms
     points.push({ id: m.id, linkId: m.linkId, x: m.x, y: m.y, z: finite(m.z) ? m.z : link.rx.pos.z, predictedDbm: predicted, measuredDbm: m.rxDbm, deltaDb: m.rxDbm - predicted });
   }
   const s = stats(points.map((p) => p.deltaDb));
@@ -111,10 +112,10 @@ export function suggestCalibration(scene) {
   const spread = Math.max(...dists) - Math.min(...dists), meanDist = dists.reduce((a, b) => a + b, 0) / dists.length;
   const crossings = base.points.map((p) => directCrossings(solveAt(scene, linkOf(scene, p.linkId), p)));
 
-  const cand = (id, label, field, current, fitted, applicable, reason) => {
+  const cand = (id, label, field, current, fitted, applicable, reason, knownAfterRms) => {
     const lim = CALIBRATION_FIELDS[field], v = Math.min(lim.max, Math.max(lim.min, fitted));
     let after = base.rmsDb;
-    if (applicable) after = rmsOf(withEnv(scene, field.split('.')[1], v)).rmsDb;
+    if (applicable) after = finite(knownAfterRms) && v === fitted ? knownAfterRms : rmsOf(withEnv(scene, field.split('.')[1], v)).rmsDb; // knownAfterRms: the search already solved this exact value
     out.candidates.push({ id, label, field, current, fitted: applicable ? r2(v) : current, afterRmsDb: after, improvementDb: applicable ? base.rmsDb - after : 0, applicable, ...(!applicable && reason ? { reason } : {}) });
   };
 
@@ -136,7 +137,7 @@ export function suggestCalibration(scene) {
   if (polMatters) {
     const lim = CALIBRATION_FIELDS['environment.xpdDb'];
     const fit = minimise((v) => rmsOf(withEnv(scene, 'xpdDb', v)).rmsDb, lim.min, lim.max);
-    cand('cross-polar', 'Cross-polar floor', 'environment.xpdDb', xpdNow, fit.x, true);
+    cand('cross-polar', 'Cross-polar floor', 'environment.xpdDb', xpdNow, fit.x, true, undefined, fit.f);
   } else cand('cross-polar', 'Cross-polar floor', 'environment.xpdDb', xpdNow, xpdNow, false, 'the antennas are not cross-polarised on any measured path');
 
   out.candidates.sort((a, b) => (b.applicable - a.applicable) || (a.afterRmsDb - b.afterRmsDb));
@@ -166,34 +167,35 @@ const HEADER_NAMES = {
   note: ['note', 'notes', 'comment', 'comments', 'name', 'label', 'where'], t: ['t', 'time', 'timestamp', 's'],
 };
 const norm = (h) => String(h).toLowerCase().replace(/\(.*?\)/g, '').replace(/[^a-z0-9_]/g, '');
-const splitRow = (line) => {
-  const sep = line.includes('\t') ? '\t' : line.includes(';') ? ';' : ',';
-  return line.split(sep).map((c) => c.trim().replace(/^"(.*)"$/, '$1').trim());
-};
+const sepOf = (line) => (line.includes('\t') ? '\t' : line.includes(';') ? ';' : ',');
+const splitRow = (line, sep) => line.split(sep).map((c) => c.trim().replace(/^"(.*)"$/, '$1').trim());
 const toNum = (c) => (c === undefined ? NaN : NUM.test(String(c).replace(/\s*dbm$/i, '')) ? parseFloat(c) : NaN);
 
 /**
- * importMeasurementsCsv(text, { max = 200 }) -> { points, errors }. Tolerant: comma, semicolon or tab separators, an optional header with any of the usual names
+ * importMeasurementsCsv(text, { max = 200 }) -> { points, errors, lines }. Tolerant: comma, semicolon or tab separators, an optional header with any of the usual names
  * (x, y, z, dBm / rx / level / rssi, link / linkId, note, t), blank and # lines ignored, a "dBm" suffix on levels allowed. Without a header: 3 columns = x, y, dBm;
  * 4 columns = linkId, x, y, dBm when the first cell is not a number, else x, y, z, dBm; 5 or more = linkId, x, y, dBm, note. A point carries linkId only when the
  * file gave one (the caller supplies a default). More than `max` data rows: the rest are dropped with an error.
  */
 export function importMeasurementsCsv(text, { max = MEASUREMENT_LIMITS.max } = {}) {
-  const points = [], errors = [];
-  const lines = String(text ?? '').replace(/^﻿/, '').split(/\r\n|\n|\r/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
-  if (!lines.length) { errors.push('The file has no rows.'); return { points, errors }; }
+  const points = [], errors = [], fileLines = []; // fileLines[k] = the file line of points[k]
+  // keep the file line number of every kept line (blank and # lines are dropped but still counted), so an error names the line the user sees
+  const lines = [], lineNos = [];
+  String(text ?? '').replace(/^﻿/, '').split(/\r\n|\n|\r/).forEach((raw, k) => { const l = raw.trim(); if (l && !l.startsWith('#')) { lines.push(l); lineNos.push(k + 1); } });
+  if (!lines.length) { errors.push('The file has no rows.'); return { points, errors, lines: [] }; }
+  const sep = sepOf(lines[0]); // detected once, from the first line, for the whole file
   let cols = null, start = 0;
-  const first = splitRow(lines[0]);
+  const first = splitRow(lines[0], sep);
   // a header: no cell that is a plain number, and at least one cell naming a field
   if (first.every((c) => !NUM.test(c)) && first.some((c) => Object.values(HEADER_NAMES).some((names) => names.includes(norm(c))))) {
     cols = first.map((c) => { const n = norm(c); return Object.keys(HEADER_NAMES).find((k) => HEADER_NAMES[k].includes(n)) || null; });
     start = 1;
     for (const need of ['x', 'y', 'rxDbm']) if (!cols.includes(need)) errors.push(`The header has no column for ${need === 'rxDbm' ? 'the level (dBm)' : need}.`);
-    if (errors.length) return { points, errors };
+    if (errors.length) return { points, errors, lines: [] };
   }
   let rows = 0;
   for (let i = start; i < lines.length; i++) {
-    const row = splitRow(lines[i]), lineNo = i + 1;
+    const row = splitRow(lines[i], sep), lineNo = lineNos[i];
     if (rows >= max) { errors.push(`At most ${max} rows are read; the rest were dropped.`); break; }
     rows++;
     let m;
@@ -214,7 +216,7 @@ export function importMeasurementsCsv(text, { max = MEASUREMENT_LIMITS.max } = {
     if (typeof m.linkId === 'string' && m.linkId) p.linkId = m.linkId.slice(0, L.idChars);
     if (typeof m.note === 'string' && m.note) p.note = m.note.replace(/[\u0000-\u001f\u007f]/g, '').slice(0, L.noteChars);
     if (finite(m.t)) p.t = m.t;
-    points.push(p);
+    points.push(p); fileLines.push(lineNo);
   }
-  return { points, errors };
+  return { points, errors, lines: fileLines };
 }

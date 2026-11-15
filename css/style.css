@@ -393,6 +393,8 @@ input[type="checkbox"], input[type="radio"] { width: 24px; height: 24px; }
 @media (max-width: 800px) {
   #toolbar { flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; gap: 8px 10px; align-items: center; }
   #toolbar > * { flex: none; }
+  #toolbar > #btn-cmd, #toolbar > [aria-label="Scenario"] { order: -2; }
+  #toolbar > .source-bar { order: -1; } /* audio source early in the scrolling strip */
   #toolbar label { white-space: nowrap; flex-wrap: nowrap; }
   #example-note { max-height: 7.5em; overflow-y: auto; }
   .rc-vis { display: none; }

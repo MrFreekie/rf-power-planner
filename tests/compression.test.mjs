@@ -69,3 +69,21 @@ test('older chain items without op1dBDbm and scenes without noise sources are un
   const sc = boosterOverloadReport('overloaded').scene; sc.links[0].chain[0].op1dBDbm = 'x';
   assert.equal(validateScene(sc).ok, false);
 });
+
+test('chainCompression: a dropped non-finite signal does not shift the gains of the others (gain index kept)', () => {
+  // Signals: muted (-Infinity), then wanted at -50 dBm, gain per signal [0, 20] dB: the wanted signal must get +20, not the muted one's 0.
+  const st = [{ label: 'booster', gainDbs: [0, 20], op1dBDbm: 10 }];
+  const sigs = [{ id: 'muted', levelDbm: -Infinity, freqMHz: 600 }, { id: 'wanted', levelDbm: -50, freqMHz: 600, wanted: true }];
+  const r = chainCompression(st, sigs);
+  near(r.stages[0].linearOutDbm, -30, 1e-9, 'linear out = -50 + 20'); // tolerance 1e-9 dB
+  near(r.wantedOut, -30, 1e-9, 'wanted out');
+});
+
+test('chainCompression: a -Infinity stage gain (stop band) fully rejects the interferer instead of passing it at 0 dB', () => {
+  const sigs = [{ id: 'wanted', levelDbm: -60, freqMHz: 600, wanted: true }, { id: 'radio', levelDbm: 5, freqMHz: 450 }];
+  const pass = chainCompression([{ label: 'booster', gainDbs: [15, 15], op1dBDbm: 10.4 }], sigs);
+  const filt = chainCompression([{ label: 'booster', gainDbs: [15, -Infinity], op1dBDbm: 10.4 }], sigs);
+  assert.ok(pass.totalDb > 3, `unfiltered compresses (${pass.totalDb})`);
+  assert.equal(filt.totalDb, 0);
+  near(filt.stages[0].linearOutDbm, -45, 1e-9, 'only the wanted signal reaches the output'); // -60 + 15
+});

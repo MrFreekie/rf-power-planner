@@ -12,7 +12,7 @@
 // or null when it cannot be put as a single number. marginIsProven() combines them with combineSensitivity(): root sum of squares between independent mechanisms, a linear sum inside one mechanism.
 import { solveLink, bodyCouplingLossDb, externalNoiseNfDb, DEFAULT_XPD_DB } from './rf.js';
 import { digitalConfigOf, digitalProfile } from './digital-link.js';
-import { COMPRESSION_KNEE_DB, OP1DB_BELOW_OIP3_DB } from './compression.js';
+import { COMPRESSION_KNEE_DB, OP1DB_BELOW_OIP3_DB, DEFAULT_OIP3_DBM } from './compression.js';
 
 /** A margin under this on a body-worn link is not called proven (dB). */
 export const PROVEN_BODY_WORN_MARGIN_DB = 10;
@@ -53,7 +53,7 @@ function itemsForLink(scene, link, res) {
   if (comp && comp.totalDb > 0.05) {
     const w = comp.worst;
     add({
-      id: 'booster-compression', label: 'Booster output intercept and compression', value: `output 1 dB point ${w && Number.isFinite(w.op1dBDbm) ? fmt(w.op1dBDbm) : '10.4'} dBm`, flag: 'U', sensitivityDb: r1(comp.totalDb), effectDb: r1(comp.totalDb),
+      id: 'booster-compression', label: 'Booster output intercept and compression', value: `output 1 dB point ${w && Number.isFinite(w.op1dBDbm) ? fmt(w.op1dBDbm) : fmt(DEFAULT_OIP3_DBM - OP1DB_BELOW_OIP3_DB)} dBm`, flag: 'U', sensitivityDb: r1(comp.totalDb), effectDb: r1(comp.totalDb),
       effect: `A strong signal at the antenna (${fmt(comp.strongest.rawDbm)} dBm) drives a booster into compression and costs the wanted signal ${fmt(comp.totalDb)} dB. The booster's output intercept is an assumed figure (the 1 dB point is taken ${OP1DB_BELOW_OIP3_DB} dB below it, with a ${COMPRESSION_KNEE_DB} dB soft knee), so the loss moves about 1 dB for each dB the real point differs.`,
       fix: 'The booster datasheet output P1dB or OIP3 at the working gain (enter it as the output 1 dB point on the chain item).',
     });
@@ -136,7 +136,8 @@ function itemsForLink(scene, link, res) {
   return out;
 }
 
-const keyOf = (results, scene, i) => {
+/** resultAt(results, scene, i) -> the given solveLink result for scene.links[i] (array in link order, Map or object keyed by link id), or undefined. Shared with plan-export.js. */
+export const resultAt = (results, scene, i) => {
   const l = scene.links[i];
   if (Array.isArray(results)) return results[i];
   if (results instanceof Map) return results.get(l.id);
@@ -145,8 +146,12 @@ const keyOf = (results, scene, i) => {
 };
 
 function resultFor(scene, results, i) {
-  const given = keyOf(results, scene, i);
-  return given || solveLink(scene, scene.links[i]);
+  return resultAt(results, scene, i) || solveLink(scene, scene.links[i]);
+}
+
+/** itemsOfLink(scene, link, result) -> this link's own items (not merged with other links), each with linkIds [link.id]. Use this to score one link. */
+export function itemsOfLink(scene, link, result) {
+  return itemsForLink(scene, link, result || solveLink(scene, link)).map((it) => ({ ...it, linkIds: [link.id] }));
 }
 
 /** assumptionsInUse(scene, results) -> list of the assumed or inferred figures that influenced this scene (see the file header). */
@@ -214,9 +219,8 @@ export function marginIsProven(link, result, items, scene) {
 export function confidenceSummary(scene, results) {
   const links = (scene && Array.isArray(scene.links)) ? scene.links : [];
   const resolved = links.map((_, i) => resultFor(scene, results, i));
-  const items = assumptionsInUse(scene, resolved);
   return links.map((link, i) => {
-    const own = assumptionsForLink(items, link.id), m = marginIsProven(link, resolved[i], own, scene);
+    const own = itemsOfLink(scene, link, resolved[i]), m = marginIsProven(link, resolved[i], own, scene);
     return { linkId: link.id, name: link.name, marginDb: m.marginDb, proven: m.proven, reasons: m.reasons, rssDb: m.rssDb, worstCaseDb: m.worstCaseDb, sumSensitivityDb: m.rssDb, assumptionIds: own.map((x) => x.id) };
   });
 }

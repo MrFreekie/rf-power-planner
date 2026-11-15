@@ -167,3 +167,9 @@ test('TV noise rise: in-band power, rise in dB, whole block only, 6 and 8 MHz', 
   assert.equal(out[4].dbm, -120, 'hi edge belongs to the next channel'); assert.equal(out[5].dbm, -120, 'unoccupied neighbour is flat');
   assert.equal(out[2].tvChannel, 30);
 });
+
+test('TV_BLOCK_DBM is about 30 dB above kTB over a 7.6 MHz block (hand: -174 + 10 log10(7.6e6) = -105.2 dBm), not 50 dB', () => {
+  const kTB = -174 + 10 * Math.log10(7.6e6);
+  assert.ok(Math.abs(kTB - -105.2) < 0.05, `kTB ${kTB}`); // tolerance 0.05 dB
+  assert.ok(Math.abs(TV_BLOCK_DBM - kTB - 30.2) < 0.1, `${TV_BLOCK_DBM - kTB} dB above kTB`);
+});

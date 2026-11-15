@@ -84,6 +84,27 @@ export function collectToolbarItems(doc) {
   }
   return out;
 }
+/** Toolbar form controls that are not buttons (audio source select, tone Hz field): choosing the entry focuses the control. */
+export const CONTROL_ENTRIES = Object.freeze([
+  { id: 'audio-source', label: 'Audio source', keywords: 'audio source tone two-tone sweep music speech pink noise test signal' },
+  { id: 'audio-tone-hz', label: 'Tone Hz', keywords: 'tone frequency hertz audio test signal' },
+]);
+export function collectControlItems(doc) {
+  const out = [];
+  const hiddenEl = (e) => !!(e && (e.hidden || (e.closest && e.closest('[hidden]'))));
+  const sel = doc.getElementById('audio-source');
+  for (const c of CONTROL_ENTRIES) {
+    const el = doc.getElementById(c.id);
+    if (!el || hiddenEl(sel)) continue;
+    out.push({ id: `ctl:${c.id}`, label: c.label, group: 'Toolbar control', keywords: c.keywords, run: () => {
+      // the tone field is hidden or disabled for sources without a tone: focus the source select that enables it instead
+      const target = (hiddenEl(el) || el.disabled) && sel ? sel : el;
+      if (target.scrollIntoView) target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      target.focus();
+    } });
+  }
+  return out;
+}
 /** Inspector sections that exist in the right panel: open and focus. */
 export function collectSectionItems(doc) {
   const out = [];

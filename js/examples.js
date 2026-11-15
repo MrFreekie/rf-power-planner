@@ -13,7 +13,7 @@ import { imdSummary, evenOrderImd } from './model/imd.js';
 import { toneMpxReport } from './model/tone-mpx.js';
 import { createPerson, personLinkName, offsetFromPack, rotateOffset, personPackPositions, DEFAULT_MIC_OFFSET, DEFAULT_IEM_OFFSET } from './model/people.js';
 import { wallNoiseSourcesFromReflectors, createNoiseSource, engCrewSources, noiseSourceAt, noiseEvents } from './model/noise-sources.js';
-import { tvChannelList, tvChannelOf } from './model/spectrum-map.js';
+import { tvChannelList, tvChannelOf, TV_OCCUPIED_MHZ } from './model/spectrum-map.js';
 import { createDefaultScene, createDefaultLink, createChainItem, createReflector, createBranch, createZone, createDefaultImd, createImdTransmitter, createPlatform, createAudience, createCeiling, createChainItemFromPreset, newId, syncScene, migrateAntennaPolarisation } from './model/scene.js';
 
 const omni = (el = 90, polarisation = 'vertical') => ({ type: 'omni', gainDbi: 0, orientation: { az: 0, el }, polarisation });
@@ -699,6 +699,14 @@ export function noiseSourceScene(id, opts = {}) {
       base(s, l); l.name = 'Mic at FOH'; s.stage = { width: 30, depth: 20 };
       s.noiseSources = engCrewSources(opts.centre || { x: 12, y: 3, z: 0 });
     });
+    case 'dect-intercom': return make('mic', (s, l) => { // a 1.9 GHz wireless mic sharing the DECT band with a crew intercom beltpack 4 m from the receive antenna
+      base(s, l); l.name = '1.9 GHz mic at FOH'; l.freqMHz = 1893; l.tx.powerDbm = 10;
+      s.noiseSources = [at('dect-comms', { x: 22, y: 14, z: 1.2 }, { name: 'Crew DECT intercom beltpack' })];
+    });
+    case 'pyro-trigger-433': return make('mic', (s, l) => { // a licence-free 433 MHz mic and the pyro cue trigger 0.8 MHz above it, on the stage
+      base(s, l); l.name = '433 MHz mic at FOH'; l.freqMHz = 433.1; l.tx.powerDbm = 10;
+      s.noiseSources = [at('pyro-trigger', { x: 3, y: 12, z: 1.2 }, { name: 'Pyro cue trigger' })];
+    });
     default: return null;
   }
 }
@@ -715,34 +723,38 @@ export function noiseSourceScene(id, opts = {}) {
  */
 export const WEAK_TV_BLOCK_DBM = Object.freeze({ weak: -85, strong: -45 });
 export const WEAK_TV_FREQ_MHZ = Object.freeze({ ch33: 570.4, ch30: 546.4 }); // 0.4 MHz above the block centre: inside the flat part, away from the edges
-export function weakTvScene(variant = 'on-channel') {
-  const ch = (n) => tvChannelList(8).find((c) => c.n === n);
+export const WEAK_TV_US_CHANNEL = 26; // North America, 6 MHz plan: channel 26 = 542 to 548 MHz, occupied 5.38 MHz (ATSC)
+export function weakTvScene(variant = 'on-channel', widthMHz = 8) {
+  const us = widthMHz === 6; // the 6 MHz plan: scene.tvChannelWidthMHz = 6 and a 5.38 MHz block (only the on-channel variant is defined for it)
+  const ch = (n) => tvChannelList(widthMHz).find((c) => c.n === n);
   return make('mic', (s, l) => {
     s.stage = { width: 30, depth: 20 }; s.environment.floor = 'wood'; s.environment.model = 'free-space';
     l.name = 'Mic at FOH'; l.tx.pos = { x: 3, y: 10, z: 1.5 }; l.tx.antenna = omni(); l.rx.antenna = omni();
     l.rx.pos = { x: 22, y: 10, z: 1.2 }; l.rx.diversity.antennaB.pos = { x: 22, y: 9.4, z: 1.2 };
     l.chain = [createChainItem('cable', { cableType: 'lmr-240', lengthM: 5 })];
-    l.freqMHz = variant === 'free-gap' ? WEAK_TV_FREQ_MHZ.ch30 : WEAK_TV_FREQ_MHZ.ch33;
+    l.freqMHz = us ? Math.round((ch(WEAK_TV_US_CHANNEL).centreMHz + 0.4) * 10) / 10 : variant === 'free-gap' ? WEAK_TV_FREQ_MHZ.ch30 : WEAK_TV_FREQ_MHZ.ch33;
+    if (us) s.tvChannelWidthMHz = 6;
     const dtv = (n, blockDbm, name, pos) => {
-      const src = createNoiseSource('dtv-broadcast', { name, pos, freqMHz: ch(n).centreMHz });
+      const src = createNoiseSource('dtv-broadcast', { name, pos, freqMHz: ch(n).centreMHz, ...(us ? { bwKHz: TV_OCCUPIED_MHZ[6] * 1000 } : {}) });
       const raw0 = noiseSourceAt({ ...src, erpDbm: 0 }, l.rx.pos, l.freqMHz, 200, () => 0).rawDbm;
       return { ...src, erpDbm: Math.round((blockDbm - raw0) * 10) / 10 }; // ERP that puts blockDbm at the antenna terminals (Friis, -3 dB polarisation)
     };
     const own = variant === 'strong-cochannel' ? WEAK_TV_BLOCK_DBM.strong : WEAK_TV_BLOCK_DBM.weak;
-    s.noiseSources = [dtv(33, own, 'TV ch 33 (weak local)', { x: 29, y: 10, z: 10 })];
-    if (variant === 'strong-neighbour') s.noiseSources.push(dtv(34, WEAK_TV_BLOCK_DBM.strong, 'TV ch 34 (strong adjacent)', { x: 29, y: 16, z: 10 }));
+    s.noiseSources = [us ? dtv(WEAK_TV_US_CHANNEL, own, `TV ch ${WEAK_TV_US_CHANNEL} (weak local)`, { x: 29, y: 10, z: 10 }) : dtv(33, own, 'TV ch 33 (weak local)', { x: 29, y: 10, z: 10 })];
+    if (variant === 'strong-neighbour' && !us) s.noiseSources.push(dtv(34, WEAK_TV_BLOCK_DBM.strong, 'TV ch 34 (strong adjacent)', { x: 29, y: 16, z: 10 }));
   });
 }
-export function weakTvReport(variant) {
-  const sc = weakTvScene(variant), r = solveLink(sc, sc.links[0]);
+export function weakTvReport(variant, widthMHz = 8) {
+  const sc = weakTvScene(variant, widthMHz), r = solveLink(sc, sc.links[0]);
   const ns = r.noiseSources;
-  return { scene: sc, result: r, noise: ns, marginDb: r.marginDb, floorDbm: ns ? ns.floorAfterDbm : r.cascade.noiseFloorDbm, riseDb: ns ? ns.riseDb : 0, channel: tvChannelOf(sc.links[0].freqMHz, 8).n };
+  return { scene: sc, result: r, noise: ns, marginDb: r.marginDb, floorDbm: ns ? ns.floorAfterDbm : r.cascade.noiseFloorDbm, riseDb: ns ? ns.riseDb : 0, channel: tvChannelOf(sc.links[0].freqMHz, widthMHz).n };
 }
 
 /**
  * Booster overload by a strong nearby transmitter (compression.js): boosterOverloadScene(variant) -> a 606.1 MHz mic 137 m from a receive rack whose antenna
  * feeds a 12 dB booster and 20 m of LMR-240, with a business UHF handheld radio (33 dBm ERP, assumed) keyed 1 m from the receive antenna.
- * variant 'plain' = no booster, 'overloaded' = booster straight on the antenna, 'filtered' = a 600-612 MHz bandpass ahead of the booster.
+ * variant 'plain' = no booster, 'overloaded' = booster straight on the antenna, 'filtered' = a 600-612 MHz bandpass ahead of the booster. The booster is powered
+ * by 12 V bias from the receiver (rx.antennaBiasV), so the only warnings are the compression ones. 'padded' = a 10 dB attenuator ahead of the booster (the less ideal cure).
  */
 export function boosterOverloadScene(variant = 'overloaded') {
   return make('mic', (s, l) => {
@@ -751,8 +763,9 @@ export function boosterOverloadScene(variant = 'overloaded') {
     l.tx.pos = { x: 3, y: 10, z: 1.5 }; l.tx.antenna = omni(); l.rx.antenna = omni();
     l.rx.pos = { x: 140, y: 10, z: 1.5 }; l.rx.diversity.antennaB.pos = { x: 140, y: 9.4, z: 1.5 };
     l.chain = [];
-    if (variant === 'filtered') l.chain.push(createChainItemFromPreset('filter-bandpass', { passLoMHz: 600, passHiMHz: 612 }));
-    if (variant !== 'plain') l.chain.push(createChainItemFromPreset('booster-12'));
+    if (variant === 'filtered') l.chain.push(createChainItemFromPreset('filter-bandpass', { passLoMHz: 600, passHiMHz: 612, dcMode: 'pass', noDc: false })); // a DC-passing filter, so the bias reaches the booster behind it
+    if (variant === 'padded') l.chain.push(createChainItem('attenuator', { lossDb: 10 })); // a 10 dB pad ahead of the booster
+    if (variant !== 'plain') { l.chain.push(createChainItemFromPreset('booster-12')); l.rx.antennaBiasV = 12; } // the receiver supplies the 12 V the booster needs over the cable (no bias warning); no extra loss
     l.chain.push(createChainItem('cable', { cableType: 'lmr-240', lengthM: 20 }));
     s.noiseSources = [createNoiseSource('ptt-business-uhf', { name: 'Crew radio 1 m from the antenna', pos: { x: 140, y: 11, z: 1.5 } })];
   });
@@ -834,16 +847,17 @@ export function diversityCombiningReport(variant) {
  * 'body-loss-high': the scene assumes 3 dB of body loss, the readings were made with 10 dB. 'clean-match': the scene assumes 6 dB and so did the readings.
  */
 export const MEASUREMENT_WALK_X = Object.freeze([8, 13, 19, 26, 33, 40, 46, 52, 57, 62, 66, 70]);
+export const MEASUREMENT_FEW_X = Object.freeze([32, 33, 34]); // the too-few walk: three readings within 2 m of each other
 const measScatter = (i) => { const v = Math.sin((i + 1) * 12.9898) * 43758.5453; return 0.4 * (2 * (v - Math.floor(v)) - 1); };
 export function measurementsScene(variant = 'body-loss-high') {
-  const assumed = variant === 'clean-match' ? 6 : 3, truth = variant === 'clean-match' ? 6 : 10;
+  const assumed = variant === 'clean-match' ? 6 : 3, truth = variant === 'clean-match' ? 6 : 10; // 'too-few' is the same 3 -> 10 dB story with three clustered readings
   const sc = make('mic', (s, l) => {
     s.stage = { width: 120, depth: 20 }; s.environment.floor = 'wood'; s.environment.model = 'free-space'; s.environment.bodyLossDb = assumed;
     l.name = 'Bodypack walk test'; l.freqMHz = 606.1; l.tx.powerDbm = 10;
     l.tx.pos = { x: 3, y: 10, z: 1.2 }; l.tx.antenna = omni(); l.rx.antenna = omni(); l.rx.pos = { x: 40, y: 10, z: 1.5 }; l.rx.diversity.antennaB.pos = { x: 40, y: 9.4, z: 1.5 };
   });
   const truthScene = { ...sc, environment: { ...sc.environment, bodyLossDb: truth } }, l = sc.links[0];
-  sc.measurements = MEASUREMENT_WALK_X.map((x, i) => {
+  sc.measurements = (variant === 'too-few' ? MEASUREMENT_FEW_X : MEASUREMENT_WALK_X).map((x, i) => {
     const copy = JSON.parse(JSON.stringify(l)); copy.rx.pos = { x, y: 10, z: 1.5 };
     const dbm = solveLink(truthScene, copy).inputPowerDbm + measScatter(i);
     return { id: `meas${i + 1}`, linkId: l.id, x, y: 10, rxDbm: Math.round(dbm * 100) / 100 };
@@ -1770,7 +1784,7 @@ export const EXAMPLES = [
   {
     id: 'splitter-two-way-receiver',
     title: 'Splitter: one antenna feeding two receivers',
-    note: 'Less ideal (a trade): a passive 2-way splitter lets two receivers share one antenna and costs 3.5 dB, so the chain loses 5.6 dB against 2.1 dB without it. The loss comes before the first gain stage, so the system noise figure rises from 10.1 dB to 13.6 dB and the margin falls from 59.5 dB to 56.0 dB. An active splitter (0 dB net gain, assumed 8 dB noise figure) gives 11.9 dB and 57.7 dB. Use active distribution for several receivers (figures illustrative).',
+    note: 'Less ideal: a passive 2-way splitter lets two receivers share one antenna and costs 3.5 dB, so the chain loses 5.6 dB against 2.1 dB without it. The loss comes before the first gain stage, so the system noise figure rises from 10.1 dB to 13.6 dB and the margin falls from 59.5 dB to 56.0 dB. An active splitter (0 dB net gain, assumed 8 dB noise figure) gives 11.9 dB and 57.7 dB. Use active distribution for several receivers (figures illustrative).',
     build: () => ({ scene: reviewScene('splitter-two-way-receiver', {}) }),
   },
   {
@@ -1794,7 +1808,7 @@ export const EXAMPLES = [
   {
     id: 'pad-on-iem-transmitter',
     title: 'Pad on an IEM transmitter with the wrong antenna',
-    note: 'Less ideal fix: the IEM transmitter drives an antenna cut for 863 to 865 MHz at 606.1 MHz (VSWR 46.2:1), and a 6 dB pad in front of it brings the reflection at the output stage down from 19.6 dBm to 1.6 dBm (1.6:1 at the PA). The price is 6 dB of link margin (38.3 dB against 44.3 dB), which is still plenty. The real fix is the right antenna (figures illustrative, assumed band edges).',
+    note: 'Less ideal: a pad as the fix. The IEM transmitter drives an antenna cut for 863 to 865 MHz at 606.1 MHz (VSWR 46.2:1), and a 6 dB pad in front of it brings the reflection at the output stage down from 19.6 dBm to 1.6 dBm (1.6:1 at the PA). The price is 6 dB of link margin (38.3 dB against 44.3 dB), which is still plenty. The real fix is the right antenna (figures illustrative, assumed band edges).',
     build: () => ({ scene: reviewScene('pad-on-iem-transmitter', {}) }),
   },
   {
@@ -1932,7 +1946,7 @@ export const EXAMPLES = [
   {
     id: 'booster-filtered-before-radio',
     title: 'Booster behind a bandpass filter: the radio never reaches it',
-    note: 'Best practice: the same booster behind a 600 to 612 MHz bandpass filter (30 dB stopband rejection, assumed) sees the crew radio at only -17.6 dBm at its output. It stays far below the 10.4 dBm output 1 dB point, so there is no compression and the margin is 7.6 dB, the same as with no radio keyed. The filter costs 1.5 dB of loss but it protects the booster from every out-of-band transmitter. Compare with the overloaded example, where the margin is 4.1 dB.',
+    note: 'Best practice: the same booster behind a 600 to 612 MHz bandpass filter (30 dB stopband rejection and DC-passing, both assumed) sees the crew radio at only -17.6 dBm at its output. It stays far below the 10.4 dBm output 1 dB point, so there is no compression and the margin is 7.6 dB, the same as with no radio keyed. The filter costs 1.5 dB of loss but it protects the booster from every out-of-band transmitter. Compare with the overloaded example, where the margin is 4.1 dB.',
     build: () => ({ scene: boosterOverloadScene('filtered') }),
   },
   {
@@ -1950,13 +1964,13 @@ export const EXAMPLES = [
   {
     id: 'body-worn-thin-margin',
     title: 'Body-worn link with a thin margin: not proven',
-    note: 'Problem: a bodypack 70 m from the receiver has 8.6 dB of margin, with 10 dB of body loss and a 15 dB cross-polar floor (horizontal against vertical antennas) both assumed. A body-worn margin under 10 dB is not called proven, because body loss changes by several dB with posture. The assumptions could move it by about 7.1 dB (10.0 dB if every error went the wrong way). Shorten the path, align the antennas, or walk-test it.',
+    note: 'Problem: a bodypack 70 m from the receiver has 8.6 dB of margin, with 10 dB of body loss and a 15 dB cross-polar floor (horizontal against vertical antennas, which is why the model warns about polarisation) both assumed. A body-worn margin under 10 dB is not called proven, because body loss changes by several dB with posture. The assumptions could move it by about 7.1 dB (10.0 dB if every error went the wrong way). Shorten the path, align the antennas, or walk-test it.',
     build: () => ({ scene: bodyWornScene('thin') }),
   },
   {
     id: 'body-worn-proven-twin',
     title: 'The same bodypack 25 m away: a proven margin',
-    note: 'Best practice: the same bodypack 25 m from the receiver has 17.5 dB of margin, over the 10 dB a body-worn link needs and over the 7.1 dB the assumptions could take off. It is called proven although the same assumed 10 dB body loss and 15 dB cross-polar floor are in it. Aligning the antennas would add margin again. Compare with the 70 m case, where the margin is 8.6 dB.',
+    note: 'Best practice: the same bodypack 25 m from the receiver has 17.5 dB of margin, over the 10 dB a body-worn link needs and over the 7.1 dB the assumptions could take off. It is called proven although the same assumed 10 dB body loss and 15 dB cross-polar floor are in it (the polarisation warning is that deliberately assumed floor, and aligning the antennas would add margin again). Compare with the 70 m case, where the margin is 8.6 dB.',
     build: () => ({ scene: bodyWornScene('short') }),
   },
   {
@@ -2003,8 +2017,8 @@ export const EXAMPLES = [
   },
   {
     id: 'band-four-piece-walk',
-    title: 'Four-piece band: the singer walks, her packs go with her',
-    note: 'Compare: Anna walks from the middle of the stage (8, 7.5) to the stage-right front (14.5, 8.5) and her handheld and IEM pack move with her, offsets kept. Her mic margin falls from 36.8 to 30.7 dB (-6.1 dB) while her IEM rises from 36.8 to 47.7 dB (+10.9 dB) because she is nearer the IEM antenna. The other six links do not change (0.0 dB). The scene is the start; the walk moves her mic only.',
+    title: 'Four-piece band: moving the singer carries her packs',
+    note: 'Compare: moving Anna from the middle of the stage (8, 7.5) to the stage-right front (14.5, 8.5), by dragging her on the plan, carries her handheld and IEM pack with her, offsets kept. Her mic margin falls from 36.8 to 30.7 dB (-6.1 dB) while her IEM rises from 36.8 to 47.7 dB (+10.9 dB) because she is nearer the IEM antenna, and the other six links do not change (0.0 dB). The scene is the start; the animated walk moves only her mic pack along that line, so her IEM pack stays behind while it runs.',
     build: () => ({ scene: bandPeopleScene(), walk: { to: { ...bandWalkEndScene().links[0].tx.pos }, speedMps: 0.8, pingPong: true } }),
   },
   {
@@ -2018,6 +2032,36 @@ export const EXAMPLES = [
     title: 'Coordination: the same three mics on a spread plan',
     note: 'Best practice: the same mics at 600.0, 601.0 and 603.3 MHz: no third-order product comes closer than 1000 kHz to a channel (hand: 2f2-f1 = 602.0, 2f1-f2 = 599.0, f1+f3-f2 = 602.3, f2+f3-f1 = 604.3). Nothing lands in a channel, so the products add no noise; the floor still rises 9.4 dB from the transmitter noise skirts of mics about 3 m away (assumed model). The wanted mic keeps 50.9 dB of margin, the same as in the equal plan.',
     build: () => ({ scene: coordScene('spread') }),
+  },
+  {
+    id: 'measurements-too-few-readings',
+    title: 'Walk test: three readings at nearly one distance',
+    note: 'Less ideal: three readings 29 to 31 m from the transmitter are 7.0 dB weaker than the model on average. The fit says 10.0 dB of body loss (0.3 dB rms left) but warns that three readings are too few and sit at nearly the same distance, so in a real venue the offset could equally be a wall or a polarisation loss. Walk a range of distances, through the wall if there is one, before applying it; the twelve-reading walk is the better test.',
+    build: () => ({ scene: measurementsScene('too-few') }),
+  },
+  {
+    id: 'tv-weak-6mhz-us-plan',
+    title: 'Weak TV, North America: a mic on a 6 MHz channel',
+    note: 'Less ideal: with the TV channel width set to 6 MHz a mic 0.4 MHz above the centre of channel 26 (542 to 548 MHz) shares the block with a weak local station (-85.0 dBm at the antenna, assumed). The block occupies 5.38 MHz, so a 200 kHz mic channel sees 14.3 dB less, -99.3 dBm, which is 1.5 dB more than the same power in a 7.6 MHz block; it lifts the floor by 13.0 dB and leaves 42.3 dB of margin. Check the local database and scan first; the occupancy is illustrative.',
+    build: () => ({ scene: weakTvScene('on-channel', 6) }),
+  },
+  {
+    id: 'noise-dect-intercom',
+    title: 'Noise: a DECT crew intercom beside a 1.9 GHz mic',
+    note: 'Problem: a DECT-type crew intercom beltpack 4.0 m from the receive antenna of a 1893 MHz mic puts -29.0 dBm at the antenna and -75.6 dBm in the 200 kHz channel at the peak (one 0.417 ms slot in every 10 ms frame, duty 4.2 percent), -89.4 dBm on average. The floor rises 21.7 dB and the margin falls to 17.8 dB, with 20.2 dB between the wanted signal and each burst; the 100 Hz buzz an audio path can demodulate is not modelled. Keep intercoms off the mic band and away from the antennas (figures assumed).',
+    build: () => ({ scene: noiseSourceScene('dect-intercom') }),
+  },
+  {
+    id: 'noise-pyro-trigger-433',
+    title: 'Noise: a pyro cue trigger near a 433 MHz mic',
+    note: 'Less ideal: a pyro cue trigger on 433.9 MHz sends 0.1 s command bursts (duty 0.1 percent, assumed) from 19.1 m away to the receiver of a licence-free mic on 433.1 MHz. Each burst is -81.9 dBm in the channel after 38.1 dB of assumed selectivity, 30.3 dB above the floor, but the average is -111.9 dBm, a 3.2 dB floor rise with 50.2 dB of margin left. The wanted signal is 40.3 dB above each burst so the show works, but a dropout on the cue would be heard; coordinate the trigger channel (figures assumed).',
+    build: () => ({ scene: noiseSourceScene('pyro-trigger-433') }),
+  },
+  {
+    id: 'booster-padded-before-radio',
+    title: 'Booster behind a pad: the radio is tamed, the wanted signal pays',
+    note: 'Less ideal: a 10 dB pad ahead of the booster cuts the keyed crew radio at the booster output from 13.9 dBm to 3.9 dBm, so the compression falls from 3.5 dB to 0.1 dB and the keyed margin rises from 4.1 dB to 7.5 dB. The pad costs the wanted mic 10 dB all the time, so with the radio off the margin is 27.5 dB instead of 37.5 dB. A bandpass filter (booster-filtered-before-radio) gives 7.6 dB keyed and 36.0 dB unkeyed, so a pad is a blunt cure (figures assumed).',
+    build: () => ({ scene: boosterOverloadScene('padded') }),
   },
 ];
 

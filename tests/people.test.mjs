@@ -301,3 +301,21 @@ test('an IEM bodypack assigned to a person already on the plan jumps to them', (
   assert.ok(Math.hypot(r.x - 4, r.y - 4) < 0.5, JSON.stringify(r));
   assert.deepEqual(st.getScene().people[0].pos, { x: 4, y: 4 });
 });
+
+test('swap follows the jump rule for the displaced owner too; re-assigning the same link returns true and does not move the pack', () => {
+  const sc = createDefaultScene(), l2 = createDefaultLink('mic'); sc.links.push(l2);
+  const [m1, m2] = sc.links; m1.tx.pos = { x: 2, y: 2, z: 1.3 }; m2.tx.pos = { x: 30, y: 30, z: 1.3 };
+  const st = createStore(sc);
+  const pa = A.addPerson(st, { name: 'Ann', pos: { x: 2, y: 2 } }), pb = A.addPerson(st, { name: 'Bob', pos: { x: 30, y: 30 } });
+  assert.ok(A.assignMic(st, pa, m1.id) && A.assignMic(st, pb, m2.id));
+  const at = (id) => st.getScene().links.find((l) => l.id === id).tx.pos;
+  const before = JSON.stringify(at(m1.id));
+  assert.equal(A.assignMic(st, pa, m1.id), true, 'same link again is a success'); assert.equal(JSON.stringify(at(m1.id)), before, 'and the pack did not move');
+  assert.equal(A.assignMic(st, pa, m2.id, { swap: true }), true);
+  const people = st.getScene().people, ann = people.find((p) => p.id === pa), bob = people.find((p) => p.id === pb);
+  assert.equal(ann.micLinkId, m2.id); assert.equal(bob.micLinkId, m1.id);
+  const dist = (p, q) => Math.hypot(p.x - q.x, p.y - q.y);
+  assert.ok(dist(at(m2.id), ann.pos) <= 1.5, 'the new link jumps to Ann');
+  assert.ok(dist(at(m1.id), bob.pos) <= 1.5, `the displaced owner Bob gets the link at his body, not 28 m away (${dist(at(m1.id), bob.pos).toFixed(1)} m)`);
+  assert.ok(validateScene(st.getScene()).ok);
+});

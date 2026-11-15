@@ -47,13 +47,17 @@ export function stageOp1dBDbm(item, gainDb) {
  * signal loses. wantedOut is the wanted level after the chain with the compression applied, dBm.
  */
 export function chainCompression(stages, signals, { kneeDb = COMPRESSION_KNEE_DB } = {}) {
-  const sig = (signals || []).filter((s) => s && Number.isFinite(s.levelDbm)).map((s) => ({ ...s, level: s.levelDbm })); // a non-finite level (a muted source, -Infinity) carries no power
+  const sig = (signals || []).map((s, i) => (s ? { ...s, level: s.levelDbm, gi: i } : null)).filter((s) => s && Number.isFinite(s.levelDbm)); // gi = the index into gainDbs, kept before the filter so a dropped (non-finite, muted) signal cannot shift the others' gains
   const out = [];
   let total = 0;
   const pw = (d) => Math.pow(10, d / 10);
   for (const st of stages || []) {
     const inPw = sig.reduce((a, s) => a + pw(s.level), 0);
-    sig.forEach((s, i) => { s.level += Number.isFinite(st.gainDbs && st.gainDbs[i]) ? st.gainDbs[i] : 0; });
+    sig.forEach((s) => {
+      const g = st.gainDbs && st.gainDbs[s.gi];
+      if (g === -Infinity) s.level = -Infinity; // a stop band: the signal is fully rejected, not passed at 0 dB
+      else s.level += Number.isFinite(g) ? g : 0;
+    });
     const linPw = sig.reduce((a, s) => a + pw(s.level), 0);
     const inputDbm = inPw > 0 ? 10 * Math.log10(inPw) : -Infinity, linearOutDbm = linPw > 0 ? 10 * Math.log10(linPw) : -Infinity;
     let c = 0, headroomDb = null, level = 'ok';

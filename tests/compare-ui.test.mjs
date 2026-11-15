@@ -71,3 +71,13 @@ test('dialog: take, change, compare with current, restore, clear', async () => {
   assert.equal(store.getScene().links[0].rx.pos.x, f0); store.undo(); assert.equal(store.getScene().links[0].rx.pos.x, f0 + 6);
   byText(root, 'Clear snapshots').fire('click'); assert.equal(m.snaps.count(), 0); m.destroy();
 });
+test('restoreScene migrates then validates, refuses an invalid or link-less scene, and clears a selection that no longer exists', () => {
+  const a = createDefaultScene(), store = createStore(a), snap = structuredClone(a);
+  const bad = structuredClone(a); bad.links[0].freqMHz = 'not a number';
+  assert.equal(restoreScene(store, bad), false, 'invalid is refused'); assert.equal(store.getScene().links[0].freqMHz, a.links[0].freqMHz);
+  const old = structuredClone(a); old.version = 1; delete old.venue;
+  assert.equal(restoreScene(store, old), true, 'an older version is migrated, then accepted');
+  store.select('zone-that-is-gone'); assert.equal(restoreScene(store, snap), true); assert.equal(store.getSelection(), null, 'the dangling selection is cleared');
+  store.select(snap.links[0].id); assert.equal(restoreScene(store, snap), true); assert.equal(store.getSelection(), snap.links[0].id, 'a selection that still exists is kept');
+  const before = store.getScene(); assert.equal(restoreScene(store, { ...snap, links: [] }), false); assert.equal(store.getScene(), before);
+});

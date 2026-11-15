@@ -375,7 +375,7 @@ export function applyFrequencyPlan(store, assignments) {
 
 let measSeq = 0;
 const newMeasId = () => `m${Date.now().toString(36)}${(measSeq++).toString(36)}`;
-const cleanNote = (v) => String(v).replace(/[ -]/g, '').slice(0, MEASUREMENT_LIMITS.noteChars);
+const cleanNote = (v) => String(v).replace(/[\u0000-\u001f\u007f]/g, '').slice(0, MEASUREMENT_LIMITS.noteChars);
 
 // A checked measurement from loose input, or null: finite x, y and level, clamped to the limits; linkId falls back to the first link.
 function makeMeasurement(d, m) {
@@ -434,17 +434,36 @@ export function clearMeasurements(store) { return store.update((d) => { delete d
 
 /**
  * importMeasurements(store, csvText, { linkId, replace = false }) -> { added, errors }. Parses with importMeasurementsCsv; readings with no link of their own go to
- * `linkId` (default the first link); `replace` clears the existing readings first. One undo step. Rows past the 200-point cap are dropped with an error.
+ * `linkId` (default the first link); a link column cell is matched against link ids, then link names (case-insensitive), an unknown one skips the row with an error naming the file line; `replace` clears the existing readings first. One undo step. Rows past the 200-point cap are dropped with an error.
  */
 export function importMeasurements(store, text, { linkId, replace = false } = {}) {
   const parsed = importMeasurementsCsv(text);
   const errors = [...parsed.errors];
+  if (!parsed.points.length) return { added: 0, errors }; // nothing parsed: never touch the store (replace would otherwise wipe the existing readings)
+  const links = store.getScene().links || [];
+  const byId = new Map(links.map((l) => [l.id, l]));
+  const byName = new Map(); // a name is used only when it is unambiguous
+  for (const l of links) { const k = String(l.name || '').trim().toLowerCase(); if (k) byName.set(k, byName.has(k) ? null : l); }
+  const resolve = (cell) => byId.get(cell) || byName.get(String(cell).trim().toLowerCase()) || null;
+  const fallback = (typeof linkId === 'string' && byId.get(linkId)) || links[0] || null;
+  const ready = [];
+  parsed.points.forEach((p, k) => {
+    const lineNo = (parsed.lines && parsed.lines[k]) || k + 1;
+    let target = fallback;
+    if (p.linkId) {
+      target = resolve(p.linkId);
+      if (!target) { errors.push(`Line ${lineNo}: unknown link "${p.linkId}" (not a link id or name); row skipped.`); return; }
+    }
+    if (!target) { errors.push(`Line ${lineNo}: no link to attach the reading to; row skipped.`); return; }
+    ready.push({ ...p, linkId: target.id });
+  });
+  if (!ready.length) return { added: 0, errors }; // every row was refused: leave the existing readings alone
   let added = 0;
   store.update((d) => {
     const list = replace ? [] : (Array.isArray(d.measurements) ? d.measurements : []);
-    for (const p of parsed.points) {
+    for (const p of ready) {
       if (list.length >= MEASUREMENT_LIMITS.max) { errors.push(`At most ${MEASUREMENT_LIMITS.max} readings are kept; the rest were dropped.`); break; }
-      const made = makeMeasurement(d, { ...p, linkId: p.linkId || linkId });
+      const made = makeMeasurement(d, p);
       if (!made) { errors.push('A reading was skipped: no link to attach it to.'); continue; }
       list.push(made); added++;
     }

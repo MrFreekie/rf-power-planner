@@ -124,3 +124,16 @@ test('rf.js honours custom cable and custom antenna gain', () => {
   const rxGain = (r) => r.paths[0].gainDb;
   assert.ok(rxGain(r3) > rxGain(r2) + 5);
 });
+
+test('removeLink prunes the link readings and people references and refuses to remove the last link', async () => {
+  const { removeLink } = await import('../js/actions.js');
+  const { createDefaultLink } = await import('../js/model/scene.js');
+  const st = createStore(createDefaultScene()); const a = st.getScene().links[0].id;
+  assert.equal(removeLink(st, a), false, 'the last link stays');
+  st.update((d) => { const b = createDefaultLink('mic'); d.links.push(b); d.measurements = [{ id: 'm1', linkId: a, x: 1, y: 1, rxDbm: -50 }, { id: 'm2', linkId: b.id, x: 1, y: 1, rxDbm: -50 }]; });
+  const b = st.getScene().links[1].id;
+  assert.equal(removeLink(st, a), true);
+  assert.deepEqual(st.getScene().links.map((l) => l.id), [b]);
+  assert.deepEqual(st.getScene().measurements.map((m) => m.id), ['m2'], 'the removed link readings are gone');
+  assert.equal(removeLink(st, 'nope'), false);
+});

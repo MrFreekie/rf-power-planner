@@ -559,9 +559,10 @@ try {
   mountMeasure({ button: $('btn-meas'), store });
 } catch (err) { console.error('measurements', err); $('btn-meas').hidden = true; }
 try {
-  const { mountPalette, collectToolbarItems, collectSectionItems, exampleItems } = await import('./ui/commandPalette.js');
+  const { mountPalette, collectToolbarItems, collectControlItems, collectSectionItems, exampleItems } = await import('./ui/commandPalette.js');
   mountPalette({ button: $('btn-cmd'), getItems: () => [
     ...collectToolbarItems(document),
+    ...collectControlItems(document),
     { id: 'cmd:btn-plan-fit', label: 'Fit all (plan view)', group: 'Command', keywords: 'zoom fit view reset', run: () => { const b = $('btn-plan-fit'); if (b) b.click(); } },
     ...collectSectionItems(document),
     ...exampleItems(EXAMPLES, (id) => { applyExample(id); }),

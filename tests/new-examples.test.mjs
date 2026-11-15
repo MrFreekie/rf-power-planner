@@ -109,3 +109,93 @@ test('coordination pair: equal spacing has 2 + 1 hits, the spread plan none and 
   const m1 = solveLink(eq, eq.links[0]).marginDb, m2 = solveLink(sp, sp.links[0]).marginDb;
   near(m1, m2, 0.05); has('coord-spread-plan', f1(m2));
 });
+
+// ---- pass 3 review fixes and the five new examples (figures re-run from the model; tolerances stated per assertion) ----
+import { noiseSourceScene, weakTvScene, weakTvReport, boosterOverloadReport, boosterOverloadScene, measurementsScene, bodyWornScene } from '../js/examples.js';
+import { suggestCalibration, compareMeasurements } from '../js/model/measurements.js';
+import { confidenceSummary } from '../js/model/assumptions-in-use.js';
+import { tvChannelOf, TV_OCCUPIED_MHZ } from '../js/model/spectrum-map.js';
+
+const NEW_IDS = ['measurements-too-few-readings', 'tv-weak-6mhz-us-plan', 'noise-dect-intercom', 'noise-pyro-trigger-433', 'booster-padded-before-radio'];
+test('the five pass-3 examples exist, validate, solve, lead with a category and have at most four sentences', () => {
+  for (const id of NEW_IDS) {
+    const ex = buildExample(id); assert.ok(ex, id); ok(ex.scene);
+    for (const l of ex.scene.links) assert.ok(Number.isFinite(solveLink(ex.scene, l).marginDb), id);
+    assert.match(ex.note, /^(Best practice|Less ideal|Problem|Compare): /, id); assert.ok(ex.note.split('. ').length <= 4, id);
+  }
+  assert.match(note('measurements-too-few-readings'), /^Less ideal: /); assert.match(note('noise-dect-intercom'), /^Problem: /);
+});
+
+test('every example note starts with exactly one of the four category words and a colon (the two old odd leads are fixed)', () => {
+  for (const e of EXAMPLES) assert.match(e.note, /^(Best practice|Less ideal|Problem|Compare): /, e.id);
+  assert.match(note('splitter-two-way-receiver'), /^Less ideal: /); assert.match(note('pad-on-iem-transmitter'), /^Less ideal: /);
+});
+
+test('booster examples: the bias is supplied (no 12 V warning) and the quoted 4.1, 7.6, 3.5 dB figures are unchanged', () => {
+  for (const v of ['overloaded', 'filtered']) {
+    const r = boosterOverloadReport(v).result;
+    assert.ok(!r.warnings.some((w) => /bias|DC/i.test(w)), `${v}: ${r.warnings.join(' | ')}`);
+  }
+  const o = boosterOverloadReport('overloaded'), f = boosterOverloadReport('filtered'), p = boosterOverloadReport('plain');
+  near(p.marginDb, 7.6, 0.05); near(o.marginDb, 4.1, 0.05); near(f.marginDb, 7.6, 0.05); near(o.compressionDb, 3.5, 0.05); assert.equal(f.compressionDb, 0);
+  assert.equal(o.scene.links[0].rx.antennaBiasV, 12);
+  assert.ok(o.result.warnings.every((w) => /compression|1 dB point/.test(w)), 'the only warning left is the point of the example');
+});
+
+test('body-worn twins: the polarisation warning is named in the notes as the assumed floor, not left as a contradiction', () => {
+  for (const v of ['thin', 'short']) { const sc = bodyWornScene(v); assert.ok(solveLink(sc, sc.links[0]).warnings.some((w) => /Polarisation mismatch costs 15\.0 dB/.test(w)), v); }
+  assert.match(note('body-worn-proven-twin'), /polarisation warning is that deliberately assumed floor/);
+  assert.match(note('body-worn-thin-margin'), /why the model warns about polarisation/);
+});
+
+test('band walk note: the animated walk moves only the mic link, and the note says so (both packs move only when the person is moved)', () => {
+  const ex = buildExample('band-four-piece-walk'), n = ex.note;
+  assert.match(n, /animated walk moves only her mic pack/); assert.doesNotMatch(n, /walks from/);
+  assert.deepEqual(ex.walk.to, bandWalkEndScene().links[0].tx.pos);
+});
+
+test('measurements-too-few-readings: three readings at nearly one distance; the fit is offered with the two cautions', () => {
+  const sc = measurementsScene('too-few'), c = compareMeasurements(sc), g = suggestCalibration(sc);
+  assert.equal(c.n, 3); near(c.meanDb, -7.0, 0.05); near(c.rmsDb, 7.0, 0.05);
+  const l = sc.links[0], dists = c.points.map((p) => Math.hypot(p.x - l.tx.pos.x, p.y - l.tx.pos.y, p.z - l.tx.pos.z));
+  near(Math.min(...dists), 29.0, 0.05); near(Math.max(...dists), 31.0, 0.05);
+  assert.equal(g.best.id, 'body-loss'); near(g.best.fitted, 10.0, 0.05); near(g.best.afterRmsDb, 0.3, 0.05);
+  assert.ok(g.cautions.some((x) => /Only 3 measurements/.test(x))); assert.ok(g.cautions.some((x) => /nearly the same distance/.test(x)));
+  has('measurements-too-few-readings', '29 to 31 m', '7.0 dB', '10.0 dB', '0.3 dB rms');
+});
+
+test('tv-weak-6mhz-us-plan: 6 MHz width, channel 26, 5.38 MHz block: -85.0 -> -99.3 dBm in 200 kHz, floor rise and margin re-run', () => {
+  const w = weakTvReport('on-channel', 6), sc = w.scene;
+  assert.equal(sc.tvChannelWidthMHz, 6); assert.equal(w.channel, 26); assert.equal(tvChannelOf(sc.links[0].freqMHz, 6).n, 26); near(sc.links[0].freqMHz, 545.4, 1e-9);
+  near(w.noise.sources[0].rawDbm, -85.0, 0.05);
+  const hand = -85 - 10 * Math.log10((TV_OCCUPIED_MHZ[6] * 1000) / 200); // hand: 10 log10(5380 / 200) = 14.30 dB
+  near(hand, -99.30, 0.01); near(w.noise.sources[0].averageDbm, hand, 0.05);
+  const w8 = weakTvReport('on-channel'); near(w.noise.sources[0].averageDbm - w8.noise.sources[0].averageDbm, 10 * Math.log10(7600 / 5380), 0.05); // 1.50 dB
+  assert.equal(w.result.warnings.length, 0);
+  has('tv-weak-6mhz-us-plan', '-85.0 dBm', '14.3 dB', '-99.3 dBm', f1(w.riseDb), f1(w.marginDb), '1.5 dB', '5.38 MHz', 'channel 26', '542 to 548');
+  assert.equal(weakTvScene('on-channel').tvChannelWidthMHz, undefined, 'the 8 MHz scene is unchanged');
+});
+
+test('noise-dect-intercom and noise-pyro-trigger-433: peak against average figures re-run', () => {
+  for (const id of ['dect-intercom', 'pyro-trigger-433']) {
+    const sc = noiseSourceScene(id), l = sc.links[0], r = solveLink(sc, l), n = r.noiseSources, s = n.sources[0];
+    assert.equal(r.warnings.length, 0, id);
+    near(s.peakDbm - s.averageDbm, -10 * Math.log10(s.duty), 0.01, 'peak minus average = -10 log10(duty)');
+    if (id === 'dect-intercom') {
+      near(s.duty, 0.417e-3 * 100, 1e-9); near(s.distanceM, 4.0, 0.05); near(s.rawDbm, -29.0, 0.05);
+      has('noise-dect-intercom', '1893', f1(s.distanceM), f1(s.rawDbm), f1(s.peakDbm), f1(s.averageDbm), f1(n.riseDb), f1(r.marginDb), f1(r.inputPowerDbm - s.peakDbm), '4.2 percent');
+    } else {
+      near(s.duty, 0.001, 1e-12); assert.equal(s.inChannel, false); near(s.selectivityDb, 38.1, 0.05);
+      has('noise-pyro-trigger-433', '433.9', '433.1', f1(s.distanceM), f1(s.peakDbm), f1(s.averageDbm), f1(n.peakRiseDb), f1(n.riseDb), f1(r.marginDb), f1(r.inputPowerDbm - s.peakDbm), '38.1 dB');
+    }
+  }
+});
+
+test('booster-padded-before-radio: the 10 dB pad cuts compression to 0.1 dB, keyed margin 7.5 dB, 10 dB lost with the radio off', () => {
+  const pd = boosterOverloadReport('padded'), ov = boosterOverloadReport('overloaded');
+  near(pd.boosterOutDbm, ov.boosterOutDbm - 10, 0.01); near(pd.boosterOutDbm, 3.9, 0.05); near(pd.compressionDb, 0.06, 0.01); near(pd.marginDb, 7.5, 0.05);
+  const quiet = (v) => { const sc = boosterOverloadScene(v); sc.noiseSources = []; return solveLink(sc, sc.links[0]).marginDb; };
+  near(quiet('overloaded') - quiet('padded'), 10, 0.05, 'the pad costs exactly its 10 dB'); near(quiet('padded'), 27.5, 0.05); near(quiet('overloaded'), 37.5, 0.05); near(quiet('filtered'), 36.0, 0.05);
+  has('booster-padded-before-radio', '13.9 dBm', '3.9 dBm', '3.5 dB', '0.1 dB', '4.1 dB', '7.5 dB', '27.5 dB', '37.5 dB', '7.6 dB', '36.0 dB');
+  assert.ok(confidenceSummary(pd.scene).length === 1);
+});

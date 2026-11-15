@@ -200,7 +200,7 @@ export function simulatedNoiseFloor({ environment = 'quiet', bwKHz = 200, freqsM
 // ------------------------------------------------------------------------------------------------ TV carrier raising the floor
 /**
  * ASSUMED (flag U, illustrative): a digital TV block that is on air arrives at a venue receiver at about TV_BLOCK_DBM total power across the block
- * (a moderate field, roughly 50 dB above kTB over the block), spread flat over the occupied bandwidth (7.6 MHz in an 8 MHz channel, 5.38 MHz in a
+ * (a moderate field: kTB over 7.6 MHz is -174 + 10 log10(7.6e6) = -105.2 dBm, so about 30 dB above it; 5.38 MHz gives -106.7 dBm, about 32 dB), spread flat over the occupied bandwidth (7.6 MHz in an 8 MHz channel, 5.38 MHz in a
  * 6 MHz one). A receiver measuring in a 200 kHz window then sees the block power minus 10 log10(occupied / 200 kHz) added, power-wise, to the floor.
  * A small deterministic per-channel offset (+-3 dB) makes neighbouring blocks differ as they do in practice. Nothing here is measured.
  */

@@ -114,3 +114,23 @@ test('body-worn examples: thin margin not proven, shortened twin proven, notes q
   for (const x of ['25 m', '17.5 dB', '10 dB', '7.1 dB', '15 dB', '8.6 dB']) assert.ok(b.includes(x), x);
   for (const n of [a, b]) { assert.match(n, /^(Problem|Best practice):/); assert.ok(n.split(/(?<=\.)\s/).length <= 4); }
 });
+
+test('confidenceSummary scores each link from its own items, not the scene-merged ones', async () => {
+  const { itemsOfLink } = await import('../js/model/assumptions-in-use.js');
+  const s = createDefaultScene(); s.environment.externalNoise = 'urban';
+  const a = createDefaultLink('mic'), b = createDefaultLink('mic'); b.id = 'b2'; a.freqMHz = 200; b.freqMHz = 900; s.links = [a, b];
+  // The urban noise preset is a larger figure at 200 MHz (sensitivity 6 dB) than at 900 MHz (2 dB): hand-checked with externalNoiseNfDb.
+  const merged = assumptionsInUse(s).find((x) => x.id === 'external-noise');
+  assert.equal(merged.sensitivityDb, 6, 'the merged display item keeps the largest');
+  assert.equal(itemsOfLink(s, b, solveLink(s, b)).find((x) => x.id === 'external-noise').sensitivityDb, 2);
+  const rows = confidenceSummary(s);
+  assert.equal(rows[0].rssDb, 6); assert.equal(rows[1].rssDb, 2, 'link b is scored at its own 2 dB, not the merged 6 dB');
+});
+
+test('resultAt (shared with plan-export) reads an array, a Map or an object keyed by link id', async () => {
+  const { resultAt } = await import('../js/model/assumptions-in-use.js');
+  const { DEFAULT_OIP3_DBM, OP1DB_BELOW_OIP3_DB } = await import('../js/model/compression.js');
+  const s = createDefaultScene(), id = s.links[0].id, r = { marginDb: 1 };
+  assert.equal(resultAt([r], s, 0), r); assert.equal(resultAt(new Map([[id, r]]), s, 0), r); assert.equal(resultAt({ [id]: r }, s, 0), r); assert.equal(resultAt(undefined, s, 0), undefined);
+  near(DEFAULT_OIP3_DBM - OP1DB_BELOW_OIP3_DB, 10.4, 1e-9); // the fallback shown when a result carries no output 1 dB point
+});

@@ -12,7 +12,7 @@
 
 import { tvChannelOf, tvWidthOf, projectFrequencies, overlappingFrequencies } from './spectrum-map.js';
 import { analogOccupiedBwKHz, digitalConfigOf, digitalProfile } from './digital-link.js';
-import { confidenceSummary } from './assumptions-in-use.js';
+import { confidenceSummary, resultAt } from './assumptions-in-use.js';
 import { planHits } from './coord-lab.js';
 import { solveLink } from './rf.js';
 import { linkOwners } from './people.js';
@@ -26,13 +26,6 @@ export const PLAN_COLUMNS = Object.freeze([
 const clean = (s) => String(s == null ? '' : s).replace(/[\u0000-\u001f\u007f]/g, ' ').trim();
 const sig3 = (x) => (Number.isFinite(x) ? Number(x.toPrecision(3)) : null);
 const r1 = (x) => (Number.isFinite(x) ? Math.round(x * 10) / 10 : null);
-const resultAt = (results, scene, i) => {
-  const l = scene.links[i];
-  if (Array.isArray(results)) return results[i];
-  if (results instanceof Map) return results.get(l.id);
-  if (results && typeof results === 'object') return results[l.id];
-  return undefined;
-};
 
 /** frequencyPlanRows(scene, results?) -> rows { source 'link'|'imd', id, name, role 'mic'|'iem'|'other', freqMHz, tvChannel, occupiedBwKHz, txPowerMw, rxLevelDbm, marginDb, status, personName, assumptionFlag, notes }. */
 export function frequencyPlanRows(scene, results) {

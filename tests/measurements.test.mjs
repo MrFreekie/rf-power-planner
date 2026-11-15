@@ -144,3 +144,52 @@ test('examples: figures quoted in the notes are asserted', () => {
   for (const n of [a, b]) assert.ok(n.split(/(?<=\.)\s/).length <= 4);
   assert.ok(validateScene(EXAMPLES.find((e) => e.id === 'measurements-body-loss-high').build().scene).ok);
 });
+
+test('import: replace with zero parsed points leaves the store and its readings untouched', () => {
+  const st = createStore(simple());
+  AA.importMeasurements(st, 'x,y,dBm\n1,1,-50\n2,2,-51');
+  const before = st.getScene(), n = before.measurements.length;
+  let calls = 0; st.subscribe(() => { calls++; });
+  const r = AA.importMeasurements(st, 'x,y,dBm\nbad,1,1\n# nothing\n', { replace: true });
+  assert.equal(r.added, 0); assert.ok(r.errors.length >= 1);
+  assert.equal(st.getScene(), before, 'same scene object: no update happened'); assert.equal(st.getScene().measurements.length, n); assert.equal(calls, 0);
+  assert.equal(AA.importMeasurements(st, '', { replace: true }).added, 0); assert.equal(st.getScene().measurements.length, n);
+});
+
+test('import: a link column cell is resolved by id or name; an unknown link is an error and the row is skipped (not attached to the first link)', () => {
+  const s = simple(), b = createDefaultLink('mic'); b.name = 'Anna mic'; s.links.push(b);
+  const st = createStore(s), a = s.links[0].id;
+  const r = AA.importMeasurements(st, `link,x,y,dBm\n${a},1,1,-50\nanna MIC,2,2,-51\nghost,3,3,-52\n`);
+  assert.equal(r.added, 2); assert.equal(r.errors.length, 1); assert.match(r.errors[0], /Line 4: unknown link "ghost"/);
+  const m = st.getScene().measurements; assert.deepEqual(m.map((x) => x.linkId), [a, b.id]);
+  // all rows refused with replace: the existing readings stay
+  const r2 = AA.importMeasurements(st, 'link,x,y,dBm\nghost,3,3,-52', { replace: true });
+  assert.equal(r2.added, 0); assert.equal(st.getScene().measurements.length, 2);
+});
+
+test('importMeasurementsCsv: error line numbers match the file (blank and # lines counted); the separator comes from the first line only', () => {
+  const r = importMeasurementsCsv('# walk\n\nx,y,dBm\n1,2,-50\n\n3,four,-60\n5,6,-61\n');
+  assert.equal(r.points.length, 2); assert.equal(r.errors.length, 1); assert.match(r.errors[0], /^Line 6:/);
+  assert.deepEqual(r.lines, [4, 7]);
+  // first line is comma separated: a semicolon in a later note must not switch the separator for that row
+  const q = importMeasurementsCsv('x,y,dBm,note\n1,2,-50,door; left\n3,4,-60,ok');
+  assert.equal(q.errors.length, 0); assert.equal(q.points[0].note, 'door; left'); assert.equal(q.points.length, 2);
+});
+
+test('compareMeasurements: a non-finite predicted level is skipped and never poisons the mean or rms', () => {
+  const s = simple(); const id = s.links[0].id;
+  s.measurements = [{ id: 'a', linkId: id, x: 10, y: 0, rxDbm: -40 }, { id: 'b', linkId: id, x: 20, y: 0, rxDbm: -46 }];
+  const ok = compareMeasurements(s); assert.equal(ok.n, 2);
+  s.environment.bodyLossDb = Infinity; // a scene-level figure the link copy does not carry: every prediction is -Infinity
+  const c = compareMeasurements(s);
+  assert.equal(c.n, 0); assert.equal(c.skipped, 2); assert.ok(Number.isFinite(c.meanDb) && Number.isFinite(c.rmsDb));
+});
+
+test('notes: control characters are stripped by the escape-form regex (source has no raw control bytes)', async () => {
+  const st = createStore(simple());
+  AA.addMeasurement(st, { x: 1, y: 1, rxDbm: -50, note: 'a\u0001b\u007fc\td' });
+  assert.equal(st.getScene().measurements[0].note, 'abcd');
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../js/actionsAreas.js', import.meta.url), 'latin1');
+  assert.ok(!/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(src), 'no raw control bytes in actionsAreas.js');
+});

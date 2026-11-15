@@ -8,6 +8,7 @@
 import { NOISE_CATALOGUE } from '../model/noise-sources.js';
 
 export const NOISE_WAVE_MAX_SOURCES = 12;
+export const MIN_REACH_PX = 110, MIN_WALL_REACH_PX = 60;
 const REACH_M = 5;       // how far a ring travels before it fades out (visual)
 const num = (v, d) => (Number.isFinite(v) ? v : d);
 
@@ -39,14 +40,14 @@ export function classifyNoiseWave(src, reflector = null) {
   if (behaviour === 'continuous') return { mode: 'steady', period: 0.9, life: 3.6, reachM: REACH_M, onS: Infinity, offS: 0 };
   const occasional = { mode: 'occasional', period: 2.5, life: 2.2, reachM: REACH_M, onS: Infinity, offS: 0 };
   if (behaviour === 'impulsive') return num(p.repHz, 1) >= 20 ? { mode: 'faint', period: 1.2, life: 3.6, reachM: REACH_M, onS: Infinity, offS: 0 } : occasional;
-  if (behaviour === 'pulsed-tdma') return { mode: 'keyed', period: 0.8, life: 2.8, reachM: REACH_M, onS: 4, offS: 3 };
+  if (behaviour === 'pulsed-tdma') return { mode: 'keyed', period: 0.8, life: 2.0, reachM: REACH_M, onS: 4, offS: 3 };
   // intermittent
   const duty = num(p.dutyCycle, 0.1), onS = num(p.onS, 1);
   if (duty < 0.05 || (onS < 0.5 && duty < 0.05)) return occasional;
   if (onS >= 0.5) {
     const on = Math.min(8, onS);
     const off = Math.min(8, Math.max(3, onS / Math.max(duty, 1e-3) - onS));
-    return { mode: 'keyed', period: 0.8, life: 2.8, reachM: REACH_M, onS: on, offS: off };
+    return { mode: 'keyed', period: 0.8, life: 2.0, reachM: REACH_M, onS: on, offS: off };
   }
   return { mode: 'faint', period: 1.2, life: 3.6, reachM: REACH_M, onS: Infinity, offS: 0 }; // short, busy bursts (Wi-Fi, Bluetooth)
 }
@@ -91,8 +92,8 @@ function now() {
 const reducedMotion = () => typeof matchMedia === 'function' && !!matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 function ringAlpha(cfg, f) {
-  const base = cfg.mode === 'faint' ? 0.22 : cfg.mode === 'wall' ? 0.4 : 0.5;
-  return base * (1 - f) * Math.min(1, f * 8 + 0.25);
+  const base = cfg.mode === 'faint' ? 0.4 : cfg.mode === 'wall' ? 0.75 : 0.85;
+  return base * (1 - f * f) * Math.min(1, f * 8 + 0.25);
 }
 
 function stadium(ctx, a, b, d) {
@@ -110,6 +111,7 @@ function stadium(ctx, a, b, d) {
  * drawNoiseWaves(ctx, th, vp, scene, w, h, rip): call right after rip.drawPlan(...). Respects rip.settings (on, paused, field), the print
  * switch (settings.on = false) and prefers-reduced-motion (one static faint ring). At most NOISE_WAVE_MAX_SOURCES sources are drawn.
  */
+export const NOISE_RING_STYLE = Object.freeze({ width: 1.7, dash: [7, 5], haloWidth: 4, haloAlpha: 0.3 });
 export function drawNoiseWaves(ctx, th, vp, scene, w, h, rip) {
   const st = rip && rip.settings;
   if (!st || !st.on || st.field) return 0;
@@ -123,15 +125,14 @@ export function drawNoiseWaves(ctx, th, vp, scene, w, h, rip) {
   const refl = new Map((scene.reflectors || []).map((r) => [r.id, r]));
   let drawn = 0;
   ctx.save();
-  ctx.strokeStyle = th.inkSoft || th.ink; ctx.lineWidth = 1.3; ctx.lineCap = 'butt';
-  ctx.setLineDash([4, 5]);
+  ctx.lineCap = 'butt';
   for (const s of list) {
     if (drawn >= NOISE_WAVE_MAX_SOURCES) break;
     const cfg = classifyNoiseWave(s, s && s.reflectorId ? refl.get(s.reflectorId) : null);
     if (!cfg) continue;
     const wall = cfg.mode === 'wall' ? refl.get(s.reflectorId) : null;
     if (!wall && !(s.pos && Number.isFinite(s.pos.x) && Number.isFinite(s.pos.y))) continue;
-    const reachPx = cfg.reachM * vp.pxPerM;
+    const reachPx = Math.max(cfg.reachM * vp.pxPerM, cfg.mode === 'wall' ? MIN_WALL_REACH_PX : MIN_REACH_PX); // never so small on screen that the rings cannot be seen
     const rings = reduced ? [{ f: 0.45 }] : waveRings(cfg, s.id, clock.t);
     if (!rings.length) { drawn++; continue; }
     let a = null, b = null, c = null;
@@ -147,7 +148,11 @@ export function drawNoiseWaves(ctx, th, vp, scene, w, h, rip) {
       const rad = Math.max(2, r.f * reachPx);
       ctx.globalAlpha = reduced ? 0.14 : ringAlpha(cfg, r.f);
       if (ctx.globalAlpha <= 0.005) continue;
-      if (wall) { stadium(ctx, a, b, Math.max(3, rad)); ctx.stroke(); } else { ctx.beginPath(); ctx.arc(c.x, c.y, rad, 0, Math.PI * 2); ctx.stroke(); }
+      const path = () => { if (wall) stadium(ctx, a, b, Math.max(3, rad)); else { ctx.beginPath(); ctx.arc(c.x, c.y, rad, 0, Math.PI * 2); } };
+      // a paper-coloured halo under the dashes keeps them readable over the denser, darker link rings; the dashes stay greyscale
+      const al = ctx.globalAlpha;
+      ctx.setLineDash([]); ctx.strokeStyle = th.paper || '#ffffff'; ctx.lineWidth = NOISE_RING_STYLE.haloWidth; ctx.globalAlpha = al * NOISE_RING_STYLE.haloAlpha; path(); ctx.stroke();
+      ctx.setLineDash(NOISE_RING_STYLE.dash); ctx.strokeStyle = th.inkSoft || th.ink; ctx.lineWidth = NOISE_RING_STYLE.width; ctx.globalAlpha = al; path(); ctx.stroke();
     }
   }
   ctx.restore();

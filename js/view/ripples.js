@@ -30,6 +30,13 @@ const FIELD_INTERVAL_MS = 120;
 const DEG = Math.PI / 180;
 const IMD_COLORS = ['rgb(74,120,181)', 'rgb(201,120,40)', 'rgb(120,90,170)', 'rgb(40,150,150)'];
 const TWO_PI = Math.PI * 2;
+export function rippleNote(st, reduced, hasNoise) {
+  if (!st.on) return '';
+  if (st.field) return 'Field: where the direct and reflected waves cancel (a null) the shading is light. Moving the receiver a few centimetres can change a null into a peak.';
+  if (reduced) return 'Reduced motion: static rings. Spacing is the true wavelength.';
+  return hasNoise ? NOISE_NOTE : '';
+}
+export const NOISE_NOTE = 'Dashed rings: noise sources (keyed ones only while on)';
 
 function loadSettings() {
   const s = { on: true, speed: 1, field: false, paused: false };
@@ -490,6 +497,7 @@ export function createRipples({ store }) {
     const lFd = mk('label', { className: 'rc-check', title: 'Show the static interference pattern of the direct and reflected waves' }); const cFd = mk('input', { type: 'checkbox' }); lFd.append(cFd, document.createTextNode(' Field'));
     const bP = mk('button', { type: 'button', className: 'rc-pause' }, 'Pause'); bP.setAttribute('aria-pressed', 'false');
     const note = mk('span', { className: 'rc-note hint' });
+    const hasNoise = () => { const sc = store.getScene && store.getScene(); return !!(sc && Array.isArray(sc.noiseSources) && sc.noiseSources.length); };
     ctl.append(lOn, lSp, lFd, bP, note);
     head.append(ctl);
     cOn.addEventListener('change', () => set({ on: cOn.checked }));
@@ -500,13 +508,12 @@ export function createRipples({ store }) {
       cOn.checked = settings.on; rng.value = String(settings.speed); spNum.textContent = `${settings.speed.toFixed(2)}x`;
       cFd.checked = settings.field; bP.textContent = settings.paused ? 'Resume' : 'Pause'; bP.setAttribute('aria-pressed', String(settings.paused));
       rng.disabled = !settings.on || settings.field; bP.disabled = !settings.on || settings.field || reduced; cFd.disabled = !settings.on;
-      note.textContent = !settings.on ? '' : settings.field
-        ? 'Field: where the direct and reflected waves cancel (a null) the shading is light. Moving the receiver a few centimetres can change a null into a peak.'
-        : reduced ? 'Reduced motion: static rings. Spacing is the true wavelength.' : '';
+      note.textContent = rippleNote(settings, reduced, hasNoise());
       note.hidden = !note.textContent;
     };
     subs.add(sync); sync();
-    return { head, ctl, sync };
+    const offStore = store.subscribe ? store.subscribe(sync) : null;
+    return { head, ctl, sync, offStore };
   }
 
   function attach(kind, canvas, invalidate) {
@@ -518,7 +525,7 @@ export function createRipples({ store }) {
     return () => {
       views.delete(kind);
       if (observer) observer.unobserve(canvas);
-      if (ui) { subs.delete(ui.sync); ui.ctl.remove(); }
+      if (ui) { subs.delete(ui.sync); if (typeof ui.offStore === 'function') ui.offStore(); ui.ctl.remove(); }
     };
   }
 

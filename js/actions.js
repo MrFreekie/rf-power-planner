@@ -5,7 +5,7 @@ import { buildExample } from './examples.js';
 import { IMD_PRESETS, COMBINER_PRESETS } from './model/imd-params.js';
 import { startWalk, stopWalk } from './walk.js';
 import { effectiveAntennaB } from './model/diversity.js';
-import { createDefaultScene, createDefaultLink, createChainItem, createReflector, createBranch, createZone, createPlatform, STAGE_LIMITS, PLATFORM_LIMITS, PLATFORM_MATERIALS, createImdTransmitter, defaultImdTransmitters, newId, SCENE_LIMITS } from './model/scene.js';
+import { migrateScene, validateScene, createDefaultScene, createDefaultLink, createChainItem, createReflector, createBranch, createZone, createPlatform, STAGE_LIMITS, PLATFORM_LIMITS, PLATFORM_MATERIALS, createImdTransmitter, defaultImdTransmitters, newId, SCENE_LIMITS } from './model/scene.js';
 import { applyFmPreset } from './model/fm-presets.js';
 import { DEFAULT_MIC_OFFSET, DEFAULT_IEM_OFFSET, PEOPLE_LIMITS, PERSON_ROLES, PERSON_COLOURS, createPerson, personLinkName, extraLinkName, personPackPositions, offsetFromPack, linkOwners, prunePeople } from './model/people.js';
 import { validateVenue } from './model/venue-underlay.js';
@@ -868,6 +868,7 @@ function assign(store, personId, linkId, which, { swap = false } = {}) {
       if (xo && xo.id !== personId && !swap) return;
       if (xo) dropExtra(xo, linkId);
     }
+    if (p[idKey] === linkId) { ok = true; return; } // the person already carries this link: nothing to do, and the pack is not moved
     const owner = list.find((x) => x.id !== personId && x[idKey] === linkId);
     if (owner && !swap) return;
     const posOf = (l) => (which === 'iem' ? l.rx.pos : l.tx.pos);
@@ -877,7 +878,7 @@ function assign(store, personId, linkId, which, { swap = false } = {}) {
       if (prev) {
         const l2 = findLink(d, prev);
         owner[idKey] = prev;
-        if (l2 && owner.pos) owner[offKey] = packOffset(owner, posOf(l2));
+        if (l2 && owner.pos) { owner[offKey] = assignedOffset(owner, which, posOf(l2)); placePacks(d, owner); } // the same jump rule as for the new owner: a placed person gets the pack at their body
         if (l2) l2.name = personLinkName(owner, which);
       }
       applyCoupling(d, owner); // the other person's body coupling goes onto the link they received
@@ -970,9 +971,29 @@ export function movePeople(store, ids, delta, o = {}) {
   }, opts(o));
 }
 
-/** pruneScenePeople(store): after the UI deletes a link, call this to drop the references to it (people never keep a dangling link). */
+/** Drop the walk-test readings of links that no longer exist (they would otherwise be orphans that the calibration silently skips). */
+function pruneMeasurements(d) {
+  if (!Array.isArray(d.measurements)) return;
+  const ids = new Set((d.links || []).map((l) => l.id));
+  d.measurements = d.measurements.filter((m) => m && ids.has(m.linkId));
+  if (!d.measurements.length) delete d.measurements;
+}
+
+/** pruneScenePeople(store): after the UI deletes a link, call this to drop the references to it (people never keep a dangling link; the link's walk-test readings go too). */
 export function pruneScenePeople(store) {
-  return store.update((d) => { if (Array.isArray(d.people)) prunePeople(d); });
+  return store.update((d) => { if (Array.isArray(d.people)) prunePeople(d); pruneMeasurements(d); });
+}
+
+/** removeLink(store, linkId) -> true when removed. The last link cannot be removed. People lose their reference to it and its walk-test readings are deleted, in one undo step. */
+export function removeLink(store, linkId) {
+  return store.update((d) => {
+    if (!Array.isArray(d.links) || d.links.length < 2) return;
+    const i = d.links.findIndex((l) => l.id === linkId);
+    if (i < 0) return;
+    d.links.splice(i, 1);
+    if (Array.isArray(d.people)) prunePeople(d);
+    pruneMeasurements(d);
+  });
 }
 
 /** peopleLinkOwners(scene) -> Map linkId -> { personId, which, extra? } (extra: true for a backup mic link) for the GUI dropdown (only unassigned links are offered, the rest need a swap). */
@@ -990,11 +1011,35 @@ export function ensureOwnAntennaB(store, linkId) {
   return ok;
 }
 
-/** Replace the whole scene with a copy of `scene` (a Compare snapshot): one undo step, the walk is stopped first. Returns true when applied. */
+/** Every string `id` anywhere in a scene (links, zones, people, noise sources ...): what a selection can point at. */
+function sceneIds(scene) {
+  const ids = new Set();
+  const walk = (v, depth) => {
+    if (!v || typeof v !== 'object' || depth > 6) return;
+    if (Array.isArray(v)) { for (const x of v) walk(x, depth + 1); return; }
+    if (typeof v.id === 'string') ids.add(v.id);
+    for (const k of Object.keys(v)) if (k !== 'venue') walk(v[k], depth + 1);
+  };
+  walk(scene, 0);
+  return ids;
+}
+
+/** restorable(scene) -> true when restoreScene would accept this object at all (an object with at least one link). The Compare snapshot Take uses the same rule. */
+export const restorable = (scene) => !!scene && typeof scene === 'object' && Array.isArray(scene.links) && scene.links.length > 0;
+
+/**
+ * Replace the whole scene with a copy of `scene` (a Compare snapshot): one undo step, the walk is stopped first. The copy is migrated (older versions are read)
+ * and then validated; a scene that fails either, or has no link, is refused (false) and the current scene is left alone. A selection whose id is not in the
+ * restored scene is cleared. Returns true when applied.
+ */
 export function restoreScene(store, scene) {
-  if (!scene || !Array.isArray(scene.links) || !scene.links.length) return false;
+  if (!restorable(scene)) return false;
+  let copy;
+  try { copy = migrateScene(structuredClone(scene)); } catch { return false; }
+  if (!validateScene(copy).ok) return false;
   stopWalk();
-  const copy = structuredClone(scene);
   store.update(() => copy);
+  const sel = store.getSelection();
+  if (sel && !sceneIds(store.getScene()).has(sel)) store.select(null);
   return true;
 }

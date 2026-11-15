@@ -8,8 +8,11 @@
 // Attribution ("mainly because"): for a link whose margin moved, each changed field that can influence it is reverted to its A value in a copy of B
 // and the link is solved again; contributionDb = margin(B) - margin(B with that one field reverted). This is one-at-a-time attribution: when two
 // changes interact (for example a longer cable and a booster) the contributions do not add up to the total, `exact` is false (residual over
-// max(0.3 dB, 10 percent of the move)) and the headline says so. At most MAX_RESOLVES (40) re-solves are used per diff; changes beyond that are
-// listed unattributed and `truncated` is true.
+// max(0.3 dB, 10 percent of the move)) and the headline says so. At most MAX_RESOLVES (40) re-solves are used PER LINK; changes beyond that are
+// listed unattributed and `truncated` is true. Scene-level changes that are not the link's own (environment, reflectors, zones ...) are first reverted
+// all together in ONE re-solve: if that does not move the link's margin none of them is tested again; only when it does are they split and tried one by one.
+// Top-level keys that cannot change an RF result (name, audioSource, measurements, people, units, coverage, venue ...) are never reverted. The venue underlay
+// (large) is left out of the compared copy altogether. diffScenes(a, a) (the same object) returns at once with no changes.
 
 import { migrateScene } from './scene.js';
 import { solveLink } from './rf.js';
@@ -23,11 +26,12 @@ const finite = (x) => (Number.isFinite(x) ? x : null);
 const same = (a, b) => Object.is(a, b) || (typeof a === 'number' && typeof b === 'number' && a === b) || (typeof a === 'object' && typeof b === 'object' && a !== null && b !== null && JSON.stringify(a) === JSON.stringify(b));
 const clone = (x) => (x === undefined ? undefined : structuredClone(x));
 const idArray = (a) => Array.isArray(a) && a.length > 0 && a.every((e) => isObj(e) && typeof e.id === 'string');
-const SKIP_TOP = new Set(['version']);
+const SKIP_TOP = new Set(['version', 'venue']); // venue: a large underlay that never reaches the solver, so it is neither copied nor compared
 
 function prepare(raw) {
   if (!isObj(raw)) return { scene: { links: [] }, note: 'not a scene object' };
-  try { return { scene: migrateScene(raw), note: null }; } catch (e) { return { scene: structuredClone(raw), note: `could not be migrated: ${e.message}` }; }
+  const { venue, ...rest } = raw; // the venue underlay is not cloned or compared
+  try { return { scene: migrateScene(rest), note: null }; } catch (e) { return { scene: structuredClone(rest), note: `could not be migrated: ${e.message}` }; }
 }
 
 // ---------------------------------------------------------------- walking changes
@@ -154,17 +158,17 @@ const brief = (r) => (r ? { marginDb: finite(r.marginDb), rxLevelDbm: finite(r.r
   compressionDb: finite(r.compression && r.compression.worst ? r.compression.worst.compressionDb : 0), warnings: Array.isArray(r.warnings) ? r.warnings.map(String) : [] } : null);
 const sub = (a, b) => (a !== null && b !== null && a !== undefined && b !== undefined ? finite(b - a) : null);
 
-function deltasOf(ra, rb, sa, sb) {
+function deltasOf(ra, rb, imd) {
   const A = brief(ra), B = brief(rb);
-  if (!A || !B) return { marginDb: null, rxLevelDbm: null, inputPowerDbm: null, noiseFloorDbm: null, compressionDb: null, statusFrom: A && A.status, statusTo: B && B.status, imd: { from: null, to: null }, warningsAdded: [], warningsRemoved: [] };
+  if (!A || !B) return { marginDb: null, rxLevelDbm: null, inputPowerDbm: null, noiseFloorDbm: null, compressionDb: null, statusFrom: A && A.status, statusTo: B && B.status, imd: { ...imd }, warningsAdded: [], warningsRemoved: [] };
   return {
     marginDb: sub(A.marginDb, B.marginDb), rxLevelDbm: sub(A.rxLevelDbm, B.rxLevelDbm), inputPowerDbm: sub(A.inputPowerDbm, B.inputPowerDbm), noiseFloorDbm: sub(A.noiseFloorDbm, B.noiseFloorDbm),
-    compressionDb: sub(A.compressionDb, B.compressionDb), statusFrom: A.status, statusTo: B.status, imd: { from: imdCount(sa), to: imdCount(sb) },
+    compressionDb: sub(A.compressionDb, B.compressionDb), statusFrom: A.status, statusTo: B.status, imd: { ...imd },
     warningsAdded: B.warnings.filter((w) => !A.warnings.includes(w)), warningsRemoved: A.warnings.filter((w) => !B.warnings.includes(w)),
   };
 }
 
-const NON_RF_TOP = new Set(['measurements', 'people', 'units', 'coverage', 'venue']);
+const NON_RF_TOP = new Set(['measurements', 'people', 'units', 'coverage', 'venue', 'name', 'audioSource']);
 
 /**
  * diffScenes(a, b) -> { summary: { linksA, linksB, added[], removed[], changed[], notes[], changeCount },
@@ -182,7 +186,9 @@ export function diffScenes(a, b) {
   const nameOf = (l) => (typeof l.name === 'string' && l.name ? l.name : String(l.id));
   const added = linksB.filter((l) => !idsA.has(l.id)).map((l) => ({ id: l.id, name: nameOf(l) })), removed = linksA.filter((l) => !idsB.has(l.id)).map((l) => ({ id: l.id, name: nameOf(l) }));
 
-  const raw = []; walk(A, B, [], raw);
+  const identical = a === b; // the same object: nothing to walk or revert
+  const raw = []; if (!identical) walk(A, B, [], raw);
+  const imd = { from: imdCount(A), to: identical ? imdCount(A) : imdCount(B) }; // scene-level, so counted once here and not per link
   const changes = groupPositions(raw);
   const pub = new Map(changes.map((c) => [c, publicChange(c, A, B)]));
   const ownerId = (c) => (c.segs[0] === 'links' && typeof c.segs[1] === 'object' ? c.segs[1].id : null);
@@ -208,28 +214,46 @@ export function diffScenes(a, b) {
   for (const lb of linksB) {
     if (!idsA.has(lb.id)) continue;
     const la = linksA.find((l) => l.id === lb.id);
-    const ra = solve(A, la), rb = solve(B, lb);
-    const deltas = deltasOf(ra, rb, A, B);
+    const ra = solve(A, la), rb = identical ? ra : solve(B, lb);
+    const deltas = deltasOf(ra, rb, imd);
     const fields = changes.filter((c) => ownerId(c) === lb.id).map((c) => pub.get(c));
     links.push({ id: lb.id, name: nameOf(lb), fields, resultA: brief(ra), resultB: brief(rb), deltas, attribution: null });
     solvedPairs.push({ entry: links[links.length - 1], lb });
   }
+  const { venue: _v, ...Bsolve } = B; // already venue-free (prepare), kept explicit: the copy for each revert never carries it
   for (const { entry, lb } of solvedPairs) {
     const d = entry.deltas.marginDb;
     if (d === null || Math.abs(d) < MARGIN_EPS_DB) continue;
-    const cands = attributable.filter((c) => { const o = ownerId(c); return o === lb.id || (o === null && c.segs[0] !== 'links'); });
+    const own = attributable.filter((c) => ownerId(c) === lb.id);
+    const shared = attributable.filter((c) => ownerId(c) === null && c.segs[0] !== 'links');
     const mB = entry.resultB.marginDb, contributions = [];
-    let truncated = false;
-    for (const c of cands) {
-      if (resolves >= MAX_RESOLVES) { truncated = true; break; }
-      resolves++;
-      const copy = structuredClone(B);
-      if (!revertOn(copy, c)) continue;
+    let truncated = false, used = 0; // re-solve budget of THIS link
+    const marginWithout = (list) => {
+      if (used >= MAX_RESOLVES) { truncated = true; return undefined; }
+      used++; resolves++;
+      const copy = structuredClone(Bsolve);
+      for (const c of list) if (!revertOn(copy, c)) return null;
       const l2 = (copy.links || []).find((l) => l && l.id === lb.id);
-      const m2 = l2 ? marginOf(solve(copy, l2)) : null;
-      if (m2 === null) continue;
-      const p = pub.get(c);
-      contributions.push({ path: p.path, label: p.label, from: p.from, to: p.to, fromText: p.fromText, toText: p.toText, contributionDb: mB - m2 });
+      return l2 ? marginOf(solve(copy, l2)) : null;
+    };
+    const add = (c, m2) => { const p = pub.get(c); contributions.push({ path: p.path, label: p.label, from: p.from, to: p.to, fromText: p.fromText, toText: p.toText, contributionDb: mB - m2 }); };
+    for (const c of own) {
+      const m2 = marginWithout([c]);
+      if (m2 === undefined) break;
+      if (m2 !== null) add(c, m2);
+    }
+    if (shared.length === 1) {
+      const m2 = marginWithout(shared);
+      if (m2 !== undefined && m2 !== null) add(shared[0], m2);
+    } else if (shared.length > 1) {
+      const all = marginWithout(shared); // one test for the whole group first
+      if (all !== undefined && all !== null && Math.abs(mB - all) >= MARGIN_EPS_DB) {
+        for (const c of shared) {
+          const m2 = marginWithout([c]);
+          if (m2 === undefined) break;
+          if (m2 !== null) add(c, m2);
+        }
+      }
     }
     contributions.sort((x, y) => Math.abs(y.contributionDb) - Math.abs(x.contributionDb));
     const explained = contributions.reduce((s, x) => s + x.contributionDb, 0), residual = d - explained;
@@ -238,7 +262,7 @@ export function diffScenes(a, b) {
 
   const changedIds = links.filter((l) => l.fields.length || (l.deltas.marginDb !== null && l.deltas.marginDb !== 0)).map((l) => l.id);
   return {
-    summary: { linksA: linksA.length, linksB: linksB.length, added, removed, changed: changedIds, notes, changeCount: changes.length }, links, items, resolves,
+    summary: { linksA: linksA.length, linksB: linksB.length, added, removed, changed: changedIds, notes, changeCount: changes.length, imd }, links, items, resolves,
   };
 }
 const emptyItems = () => ({ added: [], removed: [], changed: [] });
@@ -260,14 +284,15 @@ export function headline(diff) {
         t += `, mainly because ${top.label} changed from ${top.fromText} to ${top.toText}`;
         if (others > 0) t += ` (${others} other change${others === 1 ? '' : 's'} also counted)`;
         if (!at.exact) t += at.truncated ? '. Only some of the changes were tested, so this attribution is approximate' : '. The changes interact, so this attribution is approximate';
-      } else if (l.fields.length === 0) t += ', because of a change elsewhere in the scene';
+      } else if (at && at.truncated) t += ', but the attribution was limited (more changes than could be tested)';
+      else if (l.fields.length === 0) t += ', because of a change elsewhere in the scene';
       out.push(`${t}.`);
     } else if (l.fields.length) out.push(`${l.name}: ${l.fields.length} field${l.fields.length === 1 ? '' : 's'} changed, margin unchanged.`);
     else if (d === null && (l.resultA === null || l.resultB === null)) out.push(`${l.name} could not be solved in one of the scenes.`);
     if (l.deltas.statusFrom && l.deltas.statusTo && l.deltas.statusFrom !== l.deltas.statusTo) out.push(`${l.name} status goes from ${l.deltas.statusFrom} to ${l.deltas.statusTo}.`);
-    if (l.deltas.imd.from !== l.deltas.imd.to) out.push(`${l.name}: intermodulation conflicts go from ${l.deltas.imd.from} to ${l.deltas.imd.to}.`);
     if (l.deltas.warningsAdded.length) out.push(`${l.name}: new warning: ${l.deltas.warningsAdded[0]}`);
   }
+  if (s.imd && s.imd.from !== s.imd.to) out.push(`Intermodulation conflicts go from ${s.imd.from} to ${s.imd.to}.`); // one scene-level sentence, not one per link
   for (const x of s.added) out.push(`${x.name} was added.`);
   for (const x of s.removed) out.push(`${x.name} was removed.`);
   for (const k of ['reflectors', 'zones', 'noiseSources', 'people', 'platforms', 'measurements']) {
