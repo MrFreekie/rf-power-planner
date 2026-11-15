@@ -91,3 +91,16 @@ test('keys: Page Up/Down tilt, Shift is fine, End resets, double-click reaches t
   listeners.dblclick({ clientX: 5, clientY: 5 });
   assert.deepEqual(got, [['tilt', 1, undefined], ['tilt', -1, true], ['reset'], ['nudge', 0, -1], ['rotate', 0, -1], ['cycle', 1], ['dbl', 'rx1']]);
 });
+
+test('antenna B tilt: ensureOwnAntennaB copies antenna A once, then tilt can be set on B only', async () => {
+  const { createStore } = await import('../js/store.js');
+  const { EXAMPLES } = await import('../js/examples.js');
+  const { ensureOwnAntennaB, setAntennaField } = await import('../js/actions.js');
+  const sc = EXAMPLES.find((e) => e.id === 'diversity-modes').build().scene, store = createStore(sc), l = sc.links[0];
+  assert.equal(ensureOwnAntennaB(store, l.id), true);
+  assert.equal(setAntennaField(store, l.id, 'antennaB', 'tiltDeg', 15), true);
+  const after = store.getScene().links[0];
+  assert.equal(after.rx.diversity.antennaB.antenna.tiltDeg, 15);
+  assert.equal(after.rx.antenna.tiltDeg, undefined, 'antenna A untouched');
+  assert.equal(ensureOwnAntennaB(store, 'nope'), false);
+});

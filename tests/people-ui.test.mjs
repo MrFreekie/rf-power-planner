@@ -68,3 +68,9 @@ test('a group move keeps offsets; reassigning updates names', () => {
   assert.equal(assignMic(store, p.id, other.micLinkId, { swap: true }), true);
   assert.equal(personOfLink(store.getScene(), other.micLinkId).person.id, p.id);
 });
+
+test('paths table gets one row with both margins for the carrier', async () => {
+  const { peoplePathRows } = await import('../js/ui/peopleUi.js');
+  const sc = scene(), p = sc.people[0], rows = peoplePathRows(sc, sc.links.find((l) => l.id === p.micLinkId), (l) => solveLink(sc, l));
+  assert.equal(rows.length, 1); assert.equal(rows[0].kind, `Person: ${p.name}`); assert.match(rows[0].relDb, /Mic .* \| IEM /);
+});

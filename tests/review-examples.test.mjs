@@ -2,7 +2,7 @@
 // Tolerance: figures are compared as text rounded to the digits the note prints (0.1 dB, 0.05 dB where two decimals are printed).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { reviewScene, sosReport, EXAMPLES, buildExample } from '../js/examples.js';
+import { reviewScene, sosReport, EXAMPLES, buildExample, fohScene } from '../js/examples.js';
 import { solveLink, chainLossDb } from '../js/model/rf.js';
 import { validateScene } from '../js/model/scene.js';
 import { coverageGrid, zoneStats, zoneRequirement } from '../js/model/coverage.js';
@@ -24,7 +24,7 @@ test('all review examples exist, validate, solve, and name their category with a
     assert.ok(ex, id);
     assert.deepEqual(validateScene(ex.scene), { ok: true, errors: [] }, id);
     assert.ok(Number.isFinite(solve(ex.scene).inputPowerDbm), id);
-    assert.match(ex.note, /^(Best practice|Less ideal|Problem|Compare|Narrow-band mic|Understand)/, id);
+    assert.match(ex.note, /^(Best practice|Less ideal|Problem|Compare)/, id);
     assert.ok(ex.note.split('. ').length <= 4, id);
   }
 });
@@ -154,4 +154,20 @@ test('p2p ground reflection: ripple against the direct ray over 20 to 80 m', () 
   const d150 = p2pScene('delay'); d150.links[0].p2p.groundReflection = true; d150.environment.model = 'two-ray';
   const noRefl = solve(p2pScene('delay')).rxPowerDbm;
   has('p2p-delay-speaker', f1(solve(d150).rxPowerDbm - noRefl));
+});
+
+test('every example note starts with a category: Best practice, Less ideal, Problem or Compare', () => {
+  assert.ok(EXAMPLES.length >= 106);
+  for (const e of EXAMPLES) assert.match(e.note, /^(Best practice|Less ideal|Problem|Compare)(:| \()|^Less ideal fix:/, e.id);
+});
+
+test('the best-practice FOH scenes carry no double body loss warning and the p2p ripple example admits its near-field warning', () => {
+  for (const v of ['low', 'raised', 'remote']) {
+    const s = fohScene(v);
+    for (const l of s.links) assert.ok(!solveLink(s, l).warnings.some((w) => /counts the body twice/.test(w)), `${v} ${l.name}`);
+  }
+  const p = buildExample('p2p-ground-reflection');
+  assert.ok(solveLink(p.scene, p.scene.links[0]).warnings.some((w) => /under 100 m/.test(w)));
+  assert.match(p.note, /under 100 m/);
+  assert.match(buildExample('tv-strong-cochannel').title, /^Strong TV/);
 });

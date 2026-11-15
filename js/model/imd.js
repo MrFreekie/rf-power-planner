@@ -590,6 +590,11 @@ export function imdSummary(scene, rxPoint) {
     // common on an evenly spaced grid and are usually 70+ dB below the wanted carrier (severity 'info').
     inChannelByOrder: checks.reduce((o, c) => { o[c.product.order] = (o[c.product.order] || 0) + 1; return o; }, {}),
     inChannelThirdOrderCount: checks.filter((c) => c.product.order === 3).length,
+    // inChannelCount counts every (product, channel) pair of every mechanism and order, so one third-order frequency is listed once for the front end
+    // and once for the transmitter-reverse path, and fifth-order products (usually 'info') are added on top (imd-too-close: 28 = 6 + 4 third order, 18 fifth).
+    // The distinct counts below de-duplicate by product label and channel: this is the number that matches the coordination lab and coordination.js.
+    inChannelDistinctCount: new Set(checks.map((c) => `${c.product.label}>${c.channelId}`)).size,
+    inChannelThirdOrderDistinctCount: new Set(checks.filter((c) => c.product.order === 3).map((c) => `${c.product.label}>${c.channelId}`)).size,
     evenInBandCount: ev.inBandCount, evenBandHitCount: ev.bandHitCount, worstEvenProductDbm: ev.worst ? ev.worst.levelDbm : null,
   };
 }

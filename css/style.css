@@ -851,3 +851,29 @@ body.vnalab-open { overflow: hidden; }
 .imd canvas[role="button"]:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 .ppl-bar { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .ppl-margins { margin: 6px 0 0; padding-left: 18px; font-size: 12px; }
+.ppl-bar select { max-width: 100%; min-width: 0; flex: 1 1 12em; }
+
+/* spectrum map pop-out */
+.map-dialog { width: min(96vw, 1400px); max-width: 96vw; }
+.map-scroll { overflow-x: auto; overflow-y: hidden; max-width: 100%; border-bottom: 1px solid var(--line); background: var(--paper); }
+.map-canvas { display: block; cursor: crosshair; touch-action: pan-x pan-y; max-width: none; }
+.map-canvas:focus-visible { outline: 3px solid var(--focus); outline-offset: -3px; box-shadow: none; }
+.map-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 4px 0; }
+.map-bar label, .map-bar legend { font-size: 13px; }
+.map-bar select { max-width: 100%; }
+.map-bar button { min-height: 32px; }
+.map-width { display: flex; flex-wrap: wrap; gap: 4px 12px; border: 1px solid var(--line); border-radius: var(--radius); padding: 2px 8px 4px; margin: 0; }
+.map-crumbs { display: flex; align-items: center; gap: 4px; font-size: 13px; }
+.map-illus { margin: 4px 0; font-size: 13px; font-weight: 600; }
+.map-warn { margin: 4px 0; font-size: 13px; color: var(--warn-text); }
+.map-warn:empty { display: none; }
+.map-list { font-size: 13px; margin: 4px 0; }
+.map-list summary { cursor: pointer; padding: 4px 0; }
+.map-btns { display: flex; flex-wrap: wrap; gap: 4px; max-height: 140px; overflow: auto; }
+.map-btns button { min-height: 32px; font-size: 12px; }
+.map-info { border: 1px solid var(--line); border-radius: var(--radius); padding: 6px 10px; margin: 6px 0; font-size: 13px; line-height: 1.4; }
+.map-info h3 { margin: 0 0 4px; font-size: 14px; }
+.map-info p { margin: 2px 0; }
+.map-flag { font-weight: 700; }
+.spectrum-dialog .map-bar, .spectrum-dialog .map-list, .spectrum-dialog .map-info, .spectrum-dialog .map-illus, .spectrum-dialog .map-warn { margin-left: 14px; margin-right: 14px; }
+@media (max-width: 480px) { .map-dialog { width: 100vw; max-width: 100vw; } }

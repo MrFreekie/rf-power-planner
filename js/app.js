@@ -360,7 +360,7 @@ function renderWarnings(list) {
   ul.hidden = items.length === 0;
 }
 
-import { peopleBudgetRows } from './ui/peopleUi.js';
+import { peoplePathRows, peopleBudgetRows } from './ui/peopleUi.js';
 import { noiseBudgetRows, noisePathRows } from './ui/noiseUi.js';
 function renderExtras(r, scene = null, link = null) {
   const dl = $('readout-extra');
@@ -378,7 +378,7 @@ function renderExtras(r, scene = null, link = null) {
 
 function renderPaths(r, scene) {
   const body = $('paths-body');
-  const rows = r ? [...pathRows(r, scene, scene.units.length), ...noisePathRows(r.noiseSources, (m) => formatLength(m, scene.units.length))] : [];
+  const rows = r ? [...pathRows(r, scene, scene.units.length), ...noisePathRows(r.noiseSources, (m) => formatLength(m, scene.units.length)), ...peoplePathRows(scene, pickActiveLink(scene, store.getSelection()), (l) => solveLink(scene, l))] : [];
   $('paths-summary').textContent = `Paths (${rows.length})`;
   $('paths-len-h').textContent = `Length (${scene.units.length})`;
   const sig = JSON.stringify([rows, scene.units.length]);
@@ -488,6 +488,12 @@ if (staleCleared) showStatus('Your previously saved scene could not be read, so 
 
 // collapsible panels (left budgets, right inspector, bottom bar) and the focus-plot toggle
 try { mountPanels(); } catch (err) { console.error('panels', err); }
+
+// spectrum map pop-out (optional)
+try {
+  const { mountSpectrumMap } = await import('./view/spectrumMap.js');
+  mountSpectrumMap({ button: $('btn-map'), store });
+} catch (err) { console.error('spectrum map', err); $('btn-map').hidden = true; }
 
 // venue underlay button and dialog (optional: a failure must not break the planner)
 try {

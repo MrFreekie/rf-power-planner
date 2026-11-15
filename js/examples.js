@@ -8,7 +8,8 @@ import { RX_PRESETS } from './model/rx-params.js';
 import { imdSummary, evenOrderImd } from './model/imd.js';
 import { toneMpxReport } from './model/tone-mpx.js';
 import { createPerson, personLinkName, offsetFromPack, DEFAULT_MIC_OFFSET, DEFAULT_IEM_OFFSET } from './model/people.js';
-import { wallNoiseSourcesFromReflectors, createNoiseSource, engCrewSources } from './model/noise-sources.js';
+import { wallNoiseSourcesFromReflectors, createNoiseSource, engCrewSources, noiseSourceAt } from './model/noise-sources.js';
+import { tvChannelList, tvChannelOf } from './model/spectrum-map.js';
 import { createDefaultScene, createDefaultLink, createChainItem, createReflector, createBranch, createZone, createDefaultImd, createImdTransmitter, createPlatform, createAudience, createCeiling, createChainItemFromPreset, newId, syncScene, migrateAntennaPolarisation } from './model/scene.js';
 
 const omni = (el = 90, polarisation = 'vertical') => ({ type: 'omni', gainDbi: 0, orientation: { az: 0, el }, polarisation });
@@ -332,7 +333,7 @@ export function fohScene(variant, { kind = 'standing', densityPerM2, remote = 'c
   return make('mic', (s, l) => {
     s.stage = { width: 30, depth: 40 };
     s.environment.floor = 'wood';
-    s.environment.bodyLossDb = 3; // performer body shadow on both links (assumed)
+    // the performer's body shadow (3 dB, assumed) is set on the mic link only: the IEM bodypack antenna is a body-type antenna that already includes its wearer
     s.audience = [createAudience({ name: kind === 'seated' ? 'Seated crowd' : 'Standing crowd', x: 5, y: 8, width: 20, depth: 18, kind, densityPerM2: density })];
     const z = variant === 'low' ? 1.2 : 3.0;
     const stagePos = { x: 15, y: 4, z: 1.6 };
@@ -341,7 +342,7 @@ export function fohScene(variant, { kind = 'standing', densityPerM2, remote = 'c
     const pad = () => ({ type: 'paddle', gainDbi: 7, orientation: { az, el: 0 }, polarisation: 'vertical' });
     l.name = 'Mic (stage to FOH)'; l.freqMHz = 606.1;
     l.tx.pos = { ...stagePos }; l.tx.powerDbm = 14; l.tx.antenna = { type: 'quarterwave', gainDbi: 1, orientation: { az: 0, el: 90 }, polarisation: 'vertical' };
-    l.rx.pos = { ...at }; l.rx.antenna = pad();
+    l.rx.pos = { ...at }; l.rx.antenna = pad(); l.rx.bodyLossDb = 3;
     l.rx.diversity.enabled = true; l.rx.diversity.antennaB.pos = { x: at.x + 0.6, y: at.y, z: at.z };
     const remoteChain = () => {
       // a 12 dB pad at the receiver input: without it the booster and the active fibre leave the receiver within 1 to 3 dB of P1dB (hot)
@@ -699,6 +700,42 @@ export function noiseSourceScene(id, opts = {}) {
 }
 
 /**
+ * Working on a weak TV channel (item 22). weakTvScene(variant) -> a 30 x 20 m free-space FOH link at 570 / 546 MHz (UK 8 MHz plan) with digital TV
+ * blocks modelled as in-channel noise sources (noise-sources.js 'dtv-broadcast': a 7.6 MHz flat block; a 200 kHz mic channel sees the block power minus
+ * 15.8 dB). The illustrative occupancy comes from spectrum-map.js simulatedOccupancy('uk-suburban', 'weak-tv-example'): channels 33 and 34 are on air.
+ * Levels at the receive antenna are tuned (ERP solved from the model) and ASSUMED (flag U), not measured: WEAK_TV_BLOCK_DBM.
+ *   'on-channel'        mic on ch 33, own block -85 dBm, ch 34 neighbour off the air in the scene (the usable fallback, not a design choice)
+ *   'free-gap'          mic moved to ch 30 (nearest free gap clear of ch 33 and ch 34): good practice
+ *   'strong-neighbour'  mic still on ch 33 with the weak block, but ch 34 (adjacent) is a strong local signal
+ *   'strong-cochannel'  mic on ch 33 and the block is strong (-45 dBm): the failure contrast
+ */
+export const WEAK_TV_BLOCK_DBM = Object.freeze({ weak: -85, strong: -45 });
+export const WEAK_TV_FREQ_MHZ = Object.freeze({ ch33: 570.4, ch30: 546.4 }); // 0.4 MHz above the block centre: inside the flat part, away from the edges
+export function weakTvScene(variant = 'on-channel') {
+  const ch = (n) => tvChannelList(8).find((c) => c.n === n);
+  return make('mic', (s, l) => {
+    s.stage = { width: 30, depth: 20 }; s.environment.floor = 'wood'; s.environment.model = 'free-space';
+    l.name = 'Mic at FOH'; l.tx.pos = { x: 3, y: 10, z: 1.5 }; l.tx.antenna = omni(); l.rx.antenna = omni();
+    l.rx.pos = { x: 22, y: 10, z: 1.2 }; l.rx.diversity.antennaB.pos = { x: 22, y: 9.4, z: 1.2 };
+    l.chain = [createChainItem('cable', { cableType: 'lmr-240', lengthM: 5 })];
+    l.freqMHz = variant === 'free-gap' ? WEAK_TV_FREQ_MHZ.ch30 : WEAK_TV_FREQ_MHZ.ch33;
+    const dtv = (n, blockDbm, name, pos) => {
+      const src = createNoiseSource('dtv-broadcast', { name, pos, freqMHz: ch(n).centreMHz });
+      const raw0 = noiseSourceAt({ ...src, erpDbm: 0 }, l.rx.pos, l.freqMHz, 200, () => 0).rawDbm;
+      return { ...src, erpDbm: Math.round((blockDbm - raw0) * 10) / 10 }; // ERP that puts blockDbm at the antenna terminals (Friis, -3 dB polarisation)
+    };
+    const own = variant === 'strong-cochannel' ? WEAK_TV_BLOCK_DBM.strong : WEAK_TV_BLOCK_DBM.weak;
+    s.noiseSources = [dtv(33, own, 'TV ch 33 (weak local)', { x: 29, y: 10, z: 10 })];
+    if (variant === 'strong-neighbour') s.noiseSources.push(dtv(34, WEAK_TV_BLOCK_DBM.strong, 'TV ch 34 (strong adjacent)', { x: 29, y: 16, z: 10 }));
+  });
+}
+export function weakTvReport(variant) {
+  const sc = weakTvScene(variant), r = solveLink(sc, sc.links[0]);
+  const ns = r.noiseSources;
+  return { scene: sc, result: r, noise: ns, marginDb: r.marginDb, floorDbm: ns ? ns.floorAfterDbm : r.cascade.noiseFloorDbm, riseDb: ns ? ns.riseDb : 0, channel: tvChannelOf(sc.links[0].freqMHz, 8).n };
+}
+
+/**
  * Four-piece band with people (item 36): bandPeopleScene() -> a 16 x 10 m stage, four people (singer with a handheld, guitar and bass with bodypacks,
  * drummer with a bodypack), each with a mic link and an IEM link. The mic receivers sit at the front of house, the IEM transmitters on a rack at the back of the stage.
  * Frequencies are the first eight of the third-order clean IEM8 plan (illustrative). Links are named after the person ("Anna mic", "Anna IEM").
@@ -739,13 +776,13 @@ export const EXAMPLES = [
   {
     id: 'dropout-two-ray',
     title: 'Dropout at 7 m (two-ray null)',
-    note: 'The direct ray and the floor reflection arrive half a wavelength apart at about 7 m, so they partly cancel and the level falls about 9 dB below what the direct ray alone would give. The squelch closes in the dip and the audio cuts out, then returns a metre or so further on.',
+    note: 'Problem: the direct ray and the floor reflection arrive half a wavelength apart at about 7 m, so they partly cancel and the level falls about 9 dB below what the direct ray alone would give. The squelch closes in the dip and the audio cuts out, then returns a metre or so further on.',
     build: () => ({ scene: make('mic', twoRay), walk: ACROSS }),
   },
   {
     id: 'diversity-null',
     title: 'Diversity: walking through a null',
-    note: 'The second antenna is 0.4 m higher, so its null falls at a different distance. Whenever one antenna is in a fade the receiver uses the other, and the squelch stays open where a single antenna would drop out.',
+    note: 'Best practice: the second antenna is 0.4 m higher, so its null falls at a different distance. Whenever one antenna is in a fade the receiver uses the other, and the squelch stays open where a single antenna would drop out.',
     build: () => ({
       scene: make('mic', (s, l) => { twoRay(s, l); l.rx.diversity.enabled = true; l.rx.diversity.mode = 'true'; l.rx.diversity.hysteresisDb = 2; }),
       walk: ACROSS,
@@ -754,7 +791,7 @@ export const EXAMPLES = [
   {
     id: 'diversity-modes',
     title: 'Diversity modes compared (switching vs true vs ratio)',
-    note: 'Switching diversity changes antenna only after a hysteresis margin, true diversity always follows the stronger antenna, and ratio combining adds both signals and gains up to 3 dB. Change the mode in the diversity panel while the mic walks to compare.',
+    note: 'Compare: switching diversity changes antenna only after a hysteresis margin, true diversity always follows the stronger antenna, and ratio combining adds both signals and gains up to 3 dB. Change the mode in the diversity panel while the mic walks to compare.',
     build: () => ({
       scene: make('mic', (s, l) => { twoRay(s, l); l.rx.diversity.enabled = true; l.rx.diversity.mode = 'switching'; l.rx.diversity.hysteresisDb = 3; }),
       walk: ACROSS,
@@ -763,7 +800,7 @@ export const EXAMPLES = [
   {
     id: 'overload-at-antenna',
     title: 'RF overload: mic held at the antenna',
-    note: 'A handheld transmitter 30 cm from the receive antenna delivers far more power than the receiver front end can take. Compression and intermodulation distortion appear, and the receiver can lose the signal even though it is strong.',
+    note: 'Problem: a handheld transmitter 30 cm from the receive antenna delivers far more power than the receiver front end can take. Compression and intermodulation distortion appear, and the receiver can lose the signal even though it is strong.',
     build: () => ({
       scene: make('mic', (s, l) => {
         l.tx.powerDbm = 17;
@@ -776,7 +813,7 @@ export const EXAMPLES = [
   {
     id: 'overload-fix',
     title: 'Overload fix: pad and distance',
-    note: 'A 10 dB attenuator at the receiver input and two metres of separation bring the input level back inside the linear range. The same mic now sounds clean; compare the headroom with the previous example.',
+    note: 'Best practice: a 10 dB attenuator at the receiver input and two metres of separation bring the input level back inside the linear range. The same mic now sounds clean; compare the headroom with the previous example.',
     build: () => ({
       scene: make('mic', (s, l) => {
         l.tx.powerDbm = 17;
@@ -789,7 +826,7 @@ export const EXAMPLES = [
   {
     id: 'iem-stereo-mono',
     title: 'IEM: stereo to mono',
-    note: 'As the bodypack walks away the carrier-to-noise ratio falls. The stereo difference signal sits higher in the noise than the sum, so the receiver blends towards mono first, and finally loses the stereo pilot.',
+    note: 'Compare: as the bodypack walks away the carrier-to-noise ratio falls. The stereo difference signal sits higher in the noise than the sum, so the receiver blends towards mono first, and finally loses the stereo pilot.',
     build: () => ({
       scene: make('iem', (s, l) => { outdoorIem(s, l); }),
       walk: { to: { x: 10, y: 70, z: 1.0 }, speedMps: 6, pingPong: false },
@@ -798,7 +835,7 @@ export const EXAMPLES = [
   {
     id: 'pilot-vs-carrier-squelch',
     title: 'Pilot-tone squelch vs carrier squelch',
-    note: 'The carrier squelch only looks at signal strength, so a weak but present carrier still opens it and you hear hiss. With pilot squelch on, the receiver also needs a locked 19 kHz pilot and mutes as soon as the pilot is lost.',
+    note: 'Compare: the carrier squelch only looks at signal strength, so a weak but present carrier still opens it and you hear hiss. With pilot squelch on, the receiver also needs a locked 19 kHz pilot and mutes as soon as the pilot is lost.',
     build: () => ({
       scene: make('iem', (s, l) => { outdoorIem(s, l); l.mpx.pilotSquelch = true; }),
       walk: { to: { x: 10, y: 70, z: 1.0 }, speedMps: 6, pingPong: false },
@@ -807,7 +844,7 @@ export const EXAMPLES = [
   {
     id: 'long-cable',
     title: 'Long cable run loss',
-    note: 'A 100 m run of thin coax costs over forty decibels at UHF (42.5 dB for this RG58 run), which leaves only about 5 dB of margin. Try LMR-400 instead, or put a booster near the antenna: loss before the first gain stage hurts most.',
+    note: 'Problem: a 100 m run of thin coax costs over forty decibels at UHF (42.5 dB for this RG58 run), which leaves only about 5 dB of margin. Try LMR-400 instead, or put a booster near the antenna: loss before the first gain stage hurts most.',
     build: () => ({
       scene: make('mic', (s, l) => {
         s.units = { power: 'dBm', length: 'ft' };
@@ -821,7 +858,7 @@ export const EXAMPLES = [
   {
     id: 'reflective-wall',
     title: 'Reflective wall multipath',
-    note: 'A metal wall behind the receiver adds extra reflected paths. They add and cancel with the direct ray, so the level ripples as the mic moves. A dip appears each time a reflected path changes by one wavelength (0.5 m), but walking across the room changes the path difference only slowly, so along this walk the deep dips are about 2.5 m apart rather than a fraction of a wavelength.',
+    note: 'Problem: a metal wall behind the receiver adds extra reflected paths. They add and cancel with the direct ray, so the level ripples as the mic moves. A dip appears each time a reflected path changes by one wavelength (0.5 m), but walking across the room changes the path difference only slowly, so along this walk the deep dips are about 2.5 m apart rather than a fraction of a wavelength.',
     build: () => ({
       scene: make('mic', (s, l) => {
         s.reflectors = [createReflector({ id: newId('refl'), name: 'Metal wall', material: 'metal', p1: { x: 0.5, y: 7.9 }, p2: { x: 11.5, y: 7.9 }, zMin: 0, zMax: 4 })];
@@ -834,7 +871,7 @@ export const EXAMPLES = [
   {
     id: 'battery-fade',
     title: 'Battery fade: TX power sag mutes the link',
-    note: 'As the transmitter batteries run down their voltage falls below the regulator limit and the output power sags. The received level drops with it until the squelch closes, even though nothing has moved. Time is sped up here; pause or reset the battery in the toolbar.',
+    note: 'Problem: as the transmitter batteries run down their voltage falls below the regulator limit and the output power sags. The received level drops with it until the squelch closes, even though nothing has moved. Time is sped up here; pause or reset the battery in the toolbar.',
     build: () => ({
       scene: make('mic', (s, l) => {
         l.tx.pos = { x: 4, y: 3, z: 1.5 };
@@ -846,7 +883,7 @@ export const EXAMPLES = [
   {
     id: 'telemetry-before-audio',
     title: 'Telemetry drops before audio',
-    note: 'The telemetry data channel needs a cleaner signal than the audio does, so battery and status readings go stale first while the audio is still usable. Walk the mic away and watch the telemetry panel before the squelch closes.',
+    note: 'Compare: the telemetry data channel needs a cleaner signal than the audio does, so battery and status readings go stale first while the audio is still usable. Walk the mic away and watch the telemetry panel before the squelch closes.',
     build: () => ({
       scene: make('mic', (s, l) => { outdoorMic(s, l); l.telemetry.preset = 'rds-like'; }),
       walk: { to: { x: 10, y: 70, z: 1.5 }, speedMps: 6, pingPong: false },
@@ -855,7 +892,7 @@ export const EXAMPLES = [
   {
     id: 'digital-vs-analog',
     title: 'Digital vs analog: graceful vs cliff',
-    note: 'Walk away with the link in digital mode: quality stays perfect, then drops off a cliff within a few decibels. Switch the modulation to analog FM in the toolbar and repeat: the analog audio only gets gradually noisier before it finally closes.',
+    note: 'Compare: walk away with the link in digital mode: quality stays perfect, then drops off a cliff within a few decibels. Switch the modulation to analog FM in the toolbar and repeat: the analog audio only gets gradually noisier before it finally closes.',
     build: () => ({
       scene: make('iem', (s, l) => { outdoorIem(s, l); l.modulation.type = 'digital'; l.rx.squelch.thresholdDbm = -120; }),
       walk: { to: { x: 10, y: 70, z: 1.0 }, speedMps: 6, pingPong: false },
@@ -864,7 +901,7 @@ export const EXAMPLES = [
   {
     id: 'adaptive-modulation',
     title: 'Adaptive modulation: 256-QAM down to QPSK',
-    note: 'Close to the transmitter the link runs 256-QAM for maximum data rate. As the signal weakens the receiver steps down through 64-QAM and 16-QAM to QPSK, trading rate for robustness, and only then drops out.',
+    note: 'Compare: close to the transmitter the link runs 256-QAM for maximum data rate. As the signal weakens the receiver steps down through 64-QAM and 16-QAM to QPSK, trading rate for robustness, and only then drops out.',
     build: () => ({
       scene: make('iem', (s, l) => {
         outdoorIem(s, l);
@@ -878,7 +915,7 @@ export const EXAMPLES = [
   {
     id: 'digital-cuts-out',
     title: 'Why digital cuts out instead of getting noisy',
-    note: 'Error correction hides bit errors completely until there are too many to fix, then it fails abruptly. The receiver repeats the last frame for a moment to hide the gap and then mutes. Compare this with the slow noise build-up of the analog example.',
+    note: 'Compare: error correction hides bit errors completely until there are too many to fix, then it fails abruptly. The receiver repeats the last frame for a moment to hide the gap and then mutes. Compare this with the slow noise build-up of the analog example.',
     build: () => ({
       scene: make('mic', (s, l) => {
         outdoorMic(s, l);
@@ -891,7 +928,7 @@ export const EXAMPLES = [
   {
     id: 'constellation-noise',
     title: 'Constellation noise: moving the mic',
-    note: 'With the constellation order held at 64-QAM, the cloud of received symbols around each ideal point grows as the mic moves away. When the clouds start to overlap the error rate climbs and the link falls over.',
+    note: 'Problem: with the constellation order held at 64-QAM, the cloud of received symbols around each ideal point grows as the mic moves away. When the clouds start to overlap the error rate climbs and the link falls over.',
     build: () => ({
       scene: make('mic', (s, l) => {
         l.modulation = { type: 'digital', digital: { preset: 'wideband-adaptive', fixedOrder: 64, overrides: {} } };
@@ -905,7 +942,7 @@ export const EXAMPLES = [
   {
     id: 'zones-dead-spot',
     title: 'Two antennas: covering a dead spot behind a wall',
-    note: 'A heavy wall splits the venue in two. With one transmit antenna the room behind the wall is a dead spot; a second antenna on the far side, fed through a splitter from the same transmitter, covers it. Remove or move antenna 2 and watch the zone fail.',
+    note: 'Problem: a heavy wall splits the venue in two. With one transmit antenna the room behind the wall is a dead spot; a second antenna on the far side, fed through a splitter from the same transmitter, covers it. Remove or move antenna 2 and watch the zone fail.',
     build: () => ({
       scene: make('iem', (s, l) => {
         s.stage = { width: 24, depth: 12 };
@@ -921,7 +958,7 @@ export const EXAMPLES = [
   {
     id: 'zones-long-hall',
     title: 'Long distance: antenna at the far end of a hall with a booster',
-    note: 'A long cable to a far antenna loses more than the antenna can make up, so the far end of the hall is weak. A 24 dB booster after the cable on that branch brings the far zone up to its required level (with only 20 dB, about a third of the zone still falls short). Compare the map with and without the booster in the branch chain.',
+    note: 'Best practice: a long cable to a far antenna loses more than the antenna can make up, so the far end of the hall is weak. A 24 dB booster after the cable on that branch brings the far zone up to its required level (with only 20 dB, about a third of the zone still falls short). Compare the map with and without the booster in the branch chain.',
     build: () => ({
       scene: make('iem', (s, l) => {
         s.stage = { width: 60, depth: 20 };
@@ -938,7 +975,7 @@ export const EXAMPLES = [
   {
     id: 'zones-coherent-nulls',
     title: 'Coherent overlap nulls: two antennas too close together',
-    note: 'Two antennas fed from one transmitter carry the same signal. Where their waves arrive in opposite phase they cancel, giving a pattern of dead stripes. Spacing the antennas apart, or adding a small attenuator to one, reduces the depth of the nulls.',
+    note: 'Problem: two antennas fed from one transmitter carry the same signal. Where their waves arrive in opposite phase they cancel, giving a pattern of dead stripes. Spacing the antennas apart, or adding a small attenuator to one, reduces the depth of the nulls.',
     build: () => ({
       scene: make('iem', (s, l) => {
         s.stage = { width: 16, depth: 10 };
@@ -955,7 +992,7 @@ export const EXAMPLES = [
   {
     id: 'zones-backstage-corridor',
     title: 'Zone check: backstage corridor',
-    note: 'The backstage corridor needs reliable IEM coverage with 10 dB of margin. The zone table shows the worst point and the share of the corridor that passes; the suggestions list what would help most, such as moving an antenna or adding gain.',
+    note: 'Compare: the backstage corridor needs reliable IEM coverage with 10 dB of margin. The zone table shows the worst point and the share of the corridor that passes; the suggestions list what would help most, such as moving an antenna or adding gain.',
     build: () => ({
       scene: make('iem', (s, l) => {
         s.stage = { width: 24, depth: 12 };
@@ -971,7 +1008,7 @@ export const EXAMPLES = [
   {
     id: 'imd-too-close',
     title: 'Two mics too close to the receive antenna',
-    note: 'Mics B and C are held next to the receive antenna, so each arrives far stronger than the wanted mic A. The level meter shows the own transmitter of the link (about -46 dBm); in the intermod panel mic A is about -40 dBm at the antenna. The receiver front end is not perfectly linear and mixes them: twice B minus C lands exactly on the channel of mic A and buries it. The squelch closes with the reason intermod.',
+    note: 'Problem: mics B and C are held next to the receive antenna, so each arrives far stronger than the wanted mic A. The level meter shows the own transmitter of the link (about -46 dBm); in the intermod panel mic A is about -40 dBm at the antenna. The receiver front end is not perfectly linear and mixes them: twice B minus C lands exactly on the channel of mic A and buries it. The squelch closes with the reason intermod.',
     build: () => ({
       scene: imdScene('mic', 605.6, [
         ['Mic A (wanted)', 605.6, 14, 2, 3, 1.5], ['Mic B', 606.0, 14, 9.5, 6.5, 2.0], ['Mic C', 606.4, 14, 9.3, 6.0, 2.0], ['Mic D', 607.2, 14, 6, 2, 1.5],
@@ -981,7 +1018,7 @@ export const EXAMPLES = [
   {
     id: 'imd-iem-no-isolation',
     title: 'IEM combiner with no isolation',
-    note: 'Three IEM transmitters share a simple passive combiner with only 15 dB of isolation. Each one leaks a little of the others back into its own output stage, where the amplifier mixes them. Twice 606.0 minus 606.4 lands on 605.6, the channel of the third transmitter, as a spurious signal radiated from the antenna.',
+    note: 'Problem: three IEM transmitters share a simple passive combiner with only 15 dB of isolation. Each one leaks a little of the others back into its own output stage, where the amplifier mixes them. Twice 606.0 minus 606.4 lands on 605.6, the channel of the third transmitter, as a spurious signal radiated from the antenna.',
     build: () => ({
       scene: imdScene('iem', 605.6, [
         ['IEM A (wanted)', 605.6, 10, 1.0, 1.0, 1.5], ['IEM B', 606.0, 10, 1.2, 1.0, 1.5], ['IEM C', 606.4, 10, 1.4, 1.0, 1.5],
@@ -991,7 +1028,7 @@ export const EXAMPLES = [
   {
     id: 'imd-iem-isolators',
     title: 'IEM combiner with isolators: same transmitters',
-    note: 'The same three transmitters, now through an isolated combiner with circulators. The isolators cut each interferer by 50 dB instead of 15 before it reaches the other amplifiers. The product made in an amplifier grows one decibel per decibel of interferer (the own carrier of the transmitter is not reduced), so it falls by the 35 dB isolation difference less 1.5 dB because this combiner loses 1.5 dB less on the way out: about 33.5 dB, not 100 dB. The 3 dB per dB rule belongs to products made in the receiver, where every carrier is lowered.',
+    note: 'Best practice: the same three transmitters, now through an isolated combiner with circulators. The isolators cut each interferer by 50 dB instead of 15 before it reaches the other amplifiers. The product made in an amplifier grows one decibel per decibel of interferer (the own carrier of the transmitter is not reduced), so it falls by the 35 dB isolation difference less 1.5 dB because this combiner loses 1.5 dB less on the way out: about 33.5 dB, not 100 dB. The 3 dB per dB rule belongs to products made in the receiver, where every carrier is lowered.',
     build: () => ({
       scene: imdScene('iem', 605.6, [
         ['IEM A (wanted)', 605.6, 10, 1.0, 1.0, 1.5], ['IEM B', 606.0, 10, 1.2, 1.0, 1.5], ['IEM C', 606.4, 10, 1.4, 1.0, 1.5],
@@ -1001,7 +1038,7 @@ export const EXAMPLES = [
   {
     id: 'imd-move-apart',
     title: 'Move them apart: intermods fall',
-    note: 'Same four frequencies as the first intermod example, but the mics are now 8 to 9 metres from the receive antenna. The products fall three decibels for every decibel the carriers fall, so even this small increase in distance leaves the wanted channel clean. Drag a mic towards the antenna and watch it return.',
+    note: 'Best practice: same four frequencies as the first intermod example, but the mics are now 8 to 9 metres from the receive antenna. The products fall three decibels for every decibel the carriers fall, so even this small increase in distance leaves the wanted channel clean. Drag a mic towards the antenna and watch it return.',
     build: () => ({
       scene: imdScene('mic', 605.6, [
         ['Mic A (wanted)', 605.6, 14, 2, 3, 1.5], ['Mic B', 606.0, 14, 2.0, 6.5, 1.5], ['Mic C', 606.4, 14, 2.5, 2.0, 1.5], ['Mic D', 607.2, 14, 3, 4, 1.5],
@@ -1011,235 +1048,235 @@ export const EXAMPLES = [
   {
     id: 'imd-iem-8-combined',
     title: 'Eight IEMs: all through one isolated 8-way combiner (A)',
-    note: 'Eight coordinated IEM transmitters (606.1 to 623.7 MHz, 25 mW each, no third-order product in any channel) feed one isolated 8-way combiner (4.5 dB through, 45 dB port isolation, assumed) and one directional antenna. Every channel loses the same 4.5 dB and reaches the bodypack at about -37.3 dBm; the worst pair of transmitters is 45.0 dB apart, so the strongest product made in an output stage (2f1-f2) is only -102.3 dBm at the bodypack, -64.9 dBc. The plan is not free of fifth-order products: 158 still land in channels, but their summed level is only -244.0 dBm, and the 12.6 dB floor rise at the worst channel is wideband noise from the other transmitters, not intermod. Pros: one antenna, balanced levels; cons: 4.5 dB lost per channel, one point of failure; compare the 7 plus 1 and 4 plus 4 examples (figures illustrative).',
+    note: 'Best practice: eight coordinated IEM transmitters (606.1 to 623.7 MHz, 25 mW each, no third-order product in any channel) feed one isolated 8-way combiner (4.5 dB through, 45 dB port isolation, assumed) and one directional antenna. Every channel loses the same 4.5 dB and reaches the bodypack at about -37.3 dBm; the worst pair of transmitters is 45.0 dB apart, so the strongest product made in an output stage (2f1-f2) is only -102.3 dBm at the bodypack, -64.9 dBc. The plan is not free of fifth-order products: 158 still land in channels, but their summed level is only -244.0 dBm, and the 12.6 dB floor rise at the worst channel is wideband noise from the other transmitters, not intermod. Pros: one antenna, balanced levels; cons: 4.5 dB lost per channel, one point of failure; compare the 7 plus 1 and 4 plus 4 examples (figures illustrative).',
     build: () => ({ scene: iem8Scene('A') }),
   },
   {
     id: 'imd-iem-7-plus-1-omni',
     title: 'Seven IEMs on a directional antenna, one on an omni 2.5 m away (B)',
-    note: 'The same eight frequencies: seven go through a combiner (4 dB, 45 dB isolation) to the directional antenna, the eighth goes straight to an omni antenna 2.5 m in front of it, inside the main lobe. the omni transmitter has no isolator: the field of the other seven reaches its output stage only 33.1 dB down, where it mixes; the worst product is 2f8-f1 at -91.6 dBm at the bodypack (-53.1 dBc), 10.7 dB worse than the single combiner; it lands outside the IEM band but is still radiated; the odd channel is also weaker at the bodypack (-38.5 dBm against -36.8 dBm). Fixes, all in the model: move the omni to the side of the antenna, in a pattern null (45.0 dB, -101.8 dBm), put it 6 m away (-97.8 dBm), or add an isolator (35 dB) on the omni transmitter; Pros: directional gain for seven channels, lower combiner loss; Cons: an unprotected transmitter, different coverage per channel, harder to document. Illustrative figures.',
+    note: 'Problem: the same eight frequencies: seven go through a combiner (4 dB, 45 dB isolation) to the directional antenna, the eighth goes straight to an omni antenna 2.5 m in front of it, inside the main lobe. the omni transmitter has no isolator: the field of the other seven reaches its output stage only 33.1 dB down, where it mixes; the worst product is 2f8-f1 at -91.6 dBm at the bodypack (-53.1 dBc), 10.7 dB worse than the single combiner; it lands outside the IEM band but is still radiated; the odd channel is also weaker at the bodypack (-38.5 dBm against -36.8 dBm). Fixes, all in the model: move the omni to the side of the antenna, in a pattern null (45.0 dB, -101.8 dBm), put it 6 m away (-97.8 dBm), or add an isolator (35 dB) on the omni transmitter; Pros: directional gain for seven channels, lower combiner loss; Cons: an unprotected transmitter, different coverage per channel, harder to document. Illustrative figures.',
     build: () => ({ scene: iem8Scene('B') }),
   },
   {
     id: 'imd-iem-4plus4-combined',
     title: 'Eight IEMs: two 4-way combiners and a passive 2-way to one antenna (C)',
-    note: 'The same eight frequencies in two 4-way isolated combiners (3 dB, 40 dB, each transmitter with its own 20 dB isolator) joined by a passive 2-way hybrid (3.5 dB, 25 dB, assumed) to the same directional antenna. every channel now loses 6.5 dB, 2.0 dB more than the 8-way, so the bodypack gets -39.3 dBm; inside a group the isolation is 40.0 dB; between groups the path is 3 + 25 + 3 + 20 = 51.0 dB because each transmitter is still protected by its own isolator, and the worst product is -99.3 dBm (-59.9 dBc), 3.0 dB worse than the 8-way; take the isolators away (a plain 4-way and hybrid) and the cross-group isolation falls to 31.0 dB and the worst product rises to -90.3 dBm. Pros: modular, cheaper units, a failed module takes out four channels, not eight; Cons: more loss, more connectors, the hybrid is the weak link. Illustrative figures.',
+    note: 'Less ideal: the same eight frequencies in two 4-way isolated combiners (3 dB, 40 dB, each transmitter with its own 20 dB isolator) joined by a passive 2-way hybrid (3.5 dB, 25 dB, assumed) to the same directional antenna. every channel now loses 6.5 dB, 2.0 dB more than the 8-way, so the bodypack gets -39.3 dBm; inside a group the isolation is 40.0 dB; between groups the path is 3 + 25 + 3 + 20 = 51.0 dB because each transmitter is still protected by its own isolator, and the worst product is -99.3 dBm (-59.9 dBc), 3.0 dB worse than the 8-way; take the isolators away (a plain 4-way and hybrid) and the cross-group isolation falls to 31.0 dB and the worst product rises to -90.3 dBm. Pros: modular, cheaper units, a failed module takes out four channels, not eight; Cons: more loss, more connectors, the hybrid is the weak link. Illustrative figures.',
     build: () => ({ scene: iem8Scene('C') }),
   },
   {
     id: 'band-whip-wrong-band',
     title: 'Antenna band: a whip cut for 470-520 MHz used at 830 MHz',
-    note: 'The receive whip is cut for UHF band A (470-520 MHz, assumed) but the link is at 830 MHz. Its VSWR is 59.3:1, a mismatch loss of 11.9 dB (about 3.9 times less range in free space), where a whip cut for 790-865 MHz loses 0.0 dB. The swap of antennas between bands is a classic field error. Design bands and the resonance model are assumed teaching figures.',
+    note: 'Problem: the receive whip is cut for UHF band A (470-520 MHz, assumed) but the link is at 830 MHz. Its VSWR is 59.3:1, a mismatch loss of 11.9 dB (about 3.9 times less range in free space), where a whip cut for 790-865 MHz loses 0.0 dB. The swap of antennas between bands is a classic field error. Design bands and the resonance model are assumed teaching figures.',
     build: () => ({ scene: bandScene('whip-wrong-band') }),
   },
   {
     id: 'band-uhf-vs-2g4',
     title: 'Antenna band: a 2.4 GHz antenna on a 600 MHz link, and the reverse',
-    note: 'A 2.4 GHz antenna on a 600 MHz microphone link has a VSWR of 1235.3:1 and loses 24.9 dB (the model caps the loss at 30 dB). The reverse, a UHF 600-700 MHz antenna on a 2440 MHz link, loses 18.1 dB at 259.2:1. A mismatched antenna reflects the power rather than burning it, but the link margin falls by the same amount. Assumed teaching model.',
+    note: 'Compare: a 2.4 GHz antenna on a 600 MHz microphone link has a VSWR of 1235.3:1 and loses 24.9 dB (the model caps the loss at 30 dB). The reverse, a UHF 600-700 MHz antenna on a 2440 MHz link, loses 18.1 dB at 259.2:1. A mismatched antenna reflects the power rather than burning it, but the link margin falls by the same amount. Assumed teaching model.',
     build: () => ({ scene: bandScene('uhf-vs-2g4') }),
   },
   {
     id: 'band-iem-tx-wrong-antenna',
     title: 'Antenna band: IEM transmitter into an antenna cut for 863-865 MHz',
-    note: 'The 100 mW IEM transmitter at 606.1 MHz drives an antenna cut for 863-865 MHz (assumed, a whip about 8 percent wide at best): VSWR 46.2:1, 10.8 dB mismatch loss, and 92 percent of the power (19.6 dBm) returns to the output stage, which can stress the PA or trigger foldback. A 6 dB pad cuts that to 1.6 dBm (1.6:1 at the PA, the reflection crosses the pad twice); an isolator (0.5 dB forward, 20 dB reverse, assumed) gives 1.2:1 at the PA and -0.9 dBm. The real fix is the right antenna. Illustrative figures.',
+    note: 'Problem: the 100 mW IEM transmitter at 606.1 MHz drives an antenna cut for 863-865 MHz (assumed, a whip about 8 percent wide at best): VSWR 46.2:1, 10.8 dB mismatch loss, and 92 percent of the power (19.6 dBm) returns to the output stage, which can stress the PA or trigger foldback. A 6 dB pad cuts that to 1.6 dBm (1.6:1 at the PA, the reflection crosses the pad twice); an isolator (0.5 dB forward, 20 dB reverse, assumed) gives 1.2:1 at the PA and -0.9 dBm. The real fix is the right antenna. Illustrative figures.',
     build: () => ({ scene: bandScene('iem-tx-wrong-band') }),
   },
   {
     id: 'band-wideband-vs-whips',
     title: 'Antenna band: one wideband antenna against narrow whips cut per band',
-    note: 'A wideband antenna (470-960 MHz, assumed log-periodic or paddle, flat about 1.3:1) loses 0.07 dB at 830 MHz, the same link with a whip cut for 470-520 MHz loses 11.9 dB. The whip cut for 790-865 MHz is as good (0.0 dB) but only in its own band, so a wideband antenna is the safe choice when several bands are in use. The price is lower gain and a less clean pattern, assumed.',
+    note: 'Compare: a wideband antenna (470-960 MHz, assumed log-periodic or paddle, flat about 1.3:1) loses 0.07 dB at 830 MHz, the same link with a whip cut for 470-520 MHz loses 11.9 dB. The whip cut for 790-865 MHz is as good (0.0 dB) but only in its own band, so a wideband antenna is the safe choice when several bands are in use. The price is lower gain and a less clean pattern, assumed.',
     build: () => ({ scene: bandScene('wideband-vs-whips') }),
   },
   {
     id: 'band-whip-trim',
     title: 'Antenna band: trimming a whip, the VSWR dip and the 606 MHz channel',
-    note: 'A whip cut for 570-608 MHz (assumed) sits at the top edge of its band at 606 MHz: VSWR 1.69:1 and 0.30 dB of mismatch loss. Trimmed to resonate at 596-616 MHz the VSWR at 606 MHz is 1.0:1 and the loss 0.00 dB. A NanoVNA S11 sweep shows the dip move as the whip is cut (returnLossSweep in the model draws it). A hand or the body shifts the dip, assumed.',
+    note: 'Best practice: a whip cut for 570-608 MHz (assumed) sits at the top edge of its band at 606 MHz: VSWR 1.69:1 and 0.30 dB of mismatch loss. Trimmed to resonate at 596-616 MHz the VSWR at 606 MHz is 1.0:1 and the loss 0.00 dB. A NanoVNA S11 sweep shows the dip move as the whip is cut (returnLossSweep in the model draws it). A hand or the body shifts the dip, assumed.',
     build: () => ({ scene: bandScene('whip-trim') }),
   },
   {
     id: 'band-filter-wrong-band',
     title: 'Antenna band: a 863-865 MHz bandpass filter on a 606.1 MHz channel',
-    note: 'The transmit chain has a bandpass filter for 863-865 MHz (assumed 40 dB rejection) but the IEM runs at 606.1 MHz: the signal at the bodypack drops from -36.4 to -76.4 dBm and the margin from 53.6 to 13.6 dB. A filter must be chosen for the channel, like an antenna. The warning in the link says so.',
+    note: 'Problem: the transmit chain has a bandpass filter for 863-865 MHz (assumed 40 dB rejection) but the IEM runs at 606.1 MHz: the signal at the bodypack drops from -36.4 to -76.4 dBm and the margin from 53.6 to 13.6 dB. A filter must be chosen for the channel, like an antenna. The warning in the link says so.',
     build: () => ({ scene: bandScene('filter-wrong-band') }),
   },
   {
     id: 'audience-crowd',
     title: 'Audience: a standing crowd between the stage and a low receive antenna',
-    note: 'A handheld microphone on stage and a receive antenna 1.5 m high at the back of the room, across 20 m of standing audience (2 persons per m2, heads at 1.7 m). The ray runs through the crowd below head height and loses 20.0 dB (assumed 0.5 dB per metre per person per m2), so the margin falls from 51.8 to 31.8 dB. Raising the antenna to 2.5 m puts the ray above the heads for all but 1.0 dB of its path, and at 4.7 persons per m2 the loss saturates at the 30 dB cap. Absorption figures are assumed and unverified.',
+    note: 'Problem: a handheld microphone on stage and a receive antenna 1.5 m high at the back of the room, across 20 m of standing audience (2 persons per m2, heads at 1.7 m). The ray runs through the crowd below head height and loses 20.0 dB (assumed 0.5 dB per metre per person per m2), so the margin falls from 51.8 to 31.8 dB. Raising the antenna to 2.5 m puts the ray above the heads for all but 1.0 dB of its path, and at 4.7 persons per m2 the loss saturates at the 30 dB cap. Absorption figures are assumed and unverified.',
     build: () => ({ scene: audienceScene() }),
   },
   {
     id: 'ceiling-metal-roof',
     title: 'Ceiling: a metal-roofed tent or shed over a 15 m link',
-    note: 'A metal roof 5 m up is a near-perfect reflector at 606 MHz. Its ray arrives only 0.9 dB below the direct ray and 1.6 m behind it, and with the floor ray the sum changes the received level by -1.6 dB (it can be a fade or a boost depending on the spot). Move the receiver a little to see the pattern change; wavelength is 0.5 m. Material and geometry are illustrative.',
+    note: 'Problem: a metal roof 5 m up is a near-perfect reflector at 606 MHz. Its ray arrives only 0.9 dB below the direct ray and 1.6 m behind it, and with the floor ray the sum changes the received level by -1.6 dB (it can be a fade or a boost depending on the spot). Move the receiver a little to see the pattern change; wavelength is 0.5 m. Material and geometry are illustrative.',
     build: () => ({ scene: ceilingScene('tent') }),
   },
   {
     id: 'ceiling-arena-flown',
     title: 'Ceiling: arena roof 15 m up, receive antenna flown at 12 m',
-    note: 'A flown antenna 3 m under a metal arena roof sits so close to its own reflection that the ceiling ray is only 0.6 dB below the direct one and 2.4 m longer. The coherent sum changes the received level by +4.5 dB at this spot (a different spot can fade). Flown antennas near roofs need height or pattern checks, not just distance. Illustrative figures.',
+    note: 'Less ideal: a flown antenna 3 m under a metal arena roof sits so close to its own reflection that the ceiling ray is only 0.6 dB below the direct one and 2.4 m longer. The coherent sum changes the received level by +4.5 dB at this spot (a different spot can fade). Flown antennas near roofs need height or pattern checks, not just distance. Illustrative figures.',
     build: () => ({ scene: ceilingScene('arena') }),
   },
   {
     id: 'ceiling-low-club',
     title: 'Ceiling: a low plasterboard club ceiling over a 12 m link',
-    note: 'A plasterboard ceiling at 2.8 m reflects much less than metal: its ray is 9.1 dB below the direct ray and 0.3 m longer, a +1.9 dB change in the received level at this spot. Low ceilings add short-delay reflections that move the nulls closer together. Illustrative figures.',
+    note: 'Compare: a plasterboard ceiling at 2.8 m reflects much less than metal: its ray is 9.1 dB below the direct ray and 0.3 m longer, a +1.9 dB change in the received level at this spot. Low ceilings add short-delay reflections that move the nulls closer together. Illustrative figures.',
     build: () => ({ scene: ceilingScene('club') }),
   },
   {
     id: 'rof-coax-vs-fibre',
     title: 'RF over fibre: a 300 m antenna run in coax, passive fibre and active fibre',
-    note: 'The receive antenna head is 300 m from the rack. RG213 coax delivers -89.6 dBm to the receiver (margin 5.4 dB); a passive RF over fibre link (assumed -25 dB gain, 30 dB noise figure, 1.1 dB optical loss, so 2.2 dB more RF loss) gives -61.2 dBm with a system noise figure of 36.5 dB; one with built-in amplifiers gives -26.2 dBm at 12.4 dB. The fibre adds 1.47 microseconds of delay, irrelevant for audio. All fibre module figures are assumed placeholders: use a datasheet.',
+    note: 'Compare: the receive antenna head is 300 m from the rack. RG213 coax delivers -89.6 dBm to the receiver (margin 5.4 dB); a passive RF over fibre link (assumed -25 dB gain, 30 dB noise figure, 1.1 dB optical loss, so 2.2 dB more RF loss) gives -61.2 dBm with a system noise figure of 36.5 dB; one with built-in amplifiers gives -26.2 dBm at 12.4 dB. The fibre adds 1.47 microseconds of delay, irrelevant for audio. All fibre module figures are assumed placeholders: use a datasheet.',
     build: () => ({ scene: rofScene('passive') }),
   },
   {
     id: 'rof-branch-mismatch',
     title: 'RF over fibre: two antenna branches with different fibre lengths',
-    note: 'An IEM transmitter feeds two antenna branches over passive RF over fibre, 0.1 km and 0.6 km (assumed modules). The delay spread is 2450 ns, so combined at RF the two do not add in phase (1 ns is 216 degrees at 600 MHz) and the link warns. Use equal fibre lengths on branches that are combined coherently. Figures are illustrative.',
+    note: 'Problem: an IEM transmitter feeds two antenna branches over passive RF over fibre, 0.1 km and 0.6 km (assumed modules). The delay spread is 2450 ns, so combined at RF the two do not add in phase (1 ns is 216 degrees at 600 MHz) and the link warns. Use equal fibre lengths on branches that are combined coherently. Figures are illustrative.',
     build: () => ({ scene: rofBranchScene() }),
   },
   {
     id: 'sos-iem-too-close',
     title: 'Side of stage: IEM antenna 0.5 m from the mic receiver antenna',
-    note: 'A 100 mW IEM transmitter (20 dBm, 614.0 MHz) faces a mic receive paddle 0.5 m away with the same polarisation and a 12 dB booster behind it. Only 8.2 dB separates them, so +22.5 dBm reaches the receiver input against a -18 dBm P1dB and a -10 dBm maximum (assumed receiver figures): 40.5 dB over, desense capped at 40 dB, and the wanted mic margin falls from 41.1 dB to 1.1 dB. The IM3 product of the IEM and the mic is +27.8 dBm, so the booster makes it worse. Free-space figures; a real room adds or subtracts a few dB.',
+    note: 'Problem: a 100 mW IEM transmitter (20 dBm, 614.0 MHz) faces a mic receive paddle 0.5 m away with the same polarisation and a 12 dB booster behind it. Only 8.2 dB separates them, so +22.5 dBm reaches the receiver input against a -18 dBm P1dB and a -10 dBm maximum (assumed receiver figures): 40.5 dB over, desense capped at 40 dB, and the wanted mic margin falls from 41.1 dB to 1.1 dB. The IM3 product of the IEM and the mic is +27.8 dBm, so the booster makes it worse. Free-space figures; a real room adds or subtracts a few dB.',
     build: () => ({ scene: sosScene('too-close') }),
   },
   {
     id: 'sos-iem-crossed-pol',
     title: 'Side of stage: 3.3 m apart, slant mic antennas, rack in between',
-    note: 'The IEM antenna is vertical and the mic antennas slant 45 degrees, so the wanted mic loses 3 dB of polarisation (never a null) and the IEM is only 3 dB cross-polar; they are 3.3 m apart, both paddles aimed at the stage so each sits in the other side lobe, with a rack screen (2.5 dB, assumed) between. Coupling is 59.4 dB, the IEM reaches the receiver at -43.7 dBm with 25.7 dB of headroom, and desense is 0. The wanted mic keeps 50.1 dB of margin, which already includes that 3 dB. A horizontal mic antenna would isolate 14.9 dB more but cost the wanted mic 15.0 dB, so distance and the antenna patterns do the work here.',
+    note: 'Less ideal: the IEM antenna is vertical and the mic antennas slant 45 degrees, so the wanted mic loses 3 dB of polarisation (never a null) and the IEM is only 3 dB cross-polar; they are 3.3 m apart, both paddles aimed at the stage so each sits in the other side lobe, with a rack screen (2.5 dB, assumed) between. Coupling is 59.4 dB, the IEM reaches the receiver at -43.7 dBm with 25.7 dB of headroom, and desense is 0. The wanted mic keeps 50.1 dB of margin, which already includes that 3 dB. A horizontal mic antenna would isolate 14.9 dB more but cost the wanted mic 15.0 dB, so distance and the antenna patterns do the work here.',
     build: () => ({ scene: sosScene('crossed-pol') }),
   },
   {
     id: 'sos-iem-best-practice',
     title: 'Side of stage: best practice (filter, low power, remote antennas)',
-    note: 'The IEM runs 10 mW (10 dBm) from a stand at the stage-side edge aimed at the stage, and the IEM link still has 40.8 dB of margin. The mic antennas are 10.8 m away, high and behind its beam, slant 45 degrees so the wanted mic loses only 3 dB, with a 604 to 608 MHz bandpass filter (40 dB rejection, assumed) and 15 m of cable. Coupling is 66.6 dB but only -101.1 dBm reaches the receiver input (83.1 dB of headroom, no desense) and the wanted mic keeps 44.1 dB, a margin that already includes the polarisation loss. Distance and the filter do most of the work; power only costs the IEM margin you need.',
+    note: 'Best practice: the IEM runs 10 mW (10 dBm) from a stand at the stage-side edge aimed at the stage, and the IEM link still has 40.8 dB of margin. The mic antennas are 10.8 m away, high and behind its beam, slant 45 degrees so the wanted mic loses only 3 dB, with a 604 to 608 MHz bandpass filter (40 dB rejection, assumed) and 15 m of cable. Coupling is 66.6 dB but only -101.1 dBm reaches the receiver input (83.1 dB of headroom, no desense) and the wanted mic keeps 44.1 dB, a margin that already includes the polarisation loss. Distance and the filter do most of the work; power only costs the IEM margin you need.',
     build: () => ({ scene: sosScene('best') }),
   },
   {
     id: 'foh-mic-iem-audience',
     title: 'FOH: low antennas behind a standing crowd',
-    note: 'Mic receive and IEM transmit paddles sit at table height (1.2 m) at FOH, 26 m from the performer, behind 18 m of standing crowd at 4 persons per m2 (assumed absorption 0.5 dB per metre per person per m2, capped at 30 dB). The crowd takes 30.0 dB and the performer body 3 dB, leaving the mic link 2.0 dB of margin (-93.0 dBm at the receiver input) and the IEM link 10.6 dB. At 3 per m2 the mic margin is 4.9 dB; a seated crowd at 1.5 per m2 leaves 22.7 dB for the mic and 27.1 dB for the IEM because the ray passes over seated heads.',
+    note: 'Problem: mic receive and IEM transmit paddles sit at table height (1.2 m) at FOH, 26 m from the performer, behind 18 m of standing crowd at 4 persons per m2 (assumed absorption 0.5 dB per metre per person per m2, capped at 30 dB). The crowd takes 30.0 dB and the performer body 3 dB on the mic link, leaving it 2.0 dB of margin (-93.0 dBm at the receiver input) and the IEM link 13.6 dB. At 3 per m2 the mic margin is 4.9 dB; a seated crowd at 1.5 per m2 leaves 22.7 dB for the mic and 30.1 dB for the IEM because the ray passes over seated heads.',
     build: () => ({ scene: fohScene('low') }),
   },
   {
     id: 'foh-raised-antennas',
     title: 'FOH: antennas raised to 3 m on stands or a truss',
-    note: 'The same paddles aimed at the stage at 3.0 m clear the heads for most of the crowd: the mic ray no longer meets any absorption and the receiver input rises to -65.5 dBm. The mic margin recovers from 2.0 dB to 29.5 dB (27.5 dB) and the IEM margin from 10.6 dB to 38.0 dB (27.4 dB); the IEM still loses 6.5 dB because the bodypack is low on the performer. Height is the cheapest fix, so raise the antennas before adding gain.',
+    note: 'Best practice: the same paddles aimed at the stage at 3.0 m clear the heads for most of the crowd: the mic ray no longer meets any absorption and the receiver input rises to -65.5 dBm. The mic margin recovers from 2.0 dB to 29.5 dB (27.5 dB) and the IEM margin from 13.6 dB to 41.0 dB (27.4 dB); the IEM still loses 6.5 dB because the bodypack is low on the performer. Height is the cheapest fix, so raise the antennas before adding gain.',
     build: () => ({ scene: fohScene('raised') }),
   },
   {
     id: 'foh-remote-antennas',
     title: 'FOH: antennas at the stage side, 45 m of cable back to FOH',
-    note: 'The antennas move to the stage side at 3.0 m, 9 m from the performer and outside the crowd, with 45 m of LMR-400 back to FOH. A 15 dB booster at the antenna end and a 12 dB pad at the receiver input give a mic margin of 63.2 dB and an input of -31.0 dBm, 13.0 dB under P1dB (level ok); without the pad the input would be -19.0 dBm, 1.0 dB under P1dB and hot. The IEM link pays 4.9 dB of cable and has no booster (power limit), so it keeps 52.1 dB; the same booster after the cable gives 61.9 dB, and the active RF over fibre preset (assumed figures, same pad) gives 58.9 dB at -33.1 dBm. Against the low antennas that recovers 61.2 dB on the mic and 41.5 dB on the IEM.',
+    note: 'Best practice: the antennas move to the stage side at 3.0 m, 9 m from the performer and outside the crowd, with 45 m of LMR-400 back to FOH. A 15 dB booster at the antenna end and a 12 dB pad at the receiver input give a mic margin of 63.2 dB and an input of -31.0 dBm, 13.0 dB under P1dB (level ok); without the pad the input would be -19.0 dBm, 1.0 dB under P1dB and hot. The IEM link pays 4.9 dB of cable and has no booster (power limit), so it keeps 55.1 dB; the same booster after the cable gives 61.9 dB, and the active RF over fibre preset (assumed figures, same pad) gives 58.9 dB at -33.1 dBm. Against the low antennas that recovers 61.2 dB on the mic and 41.5 dB on the IEM.',
     build: () => ({ scene: fohScene('remote') }),
   },
   {
     id: 'video-wall-class-b',
     title: 'Video wall: EMC class B noise, FOH versus stage side',
-    note: 'A 14 m LED wall behind the band radiates at the class B limit (30 / 37 dBuV/m at 10 m, a ceiling, assumed). The FOH paddle 27 m away looks straight at it: -98.3 dBm in 200 kHz lifts the floor 14.3 dB and cuts the mic margin from 34.2 dB (wall off) to 19.8 dB. A stage-side receiver sees 17.5 dB of rise but is close to the mic, so it keeps 48.9 dB. The metal wall also returns a reflection only 3.5 dB below the direct ray, so expect multipath.',
+    note: 'Problem: a 14 m LED wall behind the band radiates at the class B limit (30 / 37 dBuV/m at 10 m, a ceiling, assumed). The FOH paddle 27 m away looks straight at it: -98.3 dBm in 200 kHz lifts the floor 14.3 dB and cuts the mic margin from 34.2 dB (wall off) to 19.8 dB. A stage-side receiver sees 17.5 dB of rise but is close to the mic, so it keeps 48.9 dB. The metal wall also returns a reflection only 3.5 dB below the direct ray, so expect multipath.',
     build: () => ({ scene: videoWallScene({ preset: 'class-b', rx: 'foh' }) }),
   },
   {
     id: 'video-wall-noisy',
     title: 'Video wall: noisy budget panels',
-    note: 'Budget panels or poor cabling (class A plus 15 dB, assumed) put -73.3 dBm in the FOH receiver and raise the floor by 39.2 dB, so the mic margin falls to -5.0 dB and the link fails. A wall at the class A limit leaves 10.0 dB. With the receiver at the stage front, 3 m from the wall, the noisy wall still leaves only 8.2 dB, and 24.0 dB with the receiver at the stage side. A CE-marked wall can still be the loudest thing in the band.',
+    note: 'Problem: budget panels or poor cabling (class A plus 15 dB, assumed) put -73.3 dBm in the FOH receiver and raise the floor by 39.2 dB, so the mic margin falls to -5.0 dB and the link fails. A wall at the class A limit leaves 10.0 dB. With the receiver at the stage front, 3 m from the wall, the noisy wall still leaves only 8.2 dB, and 24.0 dB with the receiver at the stage side. A CE-marked wall can still be the loudest thing in the band.',
     build: () => ({ scene: videoWallScene({ preset: 'noisy', rx: 'foh' }) }),
   },
   {
     id: 'video-wall-fixes',
     title: 'Video wall: the fixed scene (distance, aim, cabling)',
-    note: 'This is the fixed version of video-wall-noisy, whose FOH receiver has a margin of -5.0 dB: the receiver sits at the stage side aimed at the performer with the wall off its beam, and ferrite chokes and shielded data cable bring the wall down to class B (15 dB less, assumed). The noise in the receiver is -95.0 dBm, 17.5 dB of rise, and the mic margin is 48.9 dB, 53.9 dB better. Moving the receiver alone gives 24.0 dB (28.9 dB better) and the class B wall alone 19.8 dB at FOH (24.8 dB better).',
+    note: 'Best practice: this is the fixed version of video-wall-noisy, whose FOH receiver has a margin of -5.0 dB: the receiver sits at the stage side aimed at the performer with the wall off its beam, and ferrite chokes and shielded data cable bring the wall down to class B (15 dB less, assumed). The noise in the receiver is -95.0 dBm, 17.5 dB of rise, and the mic margin is 48.9 dB, 53.9 dB better. Moving the receiver alone gives 24.0 dB (28.9 dB better) and the class B wall alone 19.8 dB at FOH (24.8 dB better).',
     build: () => ({ scene: videoWallScene({ preset: 'class-b', rx: 'side' }) }),
   },
   {
     id: 'video-wall-solid-vs-mesh',
     title: 'Video wall: solid metal, mesh and carbon fibre construction',
-    note: 'Three wall sections side by side on one stage (solid metal, 10 mm metal mesh and carbon mesh, class A noise), each with a receiver 2.5 m behind it: the crossing loss is 40.0, 27.9 and 28.9 dB, and the noise reaching each receiver is -91.0, -72.2 and -75.1 dBm (the solid one includes the neighbouring walls leaking in), leaving margins of 16.2, -2.6 and 0.4 dB. Seen from FOH the metal and metal mesh both reflect at -3.5 dB and carbon at -9.5 dB. Holes of 100 mm (a coarse curtain) shield only 7.9 dB at 606 MHz, so a mesh wall is no free pass at UHF. All construction figures are assumed.',
+    note: 'Compare: three wall sections side by side on one stage (solid metal, 10 mm metal mesh and carbon mesh, class A noise), each with a receiver 2.5 m behind it: the crossing loss is 40.0, 27.9 and 28.9 dB, and the noise reaching each receiver is -91.0, -72.2 and -75.1 dBm (the solid one includes the neighbouring walls leaking in), leaving margins of 16.2, -2.6 and 0.4 dB. Seen from FOH the metal and metal mesh both reflect at -3.5 dB and carbon at -9.5 dB. Holes of 100 mm (a coarse curtain) shield only 7.9 dB at 606 MHz, so a mesh wall is no free pass at UHF. All construction figures are assumed.',
     build: () => ({ scene: videoWallScene({ preset: 'class-a', rx: 'back', sections: ['solid-metal', 'mesh-metal', 'mesh-carbon'] }) }),
   },
   {
     id: 'even-wideband-booster',
     title: 'Even-order products: 500 and 700 MHz mics on a wideband booster',
-    note: 'Two mics on 500 and 700 MHz, 2.5 m from the receive antenna, drive a wideband booster (IIP2 +30 dBm, assumed): the sum (1200 MHz) and difference (200 MHz) products are both -88.7 dBm, 24.3 dB over the receiver noise floor, and fall 2 dB per dB of input against 3 dB for IM3. Neither lands in the 600 MHz channel, but the 200 MHz one sits in a VHF band the system also uses. A 470-698 MHz bandpass behind the booster (40 dB, assumed) takes both to -128.7 dBm, 15.7 dB under the floor.',
+    note: 'Problem: two mics on 500 and 700 MHz, 2.5 m from the receive antenna, drive a wideband booster (IIP2 +30 dBm, assumed): the sum (1200 MHz) and difference (200 MHz) products are both -88.7 dBm, 24.3 dB over the receiver noise floor, and fall 2 dB per dB of input against 3 dB for IM3. Neither lands in the 600 MHz channel, but the 200 MHz one sits in a VHF band the system also uses. A 470-698 MHz bandpass behind the booster (40 dB, assumed) takes both to -128.7 dBm, 15.7 dB under the floor.',
     build: () => ({ scene: evenScene('wideband') }),
   },
   {
     id: 'even-vhf-uhf-booster',
     title: 'Even-order products: VHF and UHF mics into one booster',
-    note: 'A 190 MHz VHF mic and a 475 MHz UHF mic share one wideband booster and the receiver listens on 665 MHz: f1 + f2 is exactly 665 MHz, -76.9 dBm in the wanted channel and 36.1 dB over the floor. A 470-698 MHz bandpass in front of the booster (60 dB, assumed) removes the VHF tone before it can mix and drops the product to -136.9 dBm. Separate antennas or a filter ahead of any shared gain stage is the fix.',
+    note: 'Problem: a 190 MHz VHF mic and a 475 MHz UHF mic share one wideband booster and the receiver listens on 665 MHz: f1 + f2 is exactly 665 MHz, -76.9 dBm in the wanted channel and 36.1 dB over the floor. A 470-698 MHz bandpass in front of the booster (60 dB, assumed) removes the VHF tone before it can mix and drops the product to -136.9 dBm. Separate antennas or a filter ahead of any shared gain stage is the fix.',
     build: () => ({ scene: evenScene('vhf-uhf') }),
   },
   {
     id: 'even-second-harmonic',
     title: 'Even-order products: a 902 MHz IEM transmitter and a 1.8 GHz bodypack',
-    note: 'A 902 MHz IEM transmitter 1.5 m from a 1795 MHz bodypack radiates a second harmonic 50 dB down (assumed), arriving at -74.1 dBm in the 1785-1805 MHz band, 38.9 dB over the floor. A 60 dB low-pass on the transmitter output (assumed) takes it to -134.1 dBm, 21.1 dB under the floor. The bodypack filter keeps the 902 MHz carrier itself out of the receiver, so the harmonic is the only even-order problem.',
+    note: 'Problem: a 902 MHz IEM transmitter 1.5 m from a 1795 MHz bodypack radiates a second harmonic 50 dB down (assumed), arriving at -74.1 dBm in the 1785-1805 MHz band, 38.9 dB over the floor. A 60 dB low-pass on the transmitter output (assumed) takes it to -134.1 dBm, 21.1 dB under the floor. The bodypack filter keeps the 902 MHz carrier itself out of the receiver, so the harmonic is the only even-order problem.',
     build: () => ({ scene: evenScene('harmonic') }),
   },
   {
     id: 'even-narrow-uhf-good',
     title: 'Even-order products: narrow-band UHF, the good case',
-    note: 'Two UHF mics 8.2 MHz apart into a narrow-band receiver (IIP2 +40 dBm, assumed) give a sum near 1220 MHz and a difference of 8.2 MHz at -99.2 dBm, none in the wanted channel or any other band the system uses. Only the third-order product 2f1-f2 at -72.8 dBm matters here. Keep the wanted bands apart by more than an octave and even order products stay out of band.',
+    note: 'Best practice: two UHF mics 8.2 MHz apart into a narrow-band receiver (IIP2 +40 dBm, assumed) give a sum near 1220 MHz and a difference of 8.2 MHz at -99.2 dBm, none in the wanted channel or any other band the system uses. Only the third-order product 2f1-f2 at -72.8 dBm matters here. Keep the wanted bands apart by more than an octave and even order products stay out of band.',
     build: () => ({ scene: evenScene('narrow-uhf') }),
   },
   {
     id: 'tone-pilot-products',
     title: 'Programme tone and the 19 kHz pilot: where the products come from',
-    note: 'A 1 kHz sine at 40 percent of 75 kHz peak deviation (30 kHz, beta 30) rides with the 10 percent pilot (7.5 kHz, beta 0.395). In the baseband the two only add, but a limiter 6 dB under its nominal drive (assumed) puts products at 18 and 20 kHz (-49.5 dB), 17 and 21 kHz (-60.2 dB) and 37 and 39 kHz (-72.4 dB), and the pilot cubed lands at 57 kHz (-94.3 dB) in the RDS band. In the RF the FM itself adds sidebands at fc +- n x 1 kHz +- m x 19 kHz with weights J_n(30) J_m(0.395), filling about 102 kHz. Cures: a low-pass before the limiter, no limiting of the composite, and a pilot-notched limiter.',
+    note: 'Problem: a 1 kHz sine at 40 percent of 75 kHz peak deviation (30 kHz, beta 30) rides with the 10 percent pilot (7.5 kHz, beta 0.395). In the baseband the two only add, but a limiter 6 dB under its nominal drive (assumed) puts products at 18 and 20 kHz (-49.5 dB), 17 and 21 kHz (-60.2 dB) and 37 and 39 kHz (-72.4 dB), and the pilot cubed lands at 57 kHz (-94.3 dB) in the RDS band. In the RF the FM itself adds sidebands at fc +- n x 1 kHz +- m x 19 kHz with weights J_n(30) J_m(0.395), filling about 102 kHz. Cures: a low-pass before the limiter, no limiting of the composite, and a pilot-notched limiter.',
     build: () => ({ scene: toneMpxScene('products') }),
   },
   {
     id: 'tone-pilot-beat',
     title: 'Programme tone near the pilot: a 19.3 kHz tone beats with it',
-    note: 'A 19.3 kHz tone leaks past the 15 kHz audio low-pass, which is only 41.4 dB down there (assumed filter), leaving it 28.4 dB under the 9 percent pilot. It beats with the pilot at 300 Hz, inside the decoder loop bandwidth (assumed), wobbling the pilot phase by up to 2.2 degrees and costing stereo separation. A tone above 23 kHz would fold down through the L-R demodulator instead (25 kHz appears at 13 kHz). Keep the tone at 15 kHz or lower, steepen the filter or notch the pilot region.',
+    note: 'Problem: a 19.3 kHz tone leaks past the 15 kHz audio low-pass, which is only 41.4 dB down there (assumed filter), leaving it 28.4 dB under the 9 percent pilot. It beats with the pilot at 300 Hz, inside the decoder loop bandwidth (assumed), wobbling the pilot phase by up to 2.2 degrees and costing stereo separation. A tone above 23 kHz would fold down through the L-R demodulator instead (25 kHz appears at 13 kHz). Keep the tone at 15 kHz or lower, steepen the filter or notch the pilot region.',
     build: () => ({ scene: toneMpxScene('beat') }),
   },
   {
     id: 'tone-sweep-pilot',
     title: 'Swept tone through the MPX: the moment it reaches the pilot',
-    note: 'A swept tone passes 17 kHz where the assumed filter is only 21.2 dB down, leaving it 8.2 dB under the pilot and wobbling its phase by up to 22.8 degrees at a 2000 Hz beat. This is where the stereo decoder flickers or drops lock. The same sweep above 23 kHz folds down by 38 kHz through the L-R path. The cure is a steeper audio filter with the limiter placed after it.',
+    note: 'Problem: a swept tone passes 17 kHz where the assumed filter is only 21.2 dB down, leaving it 8.2 dB under the pilot and wobbling its phase by up to 22.8 degrees at a 2000 Hz beat. This is where the stereo decoder flickers or drops lock. The same sweep above 23 kHz folds down by 38 kHz through the L-R path. The cure is a steeper audio filter with the limiter placed after it.',
     build: () => ({ scene: toneMpxScene('sweep') }),
   },
   {
     id: 'tone-key-harmonics',
     title: 'Mono mic: a 10.9 kHz tone overloaded lands its third harmonic on the tone-key',
-    note: 'A 10.9 kHz tone at 60 percent deviation with the stage at its nominal limit (0 dB) has a third harmonic at 32.7 kHz, -36.6 dB under 100 percent modulation. The assumed 32.768 kHz tone-key window is 1 kHz wide, so the harmonic sits inside it and can hold the squelch open or mute it. Tone-key frequencies are not published for real systems, so check on the bench. Cures: low-pass the audio after the limiter, back off the level, or notch the tone-key frequency.',
+    note: 'Problem: a 10.9 kHz tone at 60 percent deviation with the stage at its nominal limit (0 dB) has a third harmonic at 32.7 kHz, -36.6 dB under 100 percent modulation. The assumed 32.768 kHz tone-key window is 1 kHz wide, so the harmonic sits inside it and can hold the squelch open or mute it. Tone-key frequencies are not published for real systems, so check on the bench. Cures: low-pass the audio after the limiter, back off the level, or notch the tone-key frequency.',
     build: () => ({ scene: toneMpxScene('tone-key') }),
   },
   {
     id: 'tone-overdeviation',
     title: 'Overdeviation: a loud tone plus the pilot passes 100 percent',
-    note: 'A 1 kHz tone at 95 percent of peak deviation plus the 9 percent pilot sums to 104 percent, 0.3 dB over the limit, so the limiter clips (beta 71). The third harmonic sits at -28.4 dB, the J0 J0 carrier term falls to -33.9 dB as the Bessel weights spread over about 186 kHz, and products at 18 and 20 kHz reach -36.9 dB. The pilot cubed lands at 57 kHz (-86.2 dB) in the RDS band. Limit the programme before the pilot is added and keep the tone below 91 percent.',
+    note: 'Problem: a 1 kHz tone at 95 percent of peak deviation plus the 9 percent pilot sums to 104 percent, 0.3 dB over the limit, so the limiter clips (beta 71). The third harmonic sits at -28.4 dB, the J0 J0 carrier term falls to -33.9 dB as the Bessel weights spread over about 186 kHz, and products at 18 and 20 kHz reach -36.9 dB. The pilot cubed lands at 57 kHz (-86.2 dB) in the RDS band. Limit the programme before the pilot is added and keep the tone below 91 percent.',
     build: () => ({ scene: toneMpxScene('overdev') }),
   },
   {
     id: 'p2p-wireless-snake',
     title: 'Point to point: wireless snake send across a field',
-    note: 'A 20 dBm send at 606 MHz crosses 1.2 km between two yagis on 6 m masts (assumed gain). The received power is -60.3 dBm with 30.5 dB of margin, but only 49 percent of the first Fresnel zone is clear at 0.6 km, so the earth costs 0.6 dB. On 2 m masts the clearance falls to 16 percent and the loss to 4.1 dB.',
+    note: 'Less ideal: a 20 dBm send at 606 MHz crosses 1.2 km between two yagis on 6 m masts (assumed gain). The received power is -60.3 dBm with 30.5 dB of margin, but only 49 percent of the first Fresnel zone is clear at 0.6 km, so the earth costs 0.6 dB. On 2 m masts the clearance falls to 16 percent and the loss to 4.1 dB.',
     build: () => ({ scene: p2pScene('snake') }),
   },
   {
     id: 'p2p-delay-speaker',
     title: 'Point to point: FOH to a stage-left delay speaker',
-    note: 'A 17 dBm send at 606 MHz crosses 150 m between paddle antennas at 3 m. The received power is -50.6 dBm with 40.1 dB of margin and 70 percent of the first Fresnel zone is clear, so the 60 percent rule is met. Over a path this long the ground reflection is left off: switched on it only adds about 1.6 dB (see p2p-ground-reflection for a short path with a real ripple).',
+    note: 'Best practice: a 17 dBm send at 606 MHz crosses 150 m between paddle antennas at 3 m. The received power is -50.6 dBm with 40.1 dB of margin and 70 percent of the first Fresnel zone is clear, so the 60 percent rule is met. Over a path this long the ground reflection is left off: switched on it only adds about 1.6 dB (see p2p-ground-reflection for a short path with a real ripple).',
     build: () => ({ scene: p2pScene('delay') }),
   },
   {
     id: 'p2p-truck-hill',
     title: 'Point to point: broadcast truck to a remote camera position',
-    note: 'A 30 dBm send at 606 MHz covers 8 km between yagis at 12 m and 6 m with a 30 m hill 3 km from the truck. The hill is a single knife edge that costs 13.8 dB, leaving -80.0 dBm received and 10.8 dB of margin and the clearance is far below the 60 percent rule. Without the hill the earth alone costs 3.2 dB and the received power is -69.3 dBm.',
+    note: 'Less ideal: a 30 dBm send at 606 MHz covers 8 km between yagis at 12 m and 6 m with a 30 m hill 3 km from the truck. The hill is a single knife edge that costs 13.8 dB, leaving -80.0 dBm received and 10.8 dB of margin and the clearance is far below the 60 percent rule. Without the hill the earth alone costs 3.2 dB and the received power is -69.3 dBm.',
     build: () => ({ scene: p2pScene('truck') }),
   },
   {
     id: 'p2p-bodypack-line-feed',
     title: 'Point to point: two bodypacks as a wireless line feed',
-    note: 'Two bodypacks with whips at 1.5 m carry a line feed over 60 m at 606 MHz with 10 dBm and nobody wearing them, so there is no body loss. The received power is -78.7 dBm with 12.1 dB of margin. The path is under 100 m and only 55 percent of the first Fresnel zone is clear, so the model warns; a mic link is the better tool here.',
+    note: 'Less ideal: two bodypacks with whips at 1.5 m carry a line feed over 60 m at 606 MHz with 10 dBm and nobody wearing them, so there is no body loss. The received power is -78.7 dBm with 12.1 dB of margin. The path is under 100 m and only 55 percent of the first Fresnel zone is clear, so the model warns; a mic link is the better tool here.',
     build: () => ({ scene: p2pScene('bodypack') }),
   },
   {
     id: 'imd-pim',
     title: 'Rusty connector: PIM',
-    note: 'Two 20 W transmitters sit side by side behind an isolated combiner and the receiver is linear, which holds active intermod at the wanted channel to about -114 dBm. The product made passively by the antenna-line connector is -118 dBm for a corroded connector and -153 dBm for a good one: 35 dB apart. At this power that product stays below the noise from the transmitters themselves (about -103 dBm), so the noise rise is the same for both; passive intermod only starts to matter at much higher power, where it grows three times faster than the carriers.',
+    note: 'Problem: two 20 W transmitters sit side by side behind an isolated combiner and the receiver is linear, which holds active intermod at the wanted channel to about -114 dBm. The product made passively by the antenna-line connector is -118 dBm for a corroded connector and -153 dBm for a good one: 35 dB apart. At this power that product stays below the noise from the transmitters themselves (about -103 dBm), so the noise rise is the same for both; passive intermod only starts to matter at much higher power, where it grows three times faster than the carriers.',
     build: () => ({
       scene: imdScene('mic', 604.0, [
         ['Receiver mic (wanted)', 604.0, 0, 24, 12, 1.5], ['High-power TX 1', 606.0, 43, 2, 10, 2.5], ['High-power TX 2', 608.0, 43, 3, 10, 2.5],
@@ -1253,7 +1290,7 @@ export const EXAMPLES = [
   {
     id: 'imd-plan-bad',
     title: 'Intermod-free frequency plan vs a bad plan',
-    note: 'Four transmitters equally spaced by 400 kHz: nearly every third-order product lands on the channel of another transmitter. Retune them to 606.000, 606.500, 610.200 and 611.700 MHz: no third- or fifth-order product then lands within 500 kHz of any channel centre, so the coordination check clears and the 400 kHz clearance rule is met.',
+    note: 'Compare: four transmitters equally spaced by 400 kHz: nearly every third-order product lands on the channel of another transmitter. Retune them to 606.000, 606.500, 610.200 and 611.700 MHz: no third- or fifth-order product then lands within 500 kHz of any channel centre, so the coordination check clears and the 400 kHz clearance rule is met.',
     build: () => ({
       scene: imdScene('mic', 606.4, [
         ['Mic A', 606.0, 14, 9.0, 6.0, 1.5], ['Mic B', 606.4, 14, 9.2, 7.2, 1.5], ['Mic C', 606.8, 14, 8.8, 5.2, 1.5], ['Mic D', 607.2, 14, 9.4, 5.6, 1.5],
@@ -1263,7 +1300,7 @@ export const EXAMPLES = [
   {
     id: 'cascade-booster-antenna',
     title: 'Cascaded noise figure: booster at the antenna',
-    note: 'A 20 dB booster at the antenna comes first in the chain, so the 25.5 dB of cable loss after it adds little noise: the system noise figure is 13.9 dB and the link has 12 dB of margin. Compare with the same parts the other way round in the next example.',
+    note: 'Best practice: a 20 dB booster at the antenna comes first in the chain, so the 25.5 dB of cable loss after it adds little noise: the system noise figure is 13.9 dB and the link has 12 dB of margin. Compare with the same parts the other way round in the next example.',
     build: () => ({
       scene: make('mic', (s, l) => {
         l.tx.pos = { x: 1, y: 1, z: 1.5 };
@@ -1276,7 +1313,7 @@ export const EXAMPLES = [
   {
     id: 'cascade-booster-rack',
     title: 'Cascaded noise figure: booster at the rack',
-    note: 'The same booster and cable, but the booster sits at the rack after the long cable. The cable loss now comes first and adds its full 25.5 dB to the noise figure, giving 28.6 dB overall. The received power is identical, but the link margin falls to about -3 dB and the link fails.',
+    note: 'Less ideal: the same booster and cable, but the booster sits at the rack after the long cable. The cable loss now comes first and adds its full 25.5 dB to the noise figure, giving 28.6 dB overall. The received power is identical, but the link margin falls to about -3 dB and the link fails.',
     build: () => ({
       scene: make('mic', (s, l) => {
         l.tx.pos = { x: 1, y: 1, z: 1.5 };
@@ -1289,7 +1326,7 @@ export const EXAMPLES = [
   {
     id: 'stray-carrier-pilot',
     title: 'Stray carrier: pilot squelch rejects it',
-    note: 'An unmodulated stray carrier arrives 8 dB stronger than the wanted signal. A carrier squelch only looks at signal strength, so it opens on the stray carrier and the wanted audio is lost to capture. With pilot squelch on, the receiver also needs the wanted 19 kHz pilot, which the stray carrier does not have, so the gate stays shut.',
+    note: 'Compare: an unmodulated stray carrier arrives 8 dB stronger than the wanted signal. A carrier squelch only looks at signal strength, so it opens on the stray carrier and the wanted audio is lost to capture. With pilot squelch on, the receiver also needs the wanted 19 kHz pilot, which the stray carrier does not have, so the gate stays shut.',
     build: () => ({
       scene: make('iem', (s, l) => {
         outdoorIem(s, l);
@@ -1303,7 +1340,7 @@ export const EXAMPLES = [
   {
     id: 'battery-gauge',
     title: 'Battery gauge: reported vs true',
-    note: 'The transmitter estimates its battery from the voltage under load. With two alkaline cells that is a poor guide: at 50 % true charge the gauge reads 22 %, and at 30 % it already shows empty while the transmitter still runs at full power. Press Battery: Start to watch the reading fall long before the output power sags.',
+    note: 'Problem: the transmitter estimates its battery from the voltage under load. With two alkaline cells that is a poor guide: at 50 % true charge the gauge reads 22 %, and at 30 % it already shows empty while the transmitter still runs at full power. Press Battery: Start to watch the reading fall long before the output power sags.',
     build: () => ({
       scene: make('mic', (s, l) => {
         l.tx.pos = { x: 4, y: 3, z: 1.5 };
@@ -1314,7 +1351,7 @@ export const EXAMPLES = [
   {
     id: 'wall-thickness',
     title: 'Wall thickness: thin vs thick concrete',
-    note: 'The dividing wall is concrete, 0.1 m thick in its upper half and 0.4 m in its lower half. Wall loss grows with thickness (concrete costs 8 dB per 0.1 m), so the room behind the thin part is covered (weakest point -70 dBm against -75 dBm required) and the room behind the thick part is not (weakest -94 dBm). Change the thickness of a wall segment to see the zone result change.',
+    note: 'Compare: the dividing wall is concrete, 0.1 m thick in its upper half and 0.4 m in its lower half. Wall loss grows with thickness (concrete costs 8 dB per 0.1 m), so the room behind the thin part is covered (weakest point -70 dBm against -75 dBm required) and the room behind the thick part is not (weakest -94 dBm). Change the thickness of a wall segment to see the zone result change.',
     build: () => ({
       scene: make('iem', (s, l) => {
         s.stage = { width: 24, depth: 12 };
@@ -1336,7 +1373,7 @@ export const EXAMPLES = [
   {
     id: 'diversity-cable-runs',
     title: 'Diversity with different cable runs',
-    note: 'Antenna A has a short 5 m cable run (2.1 dB loss); antenna B is on a 40 m run of RG58 with a 6 dB booster at the antenna end (11.0 dB net loss). B therefore arrives about 9 dB below A, and with switching diversity the receiver stays on A and moves to B only while A is in its fade, around 7 m (A -41 dBm, B -38 dBm). Remove the booster and B is rarely chosen.',
+    note: 'Less ideal: antenna A has a short 5 m cable run (2.1 dB loss); antenna B is on a 40 m run of RG58 with a 6 dB booster at the antenna end (11.0 dB net loss). B therefore arrives about 9 dB below A, and with switching diversity the receiver stays on A and moves to B only while A is in its fade, around 7 m (A -41 dBm, B -38 dBm). Remove the booster and B is rarely chosen.',
     build: () => ({
       scene: make('mic', (s, l) => {
         twoRay(s, l);
@@ -1352,7 +1389,7 @@ export const EXAMPLES = [
   {
     id: 'raised-stage-null',
     title: 'Raised stage: deck 1.2 m changes the dropout positions',
-    note: 'The receiver antenna stands on the floor in front of the stage and the mic walks on a deck 1.2 m high. The mic is now nearly 3 m above the reflecting floor instead of 1.75 m, so the cancellation moves: the dip that sits at 6.8 m with a ground-level stage (-46 dBm) falls at about 5.1 m on the deck and is shallower (-41 dBm), so the squelch that closes at 6.8 m on the ground stays open here. Set the deck height to 0 to compare.',
+    note: 'Problem: the receiver antenna stands on the floor in front of the stage and the mic walks on a deck 1.2 m high. The mic is now nearly 3 m above the reflecting floor instead of 1.75 m, so the cancellation moves: the dip that sits at 6.8 m with a ground-level stage (-46 dBm) falls at about 5.1 m on the deck and is shallower (-41 dBm), so the squelch that closes at 6.8 m on the ground stays open here. Set the deck height to 0 to compare.',
     build: () => ({
       scene: make('mic', (s, l) => {
         twoRay(s, l);
@@ -1368,7 +1405,7 @@ export const EXAMPLES = [
   {
     id: 'drum-riser',
     title: 'Drum riser on a stage: a stage on a stage',
-    note: 'A 1.2 m deck carries a 0.4 m drum riser, and the IEM bodypack is worn on the riser while the transmit antenna stands on the deck. Heights are measured from the local floor, so the bodypack is 1.0 m above the riser top. The floor bounce now reflects from the riser instead of the deck: that ray is about 16.3 dB weaker than over a bare deck (-43.2 dB against -27.0 dB relative to the direct ray), while the total level barely moves (-36.0 dBm against -36.1 dBm).',
+    note: 'Less ideal: a 1.2 m deck carries a 0.4 m drum riser, and the IEM bodypack is worn on the riser while the transmit antenna stands on the deck. Heights are measured from the local floor, so the bodypack is 1.0 m above the riser top. The floor bounce now reflects from the riser instead of the deck: that ray is about 16.3 dB weaker than over a bare deck (-43.2 dB against -27.0 dB relative to the direct ray), while the total level barely moves (-36.0 dBm against -36.1 dBm).',
     build: () => ({
       scene: make('iem', (s, l) => {
         s.stage = { width: 12, depth: 8, heightM: 1.2 };
@@ -1385,7 +1422,7 @@ export const EXAMPLES = [
   {
     id: 'audience-vs-stage',
     title: 'Receiver on the floor, mic on a raised stage with a riser',
-    note: 'The receiver antenna is on the floor in front of the audience and the mic is on a 1.5 m stage. The raised stage changes the geometry: the level falls from -36.6 dBm for a ground-level stage to -38.5 dBm. A 1.4 m tall, 0.6 m deep wooden riser in front of the mic then blocks part of the direct ray and costs another 3.6 dB (-42.1 dBm); a metal one would cost 5.8 dB.',
+    note: 'Compare: the receiver antenna is on the floor in front of the audience and the mic is on a 1.5 m stage. The raised stage changes the geometry: the level falls from -36.6 dBm for a ground-level stage to -38.5 dBm. A 1.4 m tall, 0.6 m deep wooden riser in front of the mic then blocks part of the direct ray and costs another 3.6 dB (-42.1 dBm); a metal one would cost 5.8 dB.',
     build: () => ({
       scene: make('mic', (s, l) => {
         s.stage = { width: 12, depth: 8, heightM: 1.5 };
@@ -1402,25 +1439,25 @@ export const EXAMPLES = [
   {
     id: 'band-vhf',
     title: 'Same stage at VHF (200 MHz)',
-    note: 'The same 10 m link, with the same omni antennas and 5 m of RG58, at 200 MHz. Free-space loss is 38.5 dB (effective 39.0 dB with the floor bounce) and the cable costs only 1.1 dB, so the margin is 68.9 dB. Compare the UHF and 2.4 GHz versions of this stage.',
+    note: 'Compare: the same 10 m link, with the same omni antennas and 5 m of RG58, at 200 MHz. Free-space loss is 38.5 dB (effective 39.0 dB with the floor bounce) and the cable costs only 1.1 dB, so the margin is 68.9 dB. Compare the UHF and 2.4 GHz versions of this stage.',
     build: () => ({ scene: make('mic', (s, l) => sameStage(s, l, 200)), walk: SAME_STAGE_WALK }),
   },
   {
     id: 'band-uhf',
     title: 'Same stage at UHF (600 MHz)',
-    note: 'The same link at 600 MHz: free-space loss rises to 48.0 dB (effective 46.0 dB) and the cable costs 2.1 dB, so the margin is 60.8 dB. Doubling the frequency twice more would add another 12 dB of free-space loss, with antennas of equal gain.',
+    note: 'Compare: the same link at 600 MHz: free-space loss rises to 48.0 dB (effective 46.0 dB) and the cable costs 2.1 dB, so the margin is 60.8 dB. Doubling the frequency twice more would add another 12 dB of free-space loss, with antennas of equal gain.',
     build: () => ({ scene: make('mic', (s, l) => sameStage(s, l, 600)), walk: SAME_STAGE_WALK }),
   },
   {
     id: 'band-2g4',
     title: 'Same stage at 2.4 GHz',
-    note: 'The same link at 2.4 GHz: free-space loss is 60.1 dB (effective 58.4 dB), 21.6 dB more than at 200 MHz, and the cable costs 5.4 dB, so the margin is 45.2 dB. The shorter wavelength also makes the multipath pattern finer as the mic moves, and the transmit power is 14 dBm in all three versions so only frequency differs; a UK audio PMSE 2.4 GHz system is limited to 10 mW EIRP (draft IR 2030), about 4 dB less.',
+    note: 'Compare: the same link at 2.4 GHz: free-space loss is 60.1 dB (effective 58.4 dB), 21.6 dB more than at 200 MHz, and the cable costs 5.4 dB, so the margin is 45.2 dB. The shorter wavelength also makes the multipath pattern finer as the mic moves, and the transmit power is 14 dBm in all three versions so only frequency differs; a UK audio PMSE 2.4 GHz system is limited to 10 mW EIRP (draft IR 2030), about 4 dB less.',
     build: () => ({ scene: make('mic', (s, l) => sameStage(s, l, 2400)), walk: SAME_STAGE_WALK }),
   },
   {
     id: 'wifi-busy-2g4',
     title: '2.4 GHz link in a busy Wi-Fi venue',
-    note: 'A 2.4 GHz link 104 m across a venue with busy Wi-Fi, 10 dB fade margin and a 10 dBm (10 mW) transmitter, the UK audio PMSE limit (draft IR 2030). Busy Wi-Fi raises the noise floor by about 20 dB at 2.4 GHz (to -87.6 dBm), which turns an 11.2 dB margin into -8.8 dB: a fail. At 5.8 GHz the same venue would add only about 12 dB. Set the interference option to None and the same link passes; the signal level has not changed, only the noise floor.',
+    note: 'Problem: a 2.4 GHz link 104 m across a venue with busy Wi-Fi, 10 dB fade margin and a 10 dBm (10 mW) transmitter, the UK audio PMSE limit (draft IR 2030). Busy Wi-Fi raises the noise floor by about 20 dB at 2.4 GHz (to -87.6 dBm), which turns an 11.2 dB margin into -8.8 dB: a fail. At 5.8 GHz the same venue would add only about 12 dB. Set the interference option to None and the same link passes; the signal level has not changed, only the noise floor.',
     build: () => ({
       scene: make('mic', (s, l) => {
         sameStage(s, l, 2400);
@@ -1438,7 +1475,7 @@ export const EXAMPLES = [
   {
     id: 'ur4d-style-link',
     title: 'Analogue FM link, UR4D-style receiver (assumed figures)',
-    note: 'A 50 mW handheld at 590 MHz feeds a receiver set up from published UR4D-class figures; the quoted -102 dBm at 30 dB SINAD is used as the sensitivity, so the margin is 65.5 dB across 15 m. Walk the transmitter towards the receiver: the input reaches -30 dBm (hot, the top of the rated range) at about 8 m and passes the -25 dBm overload level at about 3.5 m (multipath ripples move both points), where the front end is flagged overloaded even though the margin is highest. Keep transmitters well away from the receiver antennas. Based on published specs, some figures (noise figure, squelch threshold, band edges) are assumed.',
+    note: 'Best practice: a 50 mW handheld at 590 MHz feeds a receiver set up from published UR4D-class figures; the quoted -102 dBm at 30 dB SINAD is used as the sensitivity, so the margin is 65.5 dB across 15 m. Walk the transmitter towards the receiver: the input reaches -30 dBm (hot, the top of the rated range) at about 8 m and passes the -25 dBm overload level at about 3.5 m (multipath ripples move both points), where the front end is flagged overloaded even though the margin is highest. Keep transmitters well away from the receiver antennas. Based on published specs, some figures (noise figure, squelch threshold, band edges) are assumed.',
     build: () => ({
       scene: make('mic', (s, l) => {
         s.stage = { width: 20, depth: 12 };
@@ -1459,7 +1496,7 @@ export const EXAMPLES = [
   {
     id: 'skm-low-intermod',
     title: 'Four analogue FM mics, standard mode (SKM 5200-II class, assumed figures)',
-    note: 'Four 10 mW handhelds share a hybrid combiner with 25 dB isolation, and Mic A and Mic B beat to a product at 605.7 MHz, exactly on Mic C: the worst channel sees its noise floor rise by 20.3 dB. Switching all four to the low-intermod mode lowers the transmitter-side product by an assumed 6 dB and the worst rise to 14.8 dB. The 6 dB is an assumption standing in for a trade-report claim of about 30 percent more compatible channels. Based on published specs, some figures assumed.',
+    note: 'Compare: four 10 mW handhelds share a hybrid combiner with 25 dB isolation, and Mic A and Mic B beat to a product at 605.7 MHz, exactly on Mic C: the worst channel sees its noise floor rise by 20.3 dB. Switching all four to the low-intermod mode lowers the transmitter-side product by an assumed 6 dB and the worst rise to 14.8 dB. The 6 dB is an assumption standing in for a trade-report claim of about 30 percent more compatible channels. Based on published specs, some figures assumed.',
     build: () => ({
       scene: make('mic', (s) => {
         s.stage = { width: 16, depth: 10 };
@@ -1478,7 +1515,7 @@ export const EXAMPLES = [
   {
     id: 'fm-deviation-compare',
     title: 'FM deviation compared: +-40, +-45, +-75 and +-12.5 kHz (assumed figures)',
-    note: 'The same link and the same 15 kHz audio at a -80 dBm input: Carson bandwidth is 110 kHz at +-40 kHz (SKM 5200-II class), 120 kHz at +-45 kHz (UR4D class), 180 kHz for +-75 kHz broadcast FM and 31 kHz for +-12.5 kHz narrowband two-way (3 kHz audio, so not directly comparable). Above threshold the audio SNR rises 20 log10 of the deviation ratio, 1.0 dB for +-45 and 5.5 dB for +-75 kHz against +-40 kHz, while the threshold CNR stays near 10 dB and the threshold input level rises from -107.6 to -105.4 dBm. All fit a 200 kHz channel (broadcast uses 90 percent) and leave a 220 to 290 kHz gap to a neighbour 400 kHz away, where the receiver rejection is 75 dB. Deviation of the broadcast and narrowband systems, the audio bandwidths, the receiver noise figure and the absence of a tone-key above the audio are assumed.',
+    note: 'Compare: the same link and the same 15 kHz audio at a -80 dBm input: Carson bandwidth is 110 kHz at +-40 kHz (SKM 5200-II class), 120 kHz at +-45 kHz (UR4D class), 180 kHz for +-75 kHz broadcast FM and 31 kHz for +-12.5 kHz narrowband two-way (3 kHz audio, so not directly comparable). Above threshold the audio SNR rises 20 log10 of the deviation ratio, 1.0 dB for +-45 and 5.5 dB for +-75 kHz against +-40 kHz, while the threshold CNR stays near 10 dB and the threshold input level rises from -107.6 to -105.4 dBm. All fit a 200 kHz channel (broadcast uses 90 percent) and leave a 220 to 290 kHz gap to a neighbour 400 kHz away, where the receiver rejection is 75 dB. Deviation of the broadcast and narrowband systems, the audio bandwidths, the receiver noise figure and the absence of a tone-key above the audio are assumed.',
     build: () => ({
       scene: make('mic', (s, l) => {
         s.stage = { width: 20, depth: 12 };
@@ -1498,7 +1535,7 @@ export const EXAMPLES = [
   {
     id: 'fm-deviation-g3-vs-skm',
     title: 'Deviation compared: +-24 (G3 / 2000 class), +-40 and +-45 kHz (assumed figures)',
-    note: 'Three analogue FM systems carry the same 15 kHz audio at a -80 dBm input, compared at nominal deviation: the Sennheiser G3 / 2000 class at +-24 kHz needs 78 kHz of Carson bandwidth, the SKM 5200-II class at +-40 kHz needs 110 kHz and the UR4D class at +-45 kHz needs 120 kHz. Above threshold the audio SNR is 4.4 dB better at +-40 kHz and 5.5 dB better at +-45 kHz than at +-24 kHz (20 log10 of the deviation ratio), at the price of a threshold input level that rises from -109.1 to -107.6 and -107.2 dBm. All three use at most 60 percent of a 200 kHz channel and leave 322, 290 and 280 kHz to a neighbour 400 kHz away. Peak deviation of the G3 is twice its nominal figure, so its real occupied bandwidth is wider than this nominal estimate; the 15 kHz audio bandwidth, the receiver noise figure and the nominal-deviation reading are assumed.',
+    note: 'Compare: three analogue FM systems carry the same 15 kHz audio at a -80 dBm input, compared at nominal deviation: the Sennheiser G3 / 2000 class at +-24 kHz needs 78 kHz of Carson bandwidth, the SKM 5200-II class at +-40 kHz needs 110 kHz and the UR4D class at +-45 kHz needs 120 kHz. Above threshold the audio SNR is 4.4 dB better at +-40 kHz and 5.5 dB better at +-45 kHz than at +-24 kHz (20 log10 of the deviation ratio), at the price of a threshold input level that rises from -109.1 to -107.6 and -107.2 dBm. All three use at most 60 percent of a 200 kHz channel and leave 322, 290 and 280 kHz to a neighbour 400 kHz away. Peak deviation of the G3 is twice its nominal figure, so its real occupied bandwidth is wider than this nominal estimate; the 15 kHz audio bandwidth, the receiver noise figure and the nominal-deviation reading are assumed.',
     build: () => ({
       scene: make('mic', (s, l) => {
         s.stage = { width: 20, depth: 12 };
@@ -1596,19 +1633,19 @@ export const EXAMPLES = [
   {
     id: 'audio-bandwidth-iem-vs-mic',
     title: 'Audio bandwidth: narrow mic against IEM',
-    note: 'Narrow-band mic: the transmitter audio is limited to 9.0 kHz (a user value), so the baseband view puts the ceiling at 9 kHz and leaves a 23.8 kHz gap to the 32.8 kHz control tone. A default mic assumes 18 kHz (gap 14.8 kHz) and a stereo IEM 15 kHz, 4 kHz below the 19 kHz pilot. Set the figure to the real device (design values, not measured).',
+    note: 'Compare: narrow-band mic: the transmitter audio is limited to 9.0 kHz (a user value), so the baseband view puts the ceiling at 9 kHz and leaves a 23.8 kHz gap to the 32.8 kHz control tone. A default mic assumes 18 kHz (gap 14.8 kHz) and a stereo IEM 15 kHz, 4 kHz below the 19 kHz pilot. Set the figure to the real device (design values, not measured).',
     build: () => ({ scene: reviewScene('audio-bandwidth-iem-vs-mic', {}) }),
   },
   {
     id: 'imd-iem-8-with-fifth-order',
     title: 'Fifth-order products: count against level',
-    note: 'Understand the count: five channels from the third-order clean plan still put 26 fifth-order products in channels (158 with all eight), but their summed level is only -253.5 dBm at the bodypack, far below the -111.0 dBm thermal floor. The 12.6 dB floor rise comes from the other transmitters\' wideband noise (-98.7 dBm), not from intermod. Count hits to coordinate, judge harm by level.',
+    note: 'Less ideal: understand the count: five channels from the third-order clean plan still put 26 fifth-order products in channels (158 with all eight), but their summed level is only -253.5 dBm at the bodypack, far below the -111.0 dBm thermal floor. The 12.6 dB floor rise comes from the other transmitters\' wideband noise (-98.7 dBm), not from intermod. Count hits to coordinate, judge harm by level.',
     build: () => ({ scene: reviewScene('imd-iem-8-with-fifth-order', {}) }),
   },
   {
     id: 'p2p-ground-reflection',
     title: 'Point to point: ground reflection ripple',
-    note: 'Problem: a 40 m link between paddles lying flat at 3 m, 606 MHz, with the ground reflection on: it costs 5.0 dB at 40 m, and over 20 to 80 m the reflected ray swings the level from 16.7 dB below the direct ray at 36.2 m to 5.8 dB above at 73.7 m. With vertical polarisation the dip is only 1.9 dB. At 150 m the reflection only adds 2.7 dB and the ripple is gone.',
+    note: 'Problem: a 40 m link between paddles lying flat at 3 m, 606 MHz, with the ground reflection on: it costs 5.0 dB at 40 m, and over 20 to 80 m the reflected ray swings the level from 16.7 dB below the direct ray at 36.2 m to 5.8 dB above at 73.7 m. With vertical polarisation the dip is only 1.9 dB. At 150 m the reflection only adds 2.7 dB and the ripple is gone. The model warns that 40 m is under 100 m (near-field, a mic link is the better model): it is shown for the ripple.',
     build: () => ({ scene: reviewScene('p2p-ground-reflection', {}) }),
   },
   {
@@ -1646,6 +1683,30 @@ export const EXAMPLES = [
     title: 'Noise: an ENG crew at the press pit',
     note: 'Problem: an ENG crew at the barrier (camera transmitter, two PTT radios, an LED light and a van generator, about 12 m from the FOH receiver) raises the floor by 17.6 dB together and leaves 36.7 dB of margin. The LED light dominates at -97.2 dBm, then the generator at -98.6 dBm, the PTT radios at about -108 dBm average, and the 2.3 GHz camera transmitter only -115.8 dBm because it is far out of band. Agree lights off, radios and generator away from the antennas with the press (figures assumed).',
     build: () => ({ scene: noiseSourceScene('eng-press-pit') }),
+  },
+  {
+    id: 'tv-weak-on-channel',
+    title: 'Weak TV: a mic on top of a weak local channel',
+    note: 'Less ideal: a mic 0.4 MHz above the centre of UK channel 33 (566 to 574 MHz) shares the block with a weak local transmitter (-85 dBm at the antenna, assumed). The 7.6 MHz block is flat noise, so a 200 kHz mic channel sees 15.8 dB less, -100.8 dBm, which lifts the floor by 11.5 dB and leaves 43.3 dB of margin. It works as a fallback if the channel is licensed or permitted; check the local database and scan first. The occupancy is illustrative.',
+    build: () => ({ scene: weakTvScene('on-channel') }),
+  },
+  {
+    id: 'tv-weak-free-gap',
+    title: 'Weak TV: the mic moved to a free gap',
+    note: 'Best practice: the same mic on channel 30 (542 to 550 MHz), two channels from the nearest transmitters on 33 and 34 in the illustrative occupancy. The weak block is now 65.9 dB down (selectivity assumed), the floor rise is 0.0 dB and the margin is 55.3 dB. A free channel costs nothing: prefer it to any shared one.',
+    build: () => ({ scene: weakTvScene('free-gap') }),
+  },
+  {
+    id: 'tv-weak-strong-neighbour',
+    title: 'Weak TV: weak channel with a strong adjacent block',
+    note: 'Less ideal: the mic stays on weak channel 33 but channel 34 next door is strong (-45 dBm at the antenna, assumed). The adjacent block is held 51.6 dB down by the receiver selectivity (assumed), -96.6 dBm in the channel, so with the weak block the floor rises 16.9 dB and the margin falls to 38.0 dB. A real filter skirt decides this one: measure it or move away.',
+    build: () => ({ scene: weakTvScene('strong-neighbour') }),
+  },
+  {
+    id: 'tv-strong-cochannel',
+    title: 'Strong TV: the failure contrast, a strong signal in the channel',
+    note: 'Problem: the same mic on channel 33 where the block is strong (-45 dBm at the antenna, assumed) puts -60.8 dBm of noise in the 200 kHz channel. The floor rises 51.2 dB and only 3.7 dB of margin is left, so the link is marginal. A strong broadcast channel is not usable: pick another one.',
+    build: () => ({ scene: weakTvScene('strong-cochannel') }),
   },
 ];
 

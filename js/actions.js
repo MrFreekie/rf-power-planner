@@ -904,3 +904,15 @@ export function pruneScenePeople(store) {
 
 /** peopleLinkOwners(scene) -> Map linkId -> { personId, which } for the GUI dropdown (only unassigned links are offered, the rest need a swap). */
 export const peopleLinkOwners = (scene) => linkOwners(scene && scene.people);
+
+/** ensureOwnAntennaB(store, linkId) -> true when antenna B has its own antenna record afterwards (a copy of antenna A is made when it followed A), so per-antenna fields such as tilt can be set. */
+export function ensureOwnAntennaB(store, linkId) {
+  let ok = false;
+  store.update((d) => {
+    const l = findLink(d, linkId), b = l && l.rx && l.rx.diversity && l.rx.diversity.antennaB;
+    if (!b) return;
+    if (!b.antenna) { const { orientation, ...rest } = JSON.parse(JSON.stringify(l.rx.antenna)); b.antenna = rest; }
+    ok = true;
+  });
+  return ok;
+}

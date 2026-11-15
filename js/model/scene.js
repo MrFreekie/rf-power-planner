@@ -557,6 +557,7 @@ export function validateScene(scene) {
       if (a.headM !== undefined && !(isNum(a.headM) && a.headM >= 0.3 && a.headM <= 2.5)) errors.push(`${p}.headM must be between 0.3 and 2.5`);
     });
   }
+  if (scene.tvChannelWidthMHz !== undefined && scene.tvChannelWidthMHz !== 6 && scene.tvChannelWidthMHz !== 8) errors.push('tvChannelWidthMHz must be 6 or 8');
   if (scene.people !== undefined) {
     if (!Array.isArray(scene.people)) errors.push('people must be an array');
     else if (scene.people.length > PEOPLE_LIMITS.max) errors.push(`at most ${PEOPLE_LIMITS.max} people are supported`);

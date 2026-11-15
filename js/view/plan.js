@@ -40,6 +40,7 @@ const LOBE_STEP = 6; // degrees
 export function createPlanView(canvas, store) {
   const vp = createViewport({ pxPerM: 40, origin: { x: 40, y: 40 } });
   let handles = [];
+  if (typeof window !== "undefined" && window.__RF_TEST__) Object.defineProperty(canvas, "__handles", { get: () => handles, configurable: true }); // test flag only: read by the browser checks
   let hoverKey = null;
   let userView = false;
   let dragCounter = 0;
@@ -150,8 +151,10 @@ export function createPlanView(canvas, store) {
     // links: lines first, then lobes and icons on top
     for (const link of scene.links) drawLinkLine(ctx, th, scene, link, link === link0, w);
     for (const link of scene.links) drawLinkEnds(ctx, th, scene, link, sel, w);
-    drawPeoplePlan(ctx, th, vp, scene, sel, handles, hoverKey, w);
-    drawNoiseSources(ctx, th, vp, scene, sel, handles, hoverKey, w);
+    const placedLabels = [];
+    for (const lk of scene.links) for (const role of ['tx', 'rx']) { const q = vp.worldToScreen(lk[role].pos); placedLabels.push({ x: q.x - 45, y: q.y + 8, w: 90, h: 30 }, { x: q.x - 16, y: q.y - 16, w: 32, h: 32 }); }
+    drawPeoplePlan(ctx, th, vp, scene, sel, handles, hoverKey, w, placedLabels);
+    drawNoiseSources(ctx, th, vp, scene, sel, handles, hoverKey, w, placedLabels);
     for (const link of scene.links) drawAntennaB(ctx, th, link, sel);
     for (const link of scene.links) drawBranches(ctx, th, vp, link, handles);
     for (const link of scene.links) drawRxCableTags(ctx, th, vp, link, placer, scene.units.length, w);

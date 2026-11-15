@@ -315,3 +315,12 @@ export function removeNoiseSource(store, id) {
     d.noiseSources.splice(i, 1);
   });
 }
+
+// ---- spectrum map ---------------------------------------------------------------------------------------------------
+
+/** setTvChannelWidth(store, mhz): the global TV channel raster, 8 (Europe, UK, Australia; default) or 6 (North America). Anything else is ignored. */
+export function setTvChannelWidth(store, mhz) {
+  if (mhz !== 6 && mhz !== 8) return false;
+  store.update((d) => { d.tvChannelWidthMHz = mhz; });
+  return true;
+}

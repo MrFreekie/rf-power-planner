@@ -79,5 +79,14 @@ export function peopleBudgetRows(scene, link, solve) {
   return [{ label: o.person.name, value: m.map((x) => x.text).join('  |  ') + (m.length > 1 ? `. Weaker: ${worst.which === 'iem' ? 'IEM' : 'mic'}` : ''), severity: m.some((x) => x.status === 'FAIL' || x.status === 'DEAD') ? 'warning' : m.some((x) => x.status === 'MARGINAL') ? 'info' : 'ok' }];
 }
 
+/** Paths-table rows for the active link's carrier: one row with both margins side by side ({ kind, length, delayNs, relDb } strings). */
+export function peoplePathRows(scene, link, solve) {
+  const o = link && personOfLink(scene, link.id);
+  if (!o) return [];
+  const m = personMargins(scene, o.person, solve);
+  if (!m.length) return [];
+  return [{ kind: `Person: ${o.person.name}`, length: '-', delayNs: '-', relDb: m.map((x) => x.text).join(' | ') }];
+}
+
 /** Move a person's link packs' stored offsets after a pack was dragged: returns the new world pack positions for the person (for the tests). */
 export { personPackPositions };

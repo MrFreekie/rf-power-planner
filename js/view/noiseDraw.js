@@ -1,7 +1,8 @@
 // Noise source icons on the plan. Shape tells the type (radio waves for a narrowband carrier, a zigzag for broadband hash, a pulse train for
 // clicks), the label gives the name, and a muted source is dashed and says "off". Greyscale-safe: no colour carries meaning.
 import { NOISE_CATALOGUE } from '../model/noise-sources.js';
-import { haloText } from './util.js';
+import { haloText, setFont } from './util.js';
+import { placeLabel } from '../ui/antennaFields.js';
 
 /** Icon family of a kind: 'radio' | 'hash' | 'pulse'. Pure. */
 export function noiseGlyph(kind) {
@@ -26,7 +27,7 @@ function glyph(ctx, g, x, y, r) {
 }
 
 /** Draw every free-standing noise source; pushes a { kind: 'noise' } handle for each. Sources linked to a wall are drawn by the wall itself. */
-export function drawNoiseSources(ctx, th, vp, scene, sel, handles, hoverKey, w) {
+export function drawNoiseSources(ctx, th, vp, scene, sel, handles, hoverKey, w, placed = []) {
   const rects = [];
   for (const s of scene.noiseSources || []) {
     if (s.reflectorId || !s.pos) continue;
@@ -40,7 +41,14 @@ export function drawNoiseSources(ctx, th, vp, scene, sel, handles, hoverKey, w) 
     glyph(ctx, noiseGlyph(s.kind), p.x, p.y, 7);
     if (selected) { ctx.setLineDash([2, 3]); ctx.beginPath(); ctx.arc(p.x, p.y, r + 6, 0, Math.PI * 2); ctx.stroke(); }
     ctx.restore();
-    if (w >= 520 || selected) { haloText(ctx, th, `${s.name}${off ? ' (off)' : ''}`, p.x, p.y + r + 14, { align: 'center', color: selected ? th.ink : th.inkSoft, weight: selected ? '600' : '' }); rects.push({ x: p.x - 50, y: p.y + r + 2, w: 100, h: 16 }); }
+    placed.push({ x: p.x - r, y: p.y - r, w: 2 * r, h: 2 * r });
+    if (w >= 520 || selected) {
+      const text = `${s.name}${off ? ' (off)' : ''}`;
+      setFont(ctx, th, 12, selected ? '600' : '');
+      const box = placeLabel({ x: p.x, y: p.y + r + 8 }, { w: Math.ceil(ctx.measureText(text).width) + 6, h: 16 }, placed, { w: w || 10000, h: 10000 });
+      haloText(ctx, th, text, box.x + 3, box.y + 12, { color: selected ? th.ink : th.inkSoft, weight: selected ? '600' : '' });
+      rects.push(box); placed.push(box);
+    }
     handles.push({ kind: 'noise', itemId: s.id, sx: p.x, sy: p.y, r: 16, wx: s.pos.x, wy: s.pos.y });
   }
   return rects;

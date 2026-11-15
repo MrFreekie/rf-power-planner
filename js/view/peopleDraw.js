@@ -2,6 +2,7 @@
 // The outline is a shape plus a text label, so identity never depends on colour. The grip at the top of the outline drags the whole group.
 import { groupPoints, groupCircle, personOfLink } from '../ui/peopleUi.js';
 import { haloText, setFont } from './util.js';
+import { placeLabel } from '../ui/antennaFields.js';
 
 const TAG = { red: '#c0392b', orange: '#d9741a', amber: '#c99a00', green: '#2e8b57', teal: '#1f8a8a', cyan: '#2a9dc4', blue: '#2f5fb3', indigo: '#4b4bb0', violet: '#7b4bb0', pink: '#c2517d', brown: '#7a5230', grey: '#777777' };
 export const personTag = (c) => TAG[c] || TAG.grey;
@@ -9,7 +10,7 @@ const ROLE_MARK = { singer: 'S', instrumentalist: 'I', presenter: 'P', crew: 'C'
 export const roleMark = (r) => ROLE_MARK[r] || 'O';
 
 /** Draw every placed person on the plan. Pushes a { kind: 'person' } handle per person. Returns the label rectangles drawn. */
-export function drawPeoplePlan(ctx, th, vp, scene, sel, handles, hoverKey, w) {
+export function drawPeoplePlan(ctx, th, vp, scene, sel, handles, hoverKey, w, placed = []) {
   const rects = [];
   for (const person of scene.people || []) {
     const pts = groupPoints(scene, person);
@@ -35,10 +36,11 @@ export function drawPeoplePlan(ctx, th, vp, scene, sel, handles, hoverKey, w) {
     if (w >= 420 || selected) {
       setFont(ctx, th, 12, selected ? '600' : '');
       const tw = Math.ceil(ctx.measureText(text).width);
+      const box = placeLabel({ x: gx, y: gy }, { w: tw + 24, h: 18 }, placed, { w: w || 10000, h: 10000 });
       ctx.fillStyle = personTag(person.colour); ctx.strokeStyle = th.ink; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.arc(gx + 14, gy - 4, 4.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-      haloText(ctx, th, text, gx + 22, gy, { color: selected ? th.ink : th.inkSoft, weight: selected ? '600' : '' });
-      rects.push({ x: gx + 8, y: gy - 14, w: tw + 16, h: 18 });
+      ctx.beginPath(); ctx.arc(box.x + 7, box.y + 9, 4.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      haloText(ctx, th, text, box.x + 15, box.y + 13, { color: selected ? th.ink : th.inkSoft, weight: selected ? '600' : '' });
+      rects.push(box); placed.push(box);
     }
     handles.push({ kind: 'person', itemId: person.id, sx: gx, sy: gy, r: 16, wx: person.pos.x, wy: person.pos.y, pri: 1 });
   }

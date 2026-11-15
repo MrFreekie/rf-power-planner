@@ -59,6 +59,7 @@ export const NOISE_CATALOGUE = Object.freeze({
   bluetooth: E('Bluetooth device', 'intermittent', { type: 'narrowband', freqMHz: 2441, erpDbm: 4, bwKHz: 1000, dutyCycle: 0.3, onS: 0.005, holdS: 0 }, { erpDbm: 'I', dutyCycle: 'U' }, 'Class 2 about 2.5 mW, hopping over 79 channels (treated as one in-band carrier).', 'radio'),
   'microwave-oven': E('Microwave oven leakage (2.45 GHz)', 'continuous', { type: 'narrowband', freqMHz: 2450, erpDbm: 0, bwKHz: 30000 }, { erpDbm: 'U' }, 'A leaking door seal; a catering trailer beside the stage.', 'power'),
   'pyro-trigger': E('Pyro / cue trigger radio (433 MHz)', 'intermittent', { type: 'narrowband', freqMHz: 433.9, erpDbm: 10, bwKHz: 25, dutyCycle: 0.001, onS: 0.1, holdS: 0 }, { freqMHz: 'I', erpDbm: 'I', dutyCycle: 'U' }, 'Short command bursts.', 'radio'),
+  'dtv-broadcast': E('Digital TV transmitter or relay (one broadcast block)', 'continuous', { type: 'narrowband', freqMHz: 570, erpDbm: 10, bwKHz: 7600, dutyCycle: 1 }, { freqMHz: 'U', erpDbm: 'U', bwKHz: 'I' }, 'A DVB-T/T2 block is a flat, noise-like carrier about 7.6 MHz wide (ATSC about 5.4 MHz): to a 200 kHz mic channel it is co-channel noise at the block power minus 10 log10(block / 200 kHz). Set the frequency to the block centre and the ERP so the level at the antenna matches a field measurement.', 'radio'),
   'cofdm-camera-tx': E('Camera-mounted COFDM video transmitter (2.3 GHz band)', 'continuous', { type: 'narrowband', freqMHz: 2300, erpDbm: 27, bwKHz: 8000, dutyCycle: 1 }, { freqMHz: 'U', erpDbm: 'I', bwKHz: 'I' }, 'About 10 mW to 2 W, 1.2 to 1.3, 2 to 2.5 and 7 GHz bands: far above UHF mics, near 2.4 GHz systems. Check the regional ENG allocation.', 'eng'),
   'led-camera-light': E('On-camera LED light (PWM dimming)', 'continuous', { ...BB(38, -20) }, { fieldDbuvmAt10m: 'U' }, 'The same noise class as led-light-pwm, at a camera: close to the pit.', 'eng'),
 });
@@ -145,9 +146,12 @@ export function noiseSourceAt(src, point, freqMHz, bwKHz, gainFn = () => 0) {
     const fspl = 20 * Math.log10((4 * Math.PI * dEff) / lambda);
     const raw = num(p.erpDbm, -Infinity) - fspl + g - NOISE_POLARISATION_LOSS_DB;
     const offset = num(p.freqMHz, freqMHz) - freqMHz;
-    const sel = selectivityDb(offset, bwKHz);
-    // a carrier wider than the receiver channel only puts the receiver-bandwidth fraction of its power in the channel
-    const wide = num(p.bwKHz, 12.5), bwLoss = wide > bwKHz && Math.abs(offset) * 1000 <= (wide + bwKHz) / 2 ? 10 * Math.log10(wide / bwKHz) : 0;
+    // a carrier wider than the receiver channel only puts the receiver-bandwidth fraction of its power in the channel, and its selectivity offset is
+    // measured from the nearest edge of the block (a channel inside the block is in-channel), not from the block centre
+    const wide = num(p.bwKHz, 12.5), isWide = wide > bwKHz;
+    const edgeOffMHz = isWide ? Math.max(0, Math.abs(offset) - wide / 2000) : offset;
+    const sel = selectivityDb(edgeOffMHz, bwKHz);
+    const bwLoss = isWide && edgeOffMHz * 1000 <= bwKHz / 2 ? 10 * Math.log10(wide / bwKHz) : 0;
     const peak = raw - sel - bwLoss;
     return { ...base, peakDbm: peak, averageDbm: peak + 10 * Math.log10(duty), rawDbm: raw, inChannel: sel === 0, offsetMHz: offset, selectivityDb: sel + bwLoss };
   }
