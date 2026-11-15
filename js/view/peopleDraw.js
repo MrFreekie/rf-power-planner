@@ -48,8 +48,8 @@ export function drawPeoplePlan(ctx, th, vp, scene, sel, handles, hoverKey, w, pl
 }
 
 /** Side view: a bracket and name label above the head of the person who carries the pack drawn at (sx, headY). */
-export function drawPersonSide(ctx, th, scene, link, role, sx, floorY, headY, leftEnd = true) {
-  const o = personOfLink(scene, link.id);
+export function drawPersonSide(ctx, th, scene, link, role, sx, floorY, headY, leftEnd = true, owners = null) {
+  const o = personOfLink(scene, link.id, owners);
   if (!o) return null;
   const hasPerson = (role === 'tx') === (link.kind !== 'iem');
   if (!hasPerson) return null;

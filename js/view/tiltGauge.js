@@ -14,7 +14,17 @@ function sliceBearing(theta, u) {
  * Half-power wedge of the antenna pattern in the slice: { centre, lo, hi } as angles in degrees from straight up (+s positive), or null
  * when the pattern is wider than 180 deg (omni in this plane) or the boresight is not in the slice. Pure given the model.
  */
+const wedgeCache = new Map();
 export function halfPowerWedge(antenna, u) {
+  // 180 pattern evaluations per call: cache by the antenna (pattern + orientation + tilt) and the slice axis, so a redraw while only the pan changes is free
+  const key = `${JSON.stringify(antenna)}|${u.x.toFixed(4)}|${u.y.toFixed(4)}`;
+  if (wedgeCache.has(key)) return wedgeCache.get(key);
+  const w = computeWedge(antenna, u);
+  if (wedgeCache.size >= 64) wedgeCache.clear();
+  wedgeCache.set(key, w);
+  return w;
+}
+function computeWedge(antenna, u) {
   const { b } = antennaFrame(antenna);
   const bs = b[0] * u.x + b[1] * u.y, bz = b[2];
   if (Math.hypot(bs, bz) < 0.2) return null; // boresight points across the slice
@@ -47,7 +57,7 @@ export function elementAxis(antenna) {
 
 /**
  * Draw the tilt gauge for one antenna at screen point p. opts: { len, selected, active (dragging), tilt, el, flipS, u, antenna, hot }.
- * Returns { tip: {x,y}, rect } where tip is the handle position.
+ * Returns { tip: {x,y}, wedge, text }: the handle position, the half-power wedge (or null) and the tilt label.
  */
 export function drawTiltGauge(ctx, th, p, o) {
   const { len, selected, tilt, el = 0, u, antenna, hot, active } = o;

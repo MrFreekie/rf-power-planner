@@ -210,7 +210,7 @@ export function projectFrequencies(scene) {
     const x = freqToX(freqMHz), ch = tvChannelOf(freqMHz, w);
     out.push({ source, id, name: name || id, kind, freqMHz, bandwidthKHz, x, inGap: x === null, tvChannel: ch ? ch.n : null, segment: segmentAt(freqMHz) });
   };
-  for (const l of (scene && scene.links) || []) add('link', l.id, l.name, l.kind, l.freqMHz, l.kind === 'iem' ? 200 : 200);
+  for (const l of (scene && scene.links) || []) add('link', l.id, l.name, l.kind, l.freqMHz, 200);
   for (const t of (scene && scene.imd && scene.imd.transmitters) || []) add('imd', t.id, t.name, 'imd', t.freqMHz, 200);
   for (const n of (scene && scene.noiseSources) || []) if (n && Number.isFinite(n.freqMHz) && n.enabled !== false) add('noise', n.id, n.name, n.kind, n.freqMHz, n.bwKHz);
   return out;

@@ -6,6 +6,12 @@ export const NOISE_GROUP_LABELS = Object.freeze({ display: 'Displays and lightin
 export const BEHAVIOUR_LABELS = Object.freeze({ continuous: 'Continuous', impulsive: 'Impulsive (clicks)', intermittent: 'Intermittent (keyed or bursty)', 'pulsed-tdma': 'Pulsed TDMA (frame bursts)' });
 export const FLAG_WORDS = Object.freeze({ S: 'from a rule or class limit', I: 'inferred, typical engineering value', U: 'unverified guess' });
 
+/** Display name of a noise source: its own name, else the catalogue label of its kind, else a plain default. */
+export function noiseLabel(s) {
+  const n = s && typeof s.name === 'string' ? s.name.trim() : '';
+  return n || (s && NOISE_CATALOGUE[s.kind] && NOISE_CATALOGUE[s.kind].label) || 'Noise source';
+}
+
 /** The confidence summary of a kind: for example "field U" or "freq S, ERP S, duty U". Words are shown with the letters. */
 export function flagText(kind) {
   const def = NOISE_CATALOGUE[kind];
@@ -51,7 +57,7 @@ export function noiseBudgetRows(ns) {
     severity: rise >= 6 ? 'warning' : rise >= 3 ? 'info' : 'ok',
   }];
   const live = (ns.sources || []).filter((s) => fin(s.averageDbm)).sort((a, b) => b.averageDbm - a.averageDbm).slice(0, 3);
-  for (const s of live) rows.push({ label: `  ${s.name}`, value: `${s.distanceM.toFixed(1)} m, ${BEHAVIOUR_LABELS[s.behaviour] || s.behaviour}: average ${dbm(s.averageDbm)}, peak ${dbm(s.peakDbm)}${s.inChannel === false ? `, ${Math.abs(s.offsetMHz).toFixed(1)} MHz off channel (${s.selectivityDb.toFixed(0)} dB rejection)` : ''}`, severity: 'info' });
+  for (const s of live) rows.push({ label: `  ${noiseLabel(s)}`, value: `${s.distanceM.toFixed(1)} m, ${BEHAVIOUR_LABELS[s.behaviour] || s.behaviour}: average ${dbm(s.averageDbm)}, peak ${dbm(s.peakDbm)}${s.inChannel === false ? `, ${Math.abs(s.offsetMHz).toFixed(1)} MHz off channel (${s.selectivityDb.toFixed(0)} dB rejection)` : ''}`, severity: 'info' });
   return rows;
 }
 
@@ -59,6 +65,6 @@ export function noiseBudgetRows(ns) {
 export function noisePathRows(ns, fmtLen) {
   if (!ns) return [];
   return (ns.sources || []).filter((s) => fin(s.averageDbm)).sort((a, b) => b.averageDbm - a.averageDbm).slice(0, 6).map((s) => ({
-    kind: `Noise: ${s.name}`, length: fmtLen ? fmtLen(s.distanceM) : `${s.distanceM.toFixed(1)} m`, delayNs: '-', relDb: `avg ${s.averageDbm.toFixed(0)} / peak ${s.peakDbm.toFixed(0)} dBm`,
+    kind: `Noise: ${noiseLabel(s)}`, length: fmtLen ? fmtLen(s.distanceM) : `${s.distanceM.toFixed(1)} m`, delayNs: '-', relDb: `avg ${s.averageDbm.toFixed(0)} / peak ${s.peakDbm.toFixed(0)} dBm`,
   }));
 }

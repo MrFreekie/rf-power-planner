@@ -794,8 +794,8 @@ export function addPerson(store, partial = {}) {
     if (typeof partial.name === 'string' && partial.name.length >= 1) p.name = partial.name.slice(0, PEOPLE_LIMITS.nameChars);
     if (PERSON_ROLES.includes(partial.role)) p.role = partial.role;
     if (PERSON_COLOURS.includes(partial.colour)) p.colour = partial.colour;
-    if (partial.pos && Number.isFinite(partial.pos.x) && Number.isFinite(partial.pos.y)) p.pos = { x: partial.pos.x, y: partial.pos.y };
-    if (Number.isFinite(partial.facingDeg)) p.facingDeg = partial.facingDeg;
+    if (partial.pos && Number.isFinite(partial.pos.x) && Number.isFinite(partial.pos.y)) p.pos = { x: clampCoord(partial.pos.x), y: clampCoord(partial.pos.y) };
+    if (Number.isFinite(partial.facingDeg)) p.facingDeg = Math.min(360, Math.max(-360, partial.facingDeg));
     list.push(p); id = p.id;
   });
   return id;
@@ -833,6 +833,14 @@ function dropExtra(p, linkId) {
   if (!p.extraLinkIds.length) { delete p.extraLinkIds; delete p.extraOffsets; }
 }
 
+/** Pack offset of an absolute pack position, clamped to the validator limits (+-10 m, 0 to 5 m high) so a saved scene always loads. */
+function packOffset(person, here) {
+  const o = offsetFromPack(person, here), [lo, hi] = PEOPLE_LIMITS.offsetM, [zl, zh] = PEOPLE_LIMITS.heightM;
+  const c = (v, a, b) => Math.min(b, Math.max(a, Number.isFinite(v) ? v : 0));
+  return { dx: c(o.dx, lo, hi), dy: c(o.dy, lo, hi), dz: c(o.dz, zl, zh) };
+}
+const clampCoord = (v) => Math.min(PEOPLE_LIMITS.coord[1], Math.max(PEOPLE_LIMITS.coord[0], v));
+
 function assign(store, personId, linkId, which, { swap = false } = {}) {
   let ok = false;
   store.update((d) => {
@@ -856,14 +864,15 @@ function assign(store, personId, linkId, which, { swap = false } = {}) {
       if (prev) {
         const l2 = findLink(d, prev);
         owner[idKey] = prev;
-        if (l2 && owner.pos) owner[offKey] = offsetFromPack(owner, posOf(l2));
+        if (l2 && owner.pos) owner[offKey] = packOffset(owner, posOf(l2));
         if (l2) l2.name = personLinkName(owner, which);
       }
+      applyCoupling(d, owner); // the other person's body coupling goes onto the link they received
     }
     const here = posOf(link);
     if (!p.pos) p.pos = { x: here.x, y: here.y }; // an unplaced person stands where their first pack is
     p[idKey] = linkId;
-    p[offKey] = offsetFromPack(p, here);
+    p[offKey] = packOffset(p, here);
     link.name = personLinkName(p, which);
     applyCoupling(d, p);
     ok = true;
@@ -894,7 +903,7 @@ export function assignExtraMic(store, personId, linkId, { swap = false } = {}) {
     const here = link.tx.pos;
     if (!p.pos) p.pos = { x: here.x, y: here.y };
     p.extraLinkIds = [...(p.extraLinkIds || []), linkId];
-    p.extraOffsets = { ...(p.extraOffsets || {}), [linkId]: offsetFromPack(p, here) };
+    p.extraOffsets = { ...(p.extraOffsets || {}), [linkId]: packOffset(p, here) };
     link.name = extraLinkName(p, p.extraLinkIds.length - 1);
     applyCoupling(d, p);
     ok = true;
@@ -927,7 +936,7 @@ export function movePerson(store, id, pos, o = {}) {
   return store.update((d) => {
     const p = peopleOf(d).find((x) => x.id === id);
     if (!p || !pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.y)) return;
-    p.pos = { x: pos.x, y: pos.y };
+    p.pos = { x: clampCoord(pos.x), y: clampCoord(pos.y) };
     placePacks(d, p);
   }, opts(o));
 }
@@ -939,7 +948,7 @@ export function movePeople(store, ids, delta, o = {}) {
     const set = new Set(ids || []);
     for (const p of peopleOf(d)) {
       if (!set.has(p.id) || !p.pos) continue;
-      p.pos = { x: p.pos.x + delta.dx, y: p.pos.y + delta.dy };
+      p.pos = { x: clampCoord(p.pos.x + delta.dx), y: clampCoord(p.pos.y + delta.dy) };
       placePacks(d, p);
     }
   }, opts(o));

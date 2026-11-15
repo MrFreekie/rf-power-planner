@@ -108,6 +108,12 @@ export const P2P_FIELDS = Object.freeze({ kFactor: [0.5, 10], fadeMarginDb: [0, 
  */
 export function setP2pField(store, linkId, field, value, o = {}) {
   let changed = false;
+  // A bad value must neither mutate the scene nor commit an undo step: check the value before touching the store.
+  const okValue = field === 'kFactor' || field === 'fadeMarginDb' ? fin(value)
+    : field === 'groundReflection' ? typeof value === 'boolean'
+    : field === 'obstacleDistanceM' ? (value === null || (fin(value) && value > 0))
+    : field === 'obstacleHeightM' ? fin(value) : false;
+  if (!okValue) return false;
   store.update((d) => {
     const l = d.links.find((x) => x.id === linkId);
     if (!l || l.kind !== 'p2p') return;
@@ -188,6 +194,7 @@ export function setImdFilter(store, which, patch, o = {}) {
   return store.update((d) => {
     const m = imdIn(d); if (!m) return;
     if (patch === null) { delete m[which]; return; }
+    if (typeof patch !== 'object' || patch === undefined) return;
     const f = m[which] || { passLoMHz: 470, passHiMHz: 608, rejectionDb: 40 };
     if (fin(patch.passLoMHz)) f.passLoMHz = clampTo(patch.passLoMHz, EVEN_LIMITS.mhz);
     if (fin(patch.passHiMHz)) f.passHiMHz = clampTo(patch.passHiMHz, EVEN_LIMITS.mhz);
@@ -211,7 +218,7 @@ export function addImdBand(store, band = {}) {
 export function updateImdBand(store, index, patch = {}, o = {}) {
   return store.update((d) => {
     const m = imdIn(d), b = m && Array.isArray(m.bands) ? m.bands[index] : null; if (!b) return;
-    if (typeof patch.name === 'string' && patch.name.length <= 80) b.name = patch.name;
+    if (typeof patch.name === 'string' && patch.name) b.name = patch.name.slice(0, 80); // the same cap as addImdBand
     if (fin(patch.loMHz)) b.loMHz = clampTo(patch.loMHz, EVEN_LIMITS.mhz);
     if (fin(patch.hiMHz)) b.hiMHz = clampTo(patch.hiMHz, EVEN_LIMITS.mhz);
     if (!(b.hiMHz > b.loMHz)) b.hiMHz = Math.min(EVEN_LIMITS.mhz[1], b.loMHz + 1);
@@ -244,7 +251,13 @@ export function addNoiseSource(store, kind, overrides = {}) {
     if (!Array.isArray(d.noiseSources)) d.noiseSources = [];
     if (d.noiseSources.length >= NOISE_SOURCE_LIMITS.max) return;
     const n = d.noiseSources.length;
-    const src = createNoiseSource(kind, { pos: { x: 2 + (n % 5), y: 2 + Math.floor(n / 5), z: 1.5 }, ...overrides });
+    const src = createNoiseSource(kind, { pos: { x: 2 + (n % 5), y: 2 + Math.floor(n / 5), z: 1.5 } });
+    // overrides go through the same checks as updateNoiseSource (clamped numbers, cleaned name, bounded position); unknown keys are dropped
+    if (overrides && typeof overrides === 'object') {
+      if (typeof overrides.id === 'string' && /^[\w-]{1,64}$/.test(overrides.id) && !d.noiseSources.some((x) => x.id === overrides.id)) src.id = overrides.id;
+      if (typeof overrides.enabled === 'boolean') src.enabled = overrides.enabled;
+      applyNoisePatch(src, overrides);
+    }
     d.noiseSources.push(src); id = src.id;
   });
   return id;
@@ -265,7 +278,7 @@ export function addWallNoiseSource(store, reflectorId) {
   let id = null;
   store.update((d) => {
     const r = (d.reflectors || []).find((x) => x.id === reflectorId);
-    if (!r) return;
+    if (!r || !r.p1 || !r.p2) return;
     if (!Array.isArray(d.noiseSources)) d.noiseSources = [];
     const have = d.noiseSources.find((n) => n.reflectorId === reflectorId);
     if (have) { id = have.id; return; }
@@ -285,7 +298,6 @@ export function updateNoiseSource(store, id, patch = {}, o = {}) {
   return store.update((d) => {
     const s = (d.noiseSources || []).find((x) => x.id === id);
     if (!s) return;
-    if (typeof patch.name === 'string') s.name = patch.name.replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 80) || s.name;
     if (typeof patch.enabled === 'boolean') s.enabled = patch.enabled;
     if (typeof patch.kind === 'string' && NOISE_CATALOGUE[patch.kind] && patch.kind !== s.kind && !s.reflectorId) {
       const fresh = createNoiseSource(patch.kind);
@@ -293,13 +305,25 @@ export function updateNoiseSource(store, id, patch = {}, o = {}) {
       Object.assign(s, { kind: patch.kind }, Object.fromEntries(Object.entries(fresh).filter(([k]) => !['id', 'name', 'enabled', 'pos', 'kind'].includes(k))));
       if (/^[A-Z]/.test(s.name) && Object.values(NOISE_CATALOGUE).some((c) => c.label === s.name)) s.name = NOISE_CATALOGUE[patch.kind].label;
     }
-    if (patch.pos && typeof patch.pos === 'object') {
-      if (!s.pos) s.pos = { x: 0, y: 0, z: 1.5 };
-      for (const k of ['x', 'y']) if (fin(patch.pos[k])) s.pos[k] = clampTo(round2(patch.pos[k]), NOISE_SOURCE_LIMITS.coord);
-      if (fin(patch.pos.z)) s.pos.z = clampTo(round2(patch.pos.z), NOISE_SOURCE_LIMITS.zM);
-    }
-    for (const [k, lim] of Object.entries(NS_NUM_LIMITS)) if (fin(patch[k])) s[k] = clampTo(patch[k], lim);
+    applyNoisePatch(s, patch);
   }, opts(o));
+}
+
+/** The name, position and numeric parts of a noise-source patch, shared by updateNoiseSource and addNoiseSource (clamped, cleaned, unknown keys ignored). */
+function applyNoisePatch(s, patch) {
+  if (typeof patch.name === 'string') s.name = patch.name.replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 80) || s.name;
+  if (patch.pos && typeof patch.pos === 'object') {
+    if (!s.pos) s.pos = { x: 0, y: 0, z: 1.5 };
+    for (const k of ['x', 'y']) if (fin(patch.pos[k])) s.pos[k] = clampTo(round2(patch.pos[k]), NOISE_SOURCE_LIMITS.coord);
+    if (fin(patch.pos.z)) s.pos.z = clampTo(round2(patch.pos.z), NOISE_SOURCE_LIMITS.zM);
+  }
+  for (const [k, lim] of Object.entries(NS_NUM_LIMITS)) if (fin(patch[k])) s[k] = clampTo(patch[k], lim);
+}
+
+/** setReflectorName(store, id, name, { coalesce }): rename a reflector by id with the same cleaning as the other names (control characters stripped, 80 characters). The inspector field should call this instead of nameInput.renameReflector (40 characters, no control-character strip). */
+export function setReflectorName(store, id, name, o = {}) {
+  const clean = String(name ?? '').replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 80);
+  return store.update((d) => { const r = (d.reflectors || []).find((x) => x.id === id); if (r) r.name = clean; }, opts(o));
 }
 
 /** moveNoiseSource(store, id, { x, y }, { coalesce }). */

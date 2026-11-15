@@ -22,7 +22,7 @@ export const FM_THRESHOLD_CNR_DB = 11;      // flag I: mpx.js default (threshold
 /** digitalConfigOf(link) -> merged digital parameters (preset, then link.modulation.digital.overrides, then the link's fixedOrder). Same rule as digitalTracker.js. */
 export function digitalConfigOf(link) {
   const d = (link && link.modulation && link.modulation.digital) || {};
-  const base = DIGITAL_PRESETS[d.preset] || DIGITAL_DEFAULTS;
+  const base = (typeof d.preset === 'string' && Object.prototype.hasOwnProperty.call(DIGITAL_PRESETS, d.preset) && DIGITAL_PRESETS[d.preset]) || DIGITAL_DEFAULTS; // own keys only: 'constructor' or '__proto__' must not resolve
   const cfg = { ...base, ...(d.overrides || {}) };
   cfg.fixedOrder = d.fixedOrder || base.fixedOrder || null;
   return cfg;
@@ -52,6 +52,17 @@ function cnrForFer(cfg, target) {
  *   degradedInputDbm, concealInputDbm, downInputDbm, spectralEfficiency (information bit/s per Hz) }
  */
 export function digitalProfile(cfg) {
+  const key = profileKey(cfg), hit = PROFILE_CACHE.get(key);
+  if (hit) return hit;
+  const out = computeProfile(cfg);
+  if (PROFILE_CACHE.size > 64) PROFILE_CACHE.clear();
+  PROFILE_CACHE.set(key, out);
+  return out;
+}
+// The bisection costs 180 model evaluations: memoised on the figures that decide it (a profile object is shared, treat it as read-only).
+const PROFILE_CACHE = new Map();
+const profileKey = (c) => JSON.stringify([c.noiseBwKHz, c.noiseFigureDb, c.symbolRateKSps, c.codeRate, c.implLossDb, c.frameBits, c.preFecCliffBer, c.cliffSharpness, c.postFecFloor, c.allowedModulations, c.fixedOrder, c.degradedFer, c.concealFer, c.muteFer, c.amcThresholdsDb]);
+function computeProfile(cfg) {
   const floor = noiseFloorDbm(cfg);
   const degradedCnrDb = cnrForFer(cfg, cfg.degradedFer ?? 1e-3), concealCnrDb = cnrForFer(cfg, cfg.concealFer ?? 0.05), downCnrDb = cnrForFer(cfg, cfg.muteFer ?? 0.9);
   const orders = (cfg.allowedModulations || [cfg.fixedOrder || 4]);

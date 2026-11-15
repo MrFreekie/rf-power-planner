@@ -50,6 +50,7 @@
   #welcome { padding: 8px 12px 10px; }
   .ob-details { padding: 6px 12px; }
   .ob-body button, .ob-item button { min-height: 36px; }
+  @media (pointer: coarse), (max-width: 800px) { .ob-body button, .ob-item button { min-height: 44px; } }
 }
 
 /* ---- glossary: acronyms and the single shared popover ---- */

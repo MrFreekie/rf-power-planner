@@ -445,7 +445,8 @@ export function mountSpectrumMap({ doc = document, button, store, hostFactory = 
     } else return;
     e.preventDefault(); e.stopImmediatePropagation();
   }, true);
-  if (typeof ResizeObserver === 'function' && scroll) new ResizeObserver(() => refresh()).observe(scroll);
+  let ro = null;
+  if (typeof ResizeObserver === 'function' && scroll) { ro = new ResizeObserver(() => refresh()); ro.observe(scroll); }
 
   function open() {
     st.segId = null; st.selected = null; info.textContent = '';
@@ -455,5 +456,5 @@ export function mountSpectrumMap({ doc = document, button, store, hostFactory = 
   }
   if (button) { button.addEventListener('click', open); button.setAttribute('aria-haspopup', 'dialog'); }
   dlg.addEventListener('close', () => { if (button && button.setAttribute) button.setAttribute('aria-expanded', 'false'); });
-  return { open, zoom, state: st, refresh, zoomTo, showInfo, get map() { return map; }, destroy() { if (sub) sub(); zoom.destroy(); } };
+  return { open, zoom, state: st, refresh, zoomTo, showInfo, get map() { return map; }, destroy() { if (sub) sub(); if (ro) ro.disconnect(); zoom.destroy(); } };
 }

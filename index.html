@@ -111,11 +111,12 @@
 <main id="workspace">
   <section class="pane" aria-label="Plan view">
     <h2>Plan <label class="pane-opt" title="Show the first Fresnel zone and the 60 percent zone of the selected link"><input type="checkbox" class="fresnel-toggle"> Fresnel</label> <button type="button" id="btn-plan-fit" class="pane-fit" title="Fit every item in the plan view (key 0)">Fit all</button></h2>
-    <canvas id="plan-canvas" tabindex="0" aria-label="Plan view of the stage"></canvas>
+    <canvas id="plan-canvas" tabindex="0" aria-label="Plan view of the stage" aria-describedby="canvas-keys" aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight Alt+ArrowLeft R Plus Minus 0 BracketRight BracketLeft PageUp PageDown End"></canvas>
+    <p id="canvas-keys" class="sr-only">Keys: left and right square brackets cycle items, arrow keys nudge the selected item (Shift for bigger steps), Alt plus arrows or R aims an antenna, plus and minus zoom, 0 fits the view, Page Up and Page Down tilt in the side view, End resets tilt, Escape deselects. Space plus drag pans.</p>
   </section>
   <section class="pane" aria-label="Side view">
     <h2>Side <label class="pane-opt" title="Show the first Fresnel zone and the 60 percent zone of the selected link"><input type="checkbox" class="fresnel-toggle"> Fresnel</label> <button type="button" id="btn-side-tilt-reset" class="pane-fit" title="Set the selected antenna tilt back to 0 (key End, or double-click the tilt handle)" aria-label="Reset tilt of the selected antenna" disabled>Reset tilt</button></h2>
-    <canvas id="side-canvas" tabindex="0" aria-label="Side view of the Tx to Rx line"></canvas>
+    <canvas id="side-canvas" tabindex="0" aria-label="Side view of the Tx to Rx line" aria-describedby="canvas-keys"></canvas>
   </section>
   <div id="leftpanel" data-panel="left">
   <button type="button" class="panel-tab" data-toggle="left" aria-expanded="true" aria-controls="leftpanel-body">Budgets</button>

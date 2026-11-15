@@ -2,7 +2,7 @@
 export const NAME_MAX = 40;
 
 /** Strip control characters (keeps spaces, accents, symbols; markup is harmless because names are only drawn as text) and cap the length. */
-export function cleanName(v, max = NAME_MAX) { return String(v ?? '').replace(/[\u0000-\u001f\u007f]/g, '').slice(0, max); }
+export function cleanName(v, max = NAME_MAX) { return Array.from(String(v ?? '').replace(/[\u0000-\u001f\u007f]/g, '')).slice(0, max).join(''); }
 
 /** Name to store when a field is left empty (whitespace only counts as empty). */
 export function nameOrDefault(v, fallback) { const c = cleanName(v); return c.trim() === '' ? fallback : c; }

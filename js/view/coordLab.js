@@ -4,14 +4,14 @@
 // mountCoordLab() builds the dialog on createZoom. Planning estimates only: nothing here is a licence or a measurement.
 import { createCanvasHost, setFont, haloText, inkAlpha, strokeHatchRect } from './util.js';
 import { createZoom } from './spectraZoom.js';
-import { packLanes } from './spectrumMap.js';
+import { packLanes, ILLUSTRATIVE } from './spectrumMap.js';
+export { ILLUSTRATIVE };
 import { productFrequencies } from '../model/imd.js';
 import { planHits, equalSpacingPlan, candidateFrequencies, evaluateCandidates, bestCandidates, bestPlan, failureSummary, tvOccupiedBlocked } from '../model/coord-lab.js';
-import { projectFrequencies, tvWidthOf, simulatedOccupancy, hashSeed, OCCUPANCY_SETTINGS } from '../model/spectrum-map.js';
+import { projectFrequencies, tvWidthOf, simulatedOccupancy, hashSeed } from '../model/spectrum-map.js';
 import { applyFrequencyPlan } from '../actionsAreas.js';
 
 export const GUARD_KHZ = 400, SPACING_KHZ = 300, SNAP_KHZ = 25, MAX_ITEMS = 16, MARGIN = 28;
-export const ILLUSTRATIVE = 'Illustrative, not measured';
 export const REASON_NAMES = Object.freeze({ blocked: 'blocked range', duplicate: 'same as a channel', spacing: 'too close to a channel', 'product-on-candidate': 'product lands on it', 'product-on-fixed': 'makes a product on a channel' });
 export const BANDS = Object.freeze([
   { id: 'ch38', label: 'UK channel 38, 606-614 MHz', startMHz: 606, endMHz: 614, regionId: 'uk' },
@@ -43,10 +43,10 @@ export function labBands(items, scene) {
   }
   return out;
 }
-/** Default band id: the project's span when its frequencies fit in 40 MHz, else UK channel 38. */
+/** Default band id: the project's span (widened to cover every channel, however far apart) when there are working frequencies, else UK channel 38. Never moves a channel. */
 export function defaultBandId(items) {
   const fs = (items || []).map((i) => i.freqMHz).filter(Number.isFinite);
-  return fs.length && Math.max(...fs) - Math.min(...fs) <= 40 ? 'project' : 'ch38';
+  return fs.length ? 'project' : 'ch38';
 }
 /** Move a frequency by deltaKHz, snapped to the raster and kept inside the band. */
 export const nudge = (f, deltaKHz, band) => clamp(snap(f + deltaKHz / 1000), band.startMHz, band.endMHz);
@@ -103,7 +103,7 @@ export function planItems(items, band, blocked, seed, tries = 4) {
 // ------------------------------------------------------------------------------------------------ drawing
 const Y = { hud: 16, markers: 30, line: 118, products: 134, blocked: 200, h: 232 };
 /** Layout: x of a frequency and the marker label lanes. */
-export function layoutLab(items, band, w, metrics, blockedRanges) {
+export function layoutLab(items, band, w, blockedRanges) {
   const span = band.endMHz - band.startMHz, k = (Math.max(w, 320) - 2 * MARGIN) / span;
   const x = (f) => MARGIN + (f - band.startMHz) * k;
   const marks = items.map((it, i) => ({ it, i, px: x(it.freqMHz), label: `${it.name} ${+it.freqMHz.toFixed(3)}` }));
@@ -115,7 +115,7 @@ export function layoutLab(items, band, w, metrics, blockedRanges) {
 export function tickStepMHz(k) { for (const s of [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 20]) if (s * k >= 60) return s; return 20; }
 
 export function drawLab(ctx, w, h, th, { items, band, metrics, blocked, sel, setting }) {
-  const L = layoutLab(items, band, w, metrics, blocked);
+  const L = layoutLab(items, band, w, blocked);
   ctx.fillStyle = th.paper; ctx.fillRect(0, 0, w, h);
   const hh = metrics.hits;
   haloText(ctx, th, `Third-order hits: ${hh.hits2} (two-transmitter) + ${hh.hits3} (three-transmitter) = ${hh.hitsTotal}; spacing violations: ${hh.spacingViolations.length}`, 6, Y.hud, { px: 12, weight: 'bold', color: hh.ok ? th.pass : th.fail });
@@ -159,12 +159,14 @@ export function drawLab(ctx, w, h, th, { items, band, metrics, blocked, sel, set
 // ------------------------------------------------------------------------------------------------ DOM
 export function mountCoordLab({ doc = document, button, store, hostFactory = (c, d) => createCanvasHost(c, d) } = {}) {
   const el = (tag, cls, text, attrs) => { const e = doc.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; if (attrs) for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); return e; };
-  const st = { items: [], bandId: 'ch38', custom: null, showOcc: true, sel: null, seed: 1, drag: null, status: '', cand: null, applied: null, nextKey: 0, base: [] };
-  let L = null, scroll = null;
+  const st = { items: [], bandId: 'ch38', showOcc: true, sel: null, seed: 1, drag: null, status: '', cand: null, nextKey: 0, base: [] };
+  let L = null, scroll = null, ro = null, candTimer = null;
   const bands = () => labBands(st.base, store.getScene());
   const band = () => bands().find((b) => b.id === st.bandId) || BANDS[0];
-  const metrics = () => labMetrics(st.items.map((i) => i.freqMHz));
-  const blockedNow = () => blockedFor(band().regionId, st.showOcc);
+  // memoised: metrics by the frequency list, blocked ranges by region and occupancy switch (describe, draw and the live text all ask each frame)
+  let mKey = null, mVal = null, bKey = null, bVal = null;
+  const metrics = () => { const fs = st.items.map((i) => i.freqMHz), k = fs.join('|'); if (k !== mKey) { mKey = k; mVal = labMetrics(fs); } return mVal; };
+  const blockedNow = () => { const k = `${band().regionId}|${st.showOcc}`; if (k !== bKey) { bKey = k; bVal = blockedFor(band().regionId, st.showOcc); } return bVal; };
   const cw = () => (scroll && scroll.clientWidth) || 800;
 
   const zoom = createZoom({
@@ -227,7 +229,6 @@ export function mountCoordLab({ doc = document, button, store, hostFactory = (c,
   const note = el('p', 'hint', `Drag a marker (or select it and press the left and right arrow keys, Shift for 200 kHz steps). Third-order products 2f1 - f2 and f1 + f2 - f3 that land within ${GUARD_KHZ} kHz of a channel are hits, channels closer than ${SPACING_KHZ} kHz violate spacing. A planning estimate, not a licence: ${ILLUSTRATIVE.toLowerCase()} for the TV occupancy. Regional rules differ.`);
   zoom.slot.append(bar, status, hitsP, list, candH, candSum, candWrap, note);
 
-  function clampAll() { const b = band(); for (const i of st.items) i.freqMHz = clamp(i.freqMHz, b.startMHz, b.endMHz); }
   function load() {
     const sc = store.getScene(); st.items = workFromScene(sc); st.base = st.items.map((i) => ({ ...i })); st.nextKey = st.items.length;
     if (!st.sel || !st.items.some((i) => i.key === st.sel)) st.sel = null;
@@ -267,7 +268,14 @@ export function mountCoordLab({ doc = document, button, store, hostFactory = (c,
     hitsP.dataset.ok = hh.ok ? 'true' : 'false';
     zoom.update();
   }
-  function refresh(recompute) {
+  // the candidate search is the costly part: run it 150 ms after the last change, or at once (pointer up, band or lock change)
+  function runCand() { candTimer = null; st.cand = candidateRows(st.items, st.sel, band(), blockedNow().blocked, band().regionId); if (zoom.isOpen()) renderCand(); }
+  function scheduleCand(now) {
+    if (candTimer !== null) { clearTimeout(candTimer); candTimer = null; }
+    if (now) { runCand(); return; }
+    candTimer = setTimeout(runCand, 150);
+  }
+  function refresh(recompute, now = false) {
     if (!zoom.isOpen()) return;
     const bs = bands();
     bandSel.textContent = '';
@@ -278,8 +286,8 @@ export function mountCoordLab({ doc = document, button, store, hostFactory = (c,
     const outside = st.items.filter((i) => i.freqMHz < band().startMHz || i.freqMHz > band().endMHz).length;
     status.textContent = `${st.status}${outside ? ` ${outside} channel${outside === 1 ? ' is' : 's are'} outside this band (not drawn, still counted for products when they matter).` : ''}`.trim();
     renderList();
-    if (recompute) st.cand = candidateRows(st.items, st.sel, band(), blockedNow().blocked, band().regionId);
-    renderCand(); refreshLive();
+    if (recompute) scheduleCand(now); else renderCand();
+    refreshLive();
   }
 
   // ---- pointer and keyboard
@@ -297,7 +305,7 @@ export function mountCoordLab({ doc = document, button, store, hostFactory = (c,
     it.freqMHz = clamp(snap(L.fOf(p.x)), band().startMHz, band().endMHz);
     refreshLive();
   });
-  const endDrag = () => { if (!st.drag) return; st.drag = null; refresh(true); };
+  const endDrag = () => { if (!st.drag) return; st.drag = null; refresh(true, true); };
   canvas.addEventListener('pointerup', endDrag); canvas.addEventListener('pointercancel', endDrag);
   canvas.addEventListener('keydown', (e) => {
     if (!zoom.isOpen() || !st.items.length) return;
@@ -309,17 +317,16 @@ export function mountCoordLab({ doc = document, button, store, hostFactory = (c,
     } else return;
     e.preventDefault(); e.stopImmediatePropagation();
   }, true);
-  if (typeof ResizeObserver === 'function' && scroll) new ResizeObserver(() => refresh(false)).observe(scroll);
+  if (typeof ResizeObserver === 'function' && scroll) { ro = new ResizeObserver(() => refresh(false)); ro.observe(scroll); }
   canvas.setAttribute('aria-label', 'Coordination lab frequency line. Arrow up and down select a channel, left and right move it.');
 
   function open() {
-    load(); st.bandId = defaultBandId(st.items); st.status = ''; st.sel = null; st.applied = null;
-    clampAll();
-    zoom.open('lab', button);
+    load(); st.bandId = defaultBandId(st.items); st.status = ''; st.sel = null;
+    zoom.open('lab', button); // channels keep their real frequencies: the band follows them, nothing is clamped on open or on a band change
     if (button && button.setAttribute) button.setAttribute('aria-expanded', 'true');
-    refresh(true);
+    refresh(true, true);
   }
   if (button) { button.addEventListener('click', open); button.setAttribute('aria-haspopup', 'dialog'); }
   dlg.addEventListener('close', () => { if (button && button.setAttribute) button.setAttribute('aria-expanded', 'false'); });
-  return { open, zoom, state: st, refresh, occChk, bandSel, bBest, bApply, bEqual, bReset, hitsP, list, status, destroy() { zoom.destroy(); } };
+  return { open, zoom, state: st, refresh, occChk, bandSel, bBest, bApply, bEqual, bReset, hitsP, list, status, destroy() { if (candTimer !== null) clearTimeout(candTimer); if (ro) ro.disconnect(); zoom.destroy(); } };
 }

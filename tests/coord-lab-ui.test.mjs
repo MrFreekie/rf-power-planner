@@ -22,7 +22,7 @@ test('band picker offers the project span and defaults to it when narrow, else c
   assert.equal(b[0].id, 'project'); assert.ok(b[0].endMHz - b[0].startMHz >= 8);
   assert.ok(items.every((i) => i.freqMHz >= b[0].startMHz && i.freqMHz <= b[0].endMHz));
   assert.equal(defaultBandId(items), 'project'); assert.equal(defaultBandId([]), 'ch38');
-  assert.equal(defaultBandId([{ freqMHz: 200 }, { freqMHz: 600 }]), 'ch38');
+  assert.equal(defaultBandId([{ freqMHz: 200 }, { freqMHz: 600 }]), 'project'); // wide spread: the project band covers it all, nothing is clamped
   assert.equal(BANDS[0].startMHz, 606); assert.equal(BANDS[0].endMHz, 614);
 });
 test('nudge snaps to 25 kHz and clamps to the band', () => {
@@ -76,7 +76,7 @@ test('drawLab draws the hit line, blocked label and products in both palettes', 
     assert.match(texts, /Third-order hits/); assert.match(texts, /illustrative, not measured/); assert.match(texts, /TV ch 38/);
     assert.equal(L.marks.length, 3); assert.ok(Math.abs(L.fOf(L.x(607.3)) - 607.3) < 1e-9);
   }
-  const L = layoutLab(items, BANDS[0], 100, labMetrics([606]), []); assert.ok(L.width >= 320);
+  const L = layoutLab(items, BANDS[0], 100, []); assert.ok(L.width >= 320);
 });
 test('IMD headline count: distinct third-order products (6 on imd-too-close), not the all-mechanism total', () => {
   const sc = ex('imd-too-close');
@@ -131,4 +131,24 @@ test('dialog: keyboard moves the selected marker and the number input edits it',
   assert.ok(lab.state.items[0].freqMHz <= lab.zoom.canvas && true || lab.state.items[0].freqMHz <= 700);
   lab.zoom.closeBtn.fire('click'); assert.equal(button.getAttribute('aria-expanded'), 'false');
   assert.ok(ILLUSTRATIVE.length && GUARD_KHZ === 400);
+});
+test('opening the lab never clamps channels: frequencies 100 MHz apart stay as they are, the band covers them, Apply keeps them', () => {
+  const doc = fakeDoc(), button = doc.createElement('button');
+  const sc = ex('band-four-piece-people');
+  sc.links[0].freqMHz = 520.2; sc.links[1].freqMHz = 650.6;
+  const store = createStore(sc);
+  const before = store.getScene().links.map((l) => l.freqMHz);
+  const lab = mountCoordLab({ doc, button, store, hostFactory: () => ({ invalidate() {}, destroy() {} }) });
+  lab.open();
+  const real = lab.state.items.filter((i) => i.id).map((i) => i.freqMHz);
+  assert.ok(real.includes(520.2) && real.includes(650.6));
+  assert.equal(lab.state.bandId, 'project');
+  const b = labBands(lab.state.base, store.getScene())[0];
+  assert.ok(b.startMHz <= 520 && b.endMHz >= 651);
+  assert.match(lab.status.textContent, /^(?!.*outside)/);
+  lab.bandSel.value = 'ch38'; lab.bandSel.fire('change'); // switching bands moves nothing
+  assert.ok(lab.state.items.filter((i) => i.id).map((i) => i.freqMHz).includes(520.2));
+  assert.match(lab.status.textContent, /outside this band/);
+  lab.bApply.fire('click');
+  assert.deepEqual(store.getScene().links.map((l) => l.freqMHz), before);
 });

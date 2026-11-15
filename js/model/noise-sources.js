@@ -214,18 +214,26 @@ export function noiseEvents(src, durationS, { seed = 1, maxEvents = 4000 } = {})
   const rnd = () => { u = (Math.imul(u, 1664525) + 1013904223) >>> 0; return u / 4294967296; };
   if (p.behaviour === 'impulsive' || p.behaviour === 'pulsed-tdma') {
     const period = 1 / Math.max(num(p.repHz, 1), 1e-9), w = Math.min(num(p.pulseWidthMs, 1) * 1e-3, period);
-    for (let t = rnd() * period; t < T && out.length < maxEvents; t += period) out.push({ t0: t, t1: Math.min(t + w, T) });
-    return out;
+    let t = rnd() * period;
+    for (; t < T && out.length < maxEvents; t += period) out.push({ t0: t, t1: Math.min(t + w, T) });
+    return markTruncated(out, t, T);
   }
   const on = Math.max(num(p.onS, 1), 1e-6) + Math.max(num(p.holdS, 0), 0), duty = Math.min(Math.max(num(p.dutyCycle, 0.1), 1e-6), 1);
   const period = on / duty;
-  for (let t = rnd() * Math.max(period - on, 0); t < T && out.length < maxEvents; t += period) out.push({ t0: t, t1: Math.min(t + on, T) });
+  let t = rnd() * Math.max(period - on, 0);
+  for (; t < T && out.length < maxEvents; t += period) out.push({ t0: t, t1: Math.min(t + on, T) });
+  return markTruncated(out, t, T);
+}
+// When the event cap stops the list before durationS, the array carries truncated: true and coveredS (the time actually generated), so eventsDuty can use it.
+function markTruncated(out, t, T) {
+  if (t < T) { out.truncated = true; out.coveredS = Math.min(t, T); }
   return out;
 }
 
 /** Fraction of durationS covered by the events (the measured duty of a timeline). */
 export function eventsDuty(events, durationS) {
-  return durationS > 0 ? events.reduce((s, e) => s + (e.t1 - e.t0), 0) / durationS : 0;
+  const span = events && events.truncated && Number.isFinite(events.coveredS) ? Math.min(durationS, events.coveredS) : durationS; // a capped list only covers coveredS
+  return span > 0 ? events.reduce((s, e) => s + (e.t1 - e.t0), 0) / span : 0;
 }
 
 /**

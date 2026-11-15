@@ -4,8 +4,8 @@ import { linkOwners, personPackPositions } from '../model/people.js';
 const fin = Number.isFinite;
 
 /** The person who carries a link, or null: { person, which: 'mic' | 'iem' }. */
-export function personOfLink(scene, linkId) {
-  const o = linkOwners(scene && scene.people).get(linkId);
+export function personOfLink(scene, linkId, owners = null) {
+  const o = (owners || linkOwners(scene && scene.people)).get(linkId); // pass `owners` (linkOwners(people)) to build the map once per draw
   if (!o) return null;
   const person = (scene.people || []).find((p) => p.id === o.personId);
   if (!person) return null;

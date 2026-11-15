@@ -3,6 +3,7 @@
 import { NOISE_CATALOGUE } from '../model/noise-sources.js';
 import { haloText, setFont } from './util.js';
 import { placeLabel } from '../ui/antennaFields.js';
+import { noiseLabel } from '../ui/noiseUi.js';
 
 /** Icon family of a kind: 'radio' | 'hash' | 'pulse'. Pure. */
 export function noiseGlyph(kind) {
@@ -16,7 +17,7 @@ function glyph(ctx, g, x, y, r) {
   ctx.beginPath();
   if (g === 'radio') {
     ctx.arc(x, y, 2, 0, Math.PI * 2);
-    for (const k of [1, 2]) { ctx.moveTo(x + 2 + k * 3.5, y); ctx.arc(x, y, 2 + k * 3.5, -0.9, 0.9); ctx.moveTo(x - 2 - k * 3.5, y); ctx.arc(x, y, 2 + k * 3.5, Math.PI - 0.9, Math.PI + 0.9); }
+    for (const k of [1, 2]) { const R = 2 + k * 3.5; ctx.moveTo(x + R * Math.cos(-0.9), y + R * Math.sin(-0.9)); ctx.arc(x, y, R, -0.9, 0.9); ctx.moveTo(x + R * Math.cos(Math.PI - 0.9), y + R * Math.sin(Math.PI - 0.9)); ctx.arc(x, y, R, Math.PI - 0.9, Math.PI + 0.9); } // each moveTo is the arc's own start point: no stray chord
   } else if (g === 'pulse') {
     ctx.moveTo(x - r, y + 4); ctx.lineTo(x - r + 3, y + 4); ctx.lineTo(x - r + 3, y - 5); ctx.lineTo(x - r + 5, y - 5); ctx.lineTo(x - r + 5, y + 4);
     ctx.lineTo(x + 1, y + 4); ctx.lineTo(x + 1, y - 5); ctx.lineTo(x + 3, y - 5); ctx.lineTo(x + 3, y + 4); ctx.lineTo(x + r, y + 4);
@@ -43,7 +44,7 @@ export function drawNoiseSources(ctx, th, vp, scene, sel, handles, hoverKey, w, 
     ctx.restore();
     placed.push({ x: p.x - r, y: p.y - r, w: 2 * r, h: 2 * r });
     if (w >= 520 || selected) {
-      const text = `${s.name}${off ? ' (off)' : ''}`;
+      const text = `${noiseLabel(s)}${off ? ' (off)' : ''}`;
       setFont(ctx, th, 12, selected ? '600' : '');
       const box = placeLabel({ x: p.x, y: p.y + r + 8 }, { w: Math.ceil(ctx.measureText(text).width) + 6, h: 16 }, placed, { w: w || 10000, h: 10000 });
       haloText(ctx, th, text, box.x + 3, box.y + 12, { color: selected ? th.ink : th.inkSoft, weight: selected ? '600' : '' });

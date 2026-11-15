@@ -67,7 +67,7 @@ export const cArg = (a) => Math.atan2(a.im, a.re);
 /** Complex division; a zero denominator returns a huge finite number (never NaN or Infinity). */
 export function cDiv(a, b) {
   const d = b.re * b.re + b.im * b.im;
-  if (d < 1e-300) return { re: 0, im: 0 };
+  if (d < 1e-300) { const big = (v) => (v > 0 ? 1e100 : v < 0 ? -1e100 : 0); return { re: big(a.re), im: big(a.im) }; } // a zero denominator: a huge finite number with the sign of the numerator
   return { re: (a.re * b.re + a.im * b.im) / d, im: (a.im * b.re - a.re * b.im) / d };
 }
 /** polar(mag, phaseRad) -> complex */
@@ -453,7 +453,7 @@ export function itemSparams(rawItem, fMHz, opts = {}) {
       return twoPort(gIn, rev, t, gOut);
     }
     case 'faultshort': return shuntSparams(cx(1 / Math.max(0.05, fin(item.rOhm, 0.5)), 0));  // a shorted port: 0.5 ohm to ground (U)
-    case 'faultopen': return seriesSparams(cx(0, -1 / (TAU * fMHz * 1e6 * fin(item.cPF, 0.1) * 1e-12))); // an open port: 0.1 pF gap (U)
+    case 'faultopen': return seriesSparams(cx(0, -1 / (TAU * fMHz * 1e6 * Math.max(1e-3, fin(item.cPF, 0.1)) * 1e-12))); // an open port: 0.1 pF gap (U)
     default: return passive(fin(item.lossDb, 0), Infinity);
   }
 }
@@ -774,7 +774,8 @@ export function rippleSpacingMHz(fMHz, vals) {
 // ---------------------------------------------------------------------------------------------------------------------------------
 // FAULT LIBRARY (item 26a). Every figure is ASSUMED (flag U): teaching magnitudes, not measurements of any product.
 // ---------------------------------------------------------------------------------------------------------------------------------
-const copy = (o) => JSON.parse(JSON.stringify(o));
+// structuredClone keeps Infinity and NaN (a return loss of Infinity dB for a perfect match); JSON would turn them into null. JSON is the fallback for values it cannot clone.
+const copy = (o) => { try { return structuredClone(o); } catch { return JSON.parse(JSON.stringify(o)); } };
 // Apply fn to a copy of the target: the DUT itself if its type is in `types`, else the first (or targetIndex) chain item whose kind is in `kinds`.
 function mapTarget(dut, types, kinds, fn) {
   if (dut && types.includes(dut.type)) { const d = { ...copy({ ...dut, termination: undefined }), termination: dut.termination }; if (d.termination === undefined) delete d.termination; fn(d); return d; }
@@ -907,7 +908,7 @@ export function faultsFor(dut = {}) {
   if (dut.type === 'cable') dev.add('cable');
   if (dut.type === 'antenna') dev.add('antenna');
   if (dut.type === 'chain') { for (const it of dut.items || []) if (map[resolveChainItem(it).kind]) dev.add(map[resolveChainItem(it).kind]); dev.add('splitter'); }
-  return FAULT_IDS.filter((id) => dev.has(FAULTS[id].device) && !(dut.type === 'chain' && id.startsWith('term-') && false));
+  return FAULT_IDS.filter((id) => dev.has(FAULTS[id].device));
 }
 /**
  * applyFault(cfg, faultId, params) -> { cfg, fault, applicable, warnings }

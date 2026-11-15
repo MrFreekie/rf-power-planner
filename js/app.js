@@ -29,6 +29,7 @@ import { mountCoordination } from './ui/coordination.js';
 import { mountGlossary } from './ui/glossary.js';
 import { mountPanels } from './ui/panels.js';
 import { activeLink as pickActiveLink, solveCached } from './view/util.js';
+import { confirmDialog } from './ui/confirmDialog.js';
 import { budgetExtras, modeContrast } from './ui/budgetExtras.js';
 import { modeReport } from './model/digital-link.js';
 import { fresnelView, fresnelFor } from './view/fresnelDraw.js';
@@ -283,9 +284,8 @@ $('batt-scale').addEventListener('change', (e) => {
   else { const tl = activeLink().telemetry; if (tl && tl.battery) e.target.value = tl.battery.timeScale; }
 });
 // Reset to the default scene (asks first; undoable) and let the autosave overwrite the stored copy.
-$('btn-reset').addEventListener('click', () => {
-  let ok = false;
-  try { ok = window.confirm('Reset to the default scene? Your current scene is replaced. You can press Undo straight afterwards, or use Save first to keep a copy.'); } catch { ok = false; }
+$('btn-reset').addEventListener('click', async () => {
+  const ok = await confirmDialog({ title: 'Reset to the default scene?', message: 'Your current scene is replaced. You can press Undo straight afterwards, or use Save first to keep a copy.', confirmText: 'Reset', opener: $('btn-reset') });
   if (!ok) return;
   stopWalk();
   resetScene(store);

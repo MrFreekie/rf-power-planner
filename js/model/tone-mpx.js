@@ -102,7 +102,7 @@ export function twoToneFm({ tone1Khz = TONE_MPX_DEFAULTS.toneKhz, dev1Khz, tone2
   const f1 = clampV(tone1Khz, TONE_MPX_LIMITS.toneKhz, 1), f2 = Math.max(1e-3, Number.isFinite(tone2Khz) ? tone2Khz : 19);
   const d1 = Math.max(0, Number.isFinite(dev1Khz) ? dev1Khz : 0.4 * 75), d2 = Math.max(0, Number.isFinite(dev2Khz) ? dev2Khz : 0.09 * 75);
   const b1 = d1 / f1, b2 = d2 / f2;
-  const N = Math.min(80, Math.ceil(b1 + 4 * Math.cbrt(b1 + 1) + 3)), M = Math.min(8, Math.ceil(b2 + 4 * Math.cbrt(b2 + 1) + 2));
+  const N = Math.min(2000, Math.ceil(b1 + 4 * Math.cbrt(b1 + 1) + 3)), M = Math.min(8, Math.ceil(b2 + 4 * Math.cbrt(b2 + 1) + 2));
   const J1 = [], J2 = [];
   for (let n = -N; n <= N; n++) J1[n + N] = besselJ(n, b1);
   for (let m = -M; m <= M; m++) J2[m + M] = besselJ(m, b2);
@@ -229,7 +229,7 @@ export function toneMpxReport(opts = {}) {
   const filter = opts.filter || {};
   const att = s.mono ? 0 : audioFilterDb(s.toneKhz, filter);
   const toneAfterPct = s.tonePct * Math.pow(10, -att / 20);
-  const beat = pilotBeat(s.toneKhz, { tonePct: s.tonePct, pilotPct: s.pilotPct, filter });
+  const beat = s.mono ? null : pilotBeat(s.toneKhz, { tonePct: s.tonePct, pilotPct: s.pilotPct, filter }); // a mono link has no pilot to beat against
   const deviation = overdeviation({ tonePct: toneAfterPct, pilotPct: s.mono ? 0 : s.pilotPct, peakDevKhz: s.peakDevKhz });
   const fm = twoToneFm({ tone1Khz: s.toneKhz, dev1Khz: deviation.toneDevKhz, tone2Khz: 19, dev2Khz: s.mono ? 0 : deviation.pilotDevKhz });
   const products = basebandProducts({ toneKhz: s.toneKhz, tonePct: toneAfterPct, pilotPct: s.mono ? 0 : s.pilotPct, overloadDb: s.overloadDb });
@@ -244,7 +244,7 @@ export function toneMpxReport(opts = {}) {
   const notes = [];
   if (!s.mono && s.toneKhz > 15) notes.push(`${s.toneKhz} kHz is above the 15 kHz audio limit: the low-pass removes ${att.toFixed(0)} dB (assumed filter).`);
   if (deviation.over) notes.push(`The tone and pilot together reach ${deviation.totalPct.toFixed(0)} percent of peak deviation: the limiter clips and the products above get worse.`);
-  notes.push(...beat.notes);
+  if (beat) notes.push(...beat.notes);
   if (neighbours.length) notes.push(`A product lands in the ${neighbours[0].neighbour.label} band at ${neighbours[0].line.fKhz.toFixed(1)} kHz (${neighbours[0].line.levelDb.toFixed(1)} dB).`);
   if (toneKey && toneKey.hits.length) notes.push(`Harmonic ${toneKey.hits[0].k} of the tone (${toneKey.hits[0].fKhz.toFixed(2)} kHz) falls in the tone-key window around ${toneKey.toneKeyKhz} kHz at ${toneKey.hits[0].levelDb.toFixed(1)} dB.`);
   return { settings: s, filter: { attenuationDb: att, toneAfterPct }, beat, alias: decoderAlias(s.toneKhz), deviation, fm, products, neighbours, toneKey, notes };

@@ -56,6 +56,18 @@ function toLocal(b, p) { // world -> the box's unrotated frame (floor.js toWorld
   const t = (b.rotationDeg * Math.PI) / 180, c = Math.cos(t), s = Math.sin(t), dx = p.x - b.cx, dy = p.y - b.cy;
   return { x: b.cx + dx * c - dy * s, y: b.cy + dx * s + dy * c, z: p.z };
 }
+// Analytic crossing of the centre line A -> B with a vertical wall rectangle: { s (0..1 along the path), clearance (negative: how deep inside the wall face, m) } or null.
+// Sampling alone can step over a thin wall, so the crossing is always evaluated as an extra sample (a crossed wall is blocked whatever the sample count).
+function wallCrossing(A, B, p1, p2, zMin, zMax) {
+  const rx = B.x - A.x, ry = B.y - A.y, wx = p2.x - p1.x, wy = p2.y - p1.y, den = rx * wy - ry * wx;
+  if (Math.abs(den) < 1e-12) return null; // parallel in plan
+  const qx = p1.x - A.x, qy = p1.y - A.y;
+  const s = (qx * wy - qy * wx) / den, t = (qx * ry - qy * rx) / den;
+  if (!(s > 0 && s < 1 && t >= 0 && t <= 1)) return null;
+  const z = A.z + s * (B.z - A.z);
+  if (z < zMin || z > zMax) return null;
+  return { s, clearance: -Math.max(1e-6, Math.min(z - zMin, zMax - z)) };
+}
 function segClearance(p, a, b, zMin, zMax) { // distance to a vertical wall rectangle
   const vx = b.x - a.x, vy = b.y - a.y, L2 = vx * vx + vy * vy;
   const t = L2 > 0 ? clampV(((p.x - a.x) * vx + (p.y - a.y) * vy) / L2, 0, 1) : 0;
@@ -80,7 +92,8 @@ export function fresnelObstacles(scene, { bulgeAt } = {}) {
   }
   for (const w of scene.reflectors || []) {
     if (!w || !w.p1 || !w.p2) continue;
-    out.push({ id: w.id, name: w.name || 'Wall', category: 'wall', clearanceAt: (p) => segClearance(p, w.p1, w.p2, Number.isFinite(w.zMin) ? w.zMin : 0, Number.isFinite(w.zMax) ? w.zMax : 4) });
+    const zLo = Number.isFinite(w.zMin) ? w.zMin : 0, zHi = Number.isFinite(w.zMax) ? w.zMax : 4;
+    out.push({ id: w.id, name: w.name || 'Wall', category: 'wall', clearanceAt: (p) => segClearance(p, w.p1, w.p2, zLo, zHi), crossingAt: (A, B) => wallCrossing(A, B, w.p1, w.p2, zLo, zHi) });
   }
   for (const pl of overheadPlanes(scene)) {
     const name = pl.id === 'ceiling' ? 'Ceiling' : String(((scene.overheadPanels || []).find((q) => q.id === pl.id) || {}).name || pl.id);
@@ -110,14 +123,14 @@ export function fresnelObstacles(scene, { bulgeAt } = {}) {
  * earth bulge (K = link.p2p.kFactor or 4/3) subtracted. Nothing here is added to the link budget (see the header).
  */
 export function fresnelClearance(scene, link, { freqMHz, fraction = FRESNEL_CLEARANCE_FRACTION, samples = FRESNEL_SAMPLES, tx, rx } = {}) {
-  const f = Number.isFinite(freqMHz) ? freqMHz : (link && Number.isFinite(link.freqMHz) ? link.freqMHz : 600);
+  const f = Number.isFinite(freqMHz) && freqMHz > 0 ? freqMHz : (link && Number.isFinite(link.freqMHz) && link.freqMHz > 0 ? link.freqMHz : 600);
   const A = tx || absolutePos(scene, link.tx.pos), B = rx || absolutePos(scene, link.rx.pos);
   const dx = B.x - A.x, dy = B.y - A.y, dz = B.z - A.z, d = Math.max(Math.hypot(dx, dy, dz), 1e-6), L = Math.hypot(dx, dy);
   const lam = C / (f * 1e6);
   const K = link && link.p2p && Number.isFinite(link.p2p.kFactor) ? link.p2p.kFactor : K_STANDARD;
   const bulgeAt = link && link.kind === 'p2p' ? (x) => earthBulgeM(x, d, K) : null;
   const obs = fresnelObstacles(scene, { bulgeAt });
-  const N = Math.max(8, Math.min(512, Math.floor(samples)));
+  const N = Math.max(8, Math.min(512, Math.floor(Number.isFinite(samples) ? samples : FRESNEL_SAMPLES)));
   const state = obs.map((o) => ({ o, minFraction: Infinity, clearanceM: Infinity, xM: 0 }));
   const profile = [];
   // unit vectors: path direction u, and in the plan the perpendicular n (horizontal); vertical-plane normal m (perpendicular to u in the vertical plane)
@@ -133,6 +146,13 @@ export function fresnelClearance(scene, link, { freqMHz, fraction = FRESNEL_CLEA
       if (fr < mn) { mn = fr; lim = st.o.id; }
     }
     profile.push({ s, xM: x, uM: s * L, z: p.z, f1M: f1, r60M: fraction * f1, minFraction: mn, limiting: lim });
+  }
+  // Walls: the analytic crossing of the centre line is its own sample (negative clearance, so the path is reported blocked).
+  for (const st of state) {
+    const cr = st.o.crossingAt && st.o.crossingAt(A, B);
+    if (!cr) continue;
+    const x = cr.s * d, fr = cr.clearance / Math.max(fresnelRadiusM(x, d, f), 1e-9);
+    if (fr < st.minFraction) { st.minFraction = fr; st.clearanceM = cr.clearance; st.xM = x; }
   }
   // p2p only: link.p2p.obstacle { distanceM, heightM } is a knife edge (a hill) at one distance: the clearance is measured there exactly (the sampling above
   // could miss it) and is the SAME quantity p2p.js p2pGeometry uses (line of sight minus earth bulge minus the obstacle height), so both modules agree.

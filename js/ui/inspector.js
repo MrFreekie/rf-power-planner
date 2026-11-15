@@ -13,6 +13,7 @@ import { catalogueOptions, flagText, behaviourText, FLAG_WORDS } from './noiseUi
 import { addNoiseSource, addEngCrew, addWallNoiseSource, updateNoiseSource, removeNoiseSource } from '../actionsAreas.js';
 import { PERSON_ROLES, PERSON_COLOURS, PEOPLE_LIMITS } from '../model/people.js';
 import { addPerson, updatePerson, assignMic, assignIem, assignExtraMic, removeExtraMic, removePerson, reorderPerson } from '../actions.js';
+import { confirmDialog } from './confirmDialog.js';
 import { linkChoices, personMargins, extraChoices } from './peopleUi.js';
 import { cleanName, limitMessage, renameReflector } from './nameInput.js';
 import { addAudience, updateAudience, removeAudience, setCeiling, addOverheadPanel, updateOverheadPanel, removeOverheadPanel, setP2pField, setAntennaDesignBand, densityChoiceId, setWallField, setImdIntercept, setImdFilter, addImdBand, updateImdBand, removeImdBand, setImdHarmonic } from '../actionsAreas.js';
@@ -872,11 +873,11 @@ export function mountInspector({ container, store }) {
       key: `ppl-${which}`, label: which === 'iem' ? 'In-ear link' : 'Mic link',
       options: (cc) => linkChoices(cc.scene, P(cc) || p0, which).map((x) => [x.value, x.label]),
       get: (cc) => (P(cc) || {})[which === 'iem' ? 'iemLinkId' : 'micLinkId'] || '',
-      set: (cc, v) => {
+      set: async (cc, v) => {
         const ch = linkChoices(cc.scene, P(cc) || p0, which).find((x) => x.value === v);
         const act = which === 'iem' ? assignIem : assignMic;
         if (ch && ch.swap) {
-          const ok = typeof window === 'undefined' || typeof window.confirm !== 'function' || window.confirm(`${ch.label.replace(/ \(.*$/, '')} is carried by someone else. Swap links with them?`);
+          const ok = await confirmDialog({ title: 'Swap links?', message: `${ch.label.replace(/ \(.*$/, '')} is carried by someone else. Swap links with them?`, confirmText: 'Swap', opener: document.activeElement });
           if (!ok) { sync(); return; }
           act(store, id, v, { swap: true });
         } else act(store, id, v || null);
@@ -908,12 +909,12 @@ export function mountInspector({ container, store }) {
       key: 'ppl-extra-add', label: 'Add a backup mic pack',
       options: (cc) => [['', (P(cc)?.extraLinkIds || []).length >= PEOPLE_LIMITS.maxExtra ? 'Limit reached' : 'Choose a mic link...'], ...extraChoices(cc.scene, P(cc) || p0).map((x) => [x.value, x.label])],
       get: () => '',
-      set: (cc, v) => {
+      set: async (cc, v) => {
         if (!v) return;
         const ch = extraChoices(cc.scene, P(cc) || p0).find((x) => x.value === v);
         let swap = false;
         if (ch && ch.swap) {
-          const ok = typeof window === 'undefined' || typeof window.confirm !== 'function' || window.confirm(`${ch.label.replace(/ \(.*$/, '')} is carried by someone else. Swap links with them?`);
+          const ok = await confirmDialog({ title: 'Swap links?', message: `${ch.label.replace(/ \(.*$/, '')} is carried by someone else. Swap links with them?`, confirmText: 'Swap', opener: document.activeElement });
           if (!ok) { sync(); return; }
           swap = true;
         }

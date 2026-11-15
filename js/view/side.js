@@ -13,6 +13,7 @@ import { tracePaths, antennaFrame } from '../model/rf.js';
 import { tiltFromPointer, stepTilt, tiltText, tiltHandleLength, placeLabel, TILT_COARSE_STEP, TILT_FINE_STEP } from '../ui/antennaFields.js';
 import { drawTiltGauge } from './tiltGauge.js';
 import { drawPersonSide } from './peopleDraw.js';
+import { linkOwners } from '../model/people.js';
 import { setAntennaField, ensureOwnAntennaB } from '../actions.js';
 import { SURFACES } from '../model/library.js';
 import * as icons from './icons.js';
@@ -97,6 +98,7 @@ export function createSideView(canvas, store) {
 
   function draw(ctx, w, h, th) {
     const scene = store.getScene(), sel = store.getSelection(), link = activeLink(scene, sel);
+    frameOwners = linkOwners(scene.people); // once per frame
     handles = [];
     ctx.fillStyle = th.paper; ctx.fillRect(0, 0, w, h);
     if (!link) { haloText(ctx, th, 'No link in scene', w / 2, h / 2, { align: 'center', color: th.inkSoft }); return; }
@@ -263,6 +265,7 @@ export function createSideView(canvas, store) {
     return pts[0];
   }
 
+  let frameOwners = null;
   function drawEnd(ctx, th, link, role, s, u, sel, w, txOnRight = false) {
     const leftEnd = (role === 'tx') !== txOnRight; // the end at the left margin keeps its dimension line on the outside
     const e = link[role], z = e.pos.z, fl = flAt(e.pos), p = vp.worldToScreen(s, -(z + fl)), selected = sel === e.id;
@@ -279,7 +282,7 @@ export function createSideView(canvas, store) {
       icons.drawStand(ctx, vp, s, -fl, { view: 'side', ink, fill, heightM: z });
       icons.drawAntenna(ctx, vp, s, -(z + fl), { view: 'side', ink, fill, type: e.antenna.type, pol: e.antenna.polarisation, rollDeg: e.antenna.rollDeg, groundPlane: e.antenna.groundPlane, angleDeg: angle });
     }
-    if (hasPerson) drawPersonSide(ctx, th, store.getScene(), link, role, s, vp.worldToScreen(s, -fl).y, p.y, !leftEnd);
+    if (hasPerson) drawPersonSide(ctx, th, store.getScene(), link, role, s, vp.worldToScreen(s, -fl).y, p.y, !leftEnd, frameOwners);
     // height dimension line beside the item
     const dx = p.x + (leftEnd ? -26 : 26), f0 = vp.worldToScreen(s, -fl).y;
     ctx.strokeStyle = th.inkSoft; ctx.lineWidth = 1;

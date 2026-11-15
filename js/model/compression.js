@@ -28,8 +28,8 @@ export function compressionDb(linearOutDbm, op1dBDbm, kneeDb = COMPRESSION_KNEE_
 }
 
 /**
- * stageOp1dBDbm(item, gainDb) -> output P1dB (dBm) of an active chain item: item.op1dBDbm, else OIP3 - 9.6 with OIP3 = item.oip3Dbm, else item.iip3Dbm + gain, else 20.
- * Same order of precedence as cascadeChainIip3Dbm (iip3Dbm first), so the intercept and the compression point always belong together.
+ * stageOp1dBDbm(item, gainDb) -> output P1dB (dBm) of an active chain item: item.op1dBDbm, else OIP3 - 9.6 where OIP3 = item.iip3Dbm + gain, else item.oip3Dbm, else 20.
+ * Order of precedence: item.op1dBDbm, then item.iip3Dbm + gain, then item.oip3Dbm, then the default 20 dBm (the same order as cascadeChainIip3Dbm: iip3Dbm before oip3Dbm), so the intercept and the compression point always belong together.
  */
 export function stageOp1dBDbm(item, gainDb) {
   if (Number.isFinite(item && item.op1dBDbm)) return item.op1dBDbm;
@@ -47,7 +47,7 @@ export function stageOp1dBDbm(item, gainDb) {
  * signal loses. wantedOut is the wanted level after the chain with the compression applied, dBm.
  */
 export function chainCompression(stages, signals, { kneeDb = COMPRESSION_KNEE_DB } = {}) {
-  const sig = (signals || []).map((s) => ({ ...s, level: s.levelDbm }));
+  const sig = (signals || []).filter((s) => s && Number.isFinite(s.levelDbm)).map((s) => ({ ...s, level: s.levelDbm })); // a non-finite level (a muted source, -Infinity) carries no power
   const out = [];
   let total = 0;
   const pw = (d) => Math.pow(10, d / 10);
