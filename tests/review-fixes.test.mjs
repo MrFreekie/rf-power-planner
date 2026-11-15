@@ -161,3 +161,15 @@ test('cDiv by zero is a huge finite number with the numerator sign; faultopen wi
   const r = applyFault({ dut: { type: 'cable', cableType: 'lmr-400', lengthM: 10, returnLossDb: Infinity } }, 'cable-kink');
   assert.ok(r.applicable); assert.equal(r.cfg.dut.returnLossDb, Infinity);
 });
+
+test('a mic pack assigned to a person already on the plan jumps to them; a near pack stays; an unplaced person goes to the pack', () => {
+  const st = withLinks(3);
+  st.update((d) => { d.links[0].tx.pos = { x: 30, y: 20, z: 1.0 }; d.links[1].rx.pos = { x: -12, y: 4, z: 1.0 }; d.links[2].tx.pos = { x: 40, y: 40, z: 1.0 }; });
+  const [mic, , extra] = st.getScene().links.map((l) => l.id);
+  const id = A.addPerson(st, { name: 'Cy', pos: { x: 2, y: 3 } });
+  const near = (a, b) => Math.hypot(a.x - b.x, a.y - b.y) < 0.5;
+  assert.ok(A.assignMic(st, id, mic)); assert.ok(near(st.getScene().links[0].tx.pos, { x: 2, y: 3 }), 'mic jumped to the person');
+  assert.ok(A.assignExtraMic(st, id, extra)); assert.ok(near(st.getScene().links[2].tx.pos, { x: 2, y: 3 }), 'backup mic jumped too');
+  assert.deepEqual(st.getScene().people[0].pos, { x: 2, y: 3 }, 'the person did not move');
+  assert.equal(validateScene(st.getScene()).ok, true);
+});

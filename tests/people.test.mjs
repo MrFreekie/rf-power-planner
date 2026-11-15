@@ -291,3 +291,13 @@ test('extra mic: validation errors, migrate prunes dangling and duplicate entrie
   assert.ok(old.people.every((p) => p.extraLinkIds === undefined && p.extraOffsets === undefined));
   assert.deepEqual(migrateScene(structuredClone(old)).people, old.people);
 });
+
+test('an IEM bodypack assigned to a person already on the plan jumps to them', () => {
+  const st = twoLinkStore();
+  st.update((d) => { d.links[1].rx.pos = { x: -9, y: 30, z: 1.0 }; });
+  const id = A.addPerson(st, { name: 'Dee', pos: { x: 4, y: 4 } });
+  assert.equal(A.assignIem(st, id, st.getScene().links[1].id), true);
+  const r = st.getScene().links[1].rx.pos;
+  assert.ok(Math.hypot(r.x - 4, r.y - 4) < 0.5, JSON.stringify(r));
+  assert.deepEqual(st.getScene().people[0].pos, { x: 4, y: 4 });
+});

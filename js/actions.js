@@ -7,7 +7,7 @@ import { startWalk, stopWalk } from './walk.js';
 import { effectiveAntennaB } from './model/diversity.js';
 import { createDefaultScene, createDefaultLink, createChainItem, createReflector, createBranch, createZone, createPlatform, STAGE_LIMITS, PLATFORM_LIMITS, PLATFORM_MATERIALS, createImdTransmitter, defaultImdTransmitters, newId, SCENE_LIMITS } from './model/scene.js';
 import { applyFmPreset } from './model/fm-presets.js';
-import { PEOPLE_LIMITS, PERSON_ROLES, PERSON_COLOURS, createPerson, personLinkName, extraLinkName, personPackPositions, offsetFromPack, linkOwners, prunePeople } from './model/people.js';
+import { DEFAULT_MIC_OFFSET, DEFAULT_IEM_OFFSET, PEOPLE_LIMITS, PERSON_ROLES, PERSON_COLOURS, createPerson, personLinkName, extraLinkName, personPackPositions, offsetFromPack, linkOwners, prunePeople } from './model/people.js';
 import { validateVenue } from './model/venue-underlay.js';
 import { SURFACES, ANTENNAS, GROUND_PLANE_GAIN_DBI, allowedPolarisations, defaultPolarisation, ANTENNA_CONTACT_LOSS_DB, ANTENNA_DAMPNESS_LOSS_DB } from './model/library.js';
 
@@ -841,6 +841,19 @@ function packOffset(person, here) {
 }
 const clampCoord = (v) => Math.min(PEOPLE_LIMITS.coord[1], Math.max(PEOPLE_LIMITS.coord[0], v));
 
+const NEAR_PERSON_M = 1.5;
+/**
+ * The offset a pack gets when it is assigned to a person already on the plan. A pack within NEAR_PERSON_M of the person stays where it is (the stored
+ * offset is its current one); a pack further away JUMPS to the person at the standard body offset (handheld height 1.2 m or more, otherwise a bodypack),
+ * keeping its own height. The person is the anchor: the equipment goes to whoever carries it. An unplaced person is placed at the pack instead.
+ */
+function assignedOffset(person, which, here) {
+  const o = packOffset(person, here);
+  if (Math.hypot(o.dx, o.dy) <= NEAR_PERSON_M) return o;
+  const base = which === 'iem' ? DEFAULT_IEM_OFFSET : (Number.isFinite(here.z) && here.z >= 1.2 ? DEFAULT_MIC_OFFSET.handheld : DEFAULT_MIC_OFFSET.bodypack);
+  return { dx: base.dx, dy: base.dy, dz: o.dz }; // o.dz is the pack height, already clamped to the validator limits
+}
+
 function assign(store, personId, linkId, which, { swap = false } = {}) {
   let ok = false;
   store.update((d) => {
@@ -870,9 +883,11 @@ function assign(store, personId, linkId, which, { swap = false } = {}) {
       applyCoupling(d, owner); // the other person's body coupling goes onto the link they received
     }
     const here = posOf(link);
-    if (!p.pos) p.pos = { x: here.x, y: here.y }; // an unplaced person stands where their first pack is
+    const placed = !!p.pos; // a person already on the plan keeps their place: the pack jumps to them. An unplaced person stands where their first pack is.
+    if (!placed) p.pos = { x: here.x, y: here.y };
     p[idKey] = linkId;
-    p[offKey] = packOffset(p, here);
+    p[offKey] = placed ? assignedOffset(p, which, here) : packOffset(p, here);
+    if (placed) placePacks(d, p);
     link.name = personLinkName(p, which);
     applyCoupling(d, p);
     ok = true;
@@ -900,10 +915,11 @@ export function assignExtraMic(store, personId, linkId, { swap = false } = {}) {
     const other = list.find((x) => x.id !== personId && (x.micLinkId === linkId || (x.extraLinkIds || []).includes(linkId)));
     if (other && !swap) return;
     if (other) { if (other.micLinkId === linkId) { delete other.micLinkId; delete other.micOffset; } else dropExtra(other, linkId); }
-    const here = link.tx.pos;
-    if (!p.pos) p.pos = { x: here.x, y: here.y };
+    const here = link.tx.pos, placed = !!p.pos;
+    if (!placed) p.pos = { x: here.x, y: here.y };
     p.extraLinkIds = [...(p.extraLinkIds || []), linkId];
-    p.extraOffsets = { ...(p.extraOffsets || {}), [linkId]: packOffset(p, here) };
+    p.extraOffsets = { ...(p.extraOffsets || {}), [linkId]: placed ? assignedOffset(p, 'mic', here) : packOffset(p, here) };
+    if (placed) placePacks(d, p);
     link.name = extraLinkName(p, p.extraLinkIds.length - 1);
     applyCoupling(d, p);
     ok = true;
