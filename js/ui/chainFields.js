@@ -25,6 +25,6 @@ export function presetFlag(item, field) {
 /** Item kinds that carry DC or isolation figures (for tests). */
 export function chainKindFields(kind) {
   return { coupler: ['couplingDb', 'excessLossDb', 'isolationDb', 'maxInputDbm'], biastee: ['lossDb', 'dcSupplyV', 'dcSupplyMa', 'maxInputDbm'],
-    dcblock: ['lossDb', 'dcMode', 'maxInputDbm'], activesplitter: ['ports', 'gainDb', 'nfDb', 'iip3Dbm', 'isolationDb', 'dcNeedV', 'dcNeedMa'],
-    activecombiner: ['ports', 'gainDb', 'nfDb', 'iip3Dbm', 'isolationDb', 'dcNeedV', 'dcNeedMa'] }[kind] || [];
+    dcblock: ['lossDb', 'dcMode', 'maxInputDbm'], activesplitter: ['ports', 'gainDb', 'nfDb', 'iip3Dbm', 'op1dBDbm', 'isolationDb', 'dcNeedV', 'dcNeedMa'],
+    activecombiner: ['ports', 'gainDb', 'nfDb', 'iip3Dbm', 'op1dBDbm', 'isolationDb', 'dcNeedV', 'dcNeedMa'] }[kind] || [];
 }

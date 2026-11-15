@@ -20,6 +20,7 @@
 
 import { CABLES, ANTENNAS, GROUND_PLANE_GAIN_DBI, ANTENNA_POLARISATIONS, ANTENNA_CONTACT_LOSS_DB, ANTENNA_DAMPNESS_LOSS_DB, ANTENNA_CONTACT_LABELS, ANTENNA_DAMPNESS_LABELS, SURFACES, MATERIALS, cableDbPer100m as libraryCableDbPer100m, surfaceAt, materialAt } from './library.js';
 import { formatLength } from './units.js';
+import { chainCompression, stageOp1dBDbm } from './compression.js';
 import { p2pGeometry, suggestedFadeMarginDb, K_STANDARD } from './p2p.js';
 export { p2pGeometry, earthBulgeM, fresnelRadiusM, knifeEdgeLossDb, requiredAntennaHeightM, radioHorizonM, suggestedFadeMarginDb } from './p2p.js';
 import { rofEffective, rofChainWarnings, rofBranchDelays } from './rof.js';
@@ -995,9 +996,28 @@ export function solveLink(scene, link) {
     step(`Noise sources ${nsAt.averageDbm.toFixed(1)} dBm average, ${nsAt.peakDbm.toFixed(1)} dBm peak (floor +${noiseSources.riseDb.toFixed(1)} dB, note)`, 0); wf[wf.length - 1].note = true;
   }
   cascade.noiseSources = noiseSources;
-  cascade.marginAtAntennaDb = rxPowerDbm - cascade.sensitivityAtAntennaDbm;
-  if (noiseSources) noiseSources.marginChangeDb = cascade.marginAtAntennaDb - marginAfterWallDb;
-  if (wallNoise) wallNoise.marginChangeDb = cascade.marginAtAntennaDb - marginBeforeWallDb;
+  // Booster compression (compression.js): a strong narrowband source (a keyed radio, a transmitter) reaches the receive chain at its raw level and drives
+  // an active stage towards its output P1dB; the stage then loses gain for every signal, the wanted one included. Only evaluated when such a source exists,
+  // so scenes without noise sources are unchanged. The loss (dB) is taken off the margin and reported as `compression`.
+  let compression = null;
+  const rcvChain = iem ? rxChain : chain;
+  if (nsAt && (rcvChain || []).some((it) => ACTIVE_CHAIN_KINDS.includes(it.kind))) {
+    const strong = nsAt.sources.filter((x) => x.type === 'narrowband' && Number.isFinite(x.rawDbm) && x.rawDbm > -90 && !x.muted);
+    if (strong.length) {
+      const signals = [{ id: 'wanted', levelDbm: rxPowerDbm, freqMHz: f, wanted: true }, ...strong.map((x) => ({ id: x.id, name: x.name, levelDbm: x.rawDbm, freqMHz: f + x.offsetMHz }))];
+      const stages = rcvChain.map((it) => ({
+        label: chainLabel(it), gainDbs: signals.map((sg) => chainItemNoise(it, sg.freqMHz).gainDb),
+        op1dBDbm: ACTIVE_CHAIN_KINDS.includes(it.kind) ? stageOp1dBDbm(it, chainItemNoise(it, f).gainDb) : null,
+      }));
+      const cc = chainCompression(stages, signals);
+      compression = { ...cc, strongest: strong.reduce((a, x) => (x.rawDbm > a.rawDbm ? x : a)), signals: signals.map(({ id, name, levelDbm, freqMHz }) => ({ id, name, levelDbm, freqMHz })) };
+      if (cc.totalDb > 0.05) { step(`Booster compression -${cc.totalDb.toFixed(1)} dB (strong signal, note)`, 0); wf[wf.length - 1].note = true; }
+    }
+  }
+  cascade.compression = compression;
+  cascade.marginAtAntennaDb = rxPowerDbm - cascade.sensitivityAtAntennaDbm - (compression ? compression.totalDb : 0);
+  if (noiseSources) noiseSources.marginChangeDb = cascade.marginAtAntennaDb + (compression ? compression.totalDb : 0) - marginAfterWallDb;
+  if (wallNoise) wallNoise.marginChangeDb = cascade.marginAtAntennaDb + (compression ? compression.totalDb : 0) - marginBeforeWallDb;
   const marginDb = cascade.marginAtAntennaDb;
   const status = marginDb >= 6 ? 'pass' : marginDb >= 0 ? 'marginal' : 'fail';
   paths.forEach((p) => { delete p._gt; delete p._gr; });
@@ -1012,6 +1032,10 @@ export function solveLink(scene, link) {
     warnings.push('A body antenna already includes the loss of the wearer (-3 dBi, weaker behind); a body loss setting on top of it counts the body twice.');
   }
   warnings.push(...inputWarn);
+  if (compression && compression.totalDb > 0.05) {
+    const w = compression.worst;
+    warnings.push(`${w.label} is driven ${w.compressionDb >= 1 ? 'into compression' : 'towards its 1 dB point'} by ${compression.strongest.name || 'a strong signal'} (${compression.strongest.rawDbm.toFixed(1)} dBm at the antenna): ${compression.totalDb.toFixed(1)} dB less gain for the wanted signal. Put a bandpass filter ahead of the booster, move the source or the antenna, or use a booster with a higher P1dB.`);
+  }
   if (wallNoise && wallNoise.riseDb >= 3) {
     const w0 = wallNoise.walls.reduce((a, b) => (b.powerDbm > a.powerDbm ? b : a));
     warnings.push(`Video wall noise ${w0.name ? `from "${w0.name}" ` : ''}raises the receiver noise floor by ${wallNoise.riseDb.toFixed(1)} dB (${wallNoise.dbm.toFixed(1)} dBm in ${wallNoise.bandwidthKHz} kHz, ${w0.distanceM.toFixed(1)} m from the wall, ${w0.side} side, wall limit assumed): move the antenna away from the wall, aim it away, or fix the panel cabling (ferrites, shielded data cable).`);
@@ -1052,7 +1076,7 @@ export function solveLink(scene, link) {
     tx: txM.matched ? null : { vswr: txM.vswr, returnLossDb: txM.returnLossDb, mismatchDb: txM.mismatchDb, inBand: txM.inBand, reflectedDbm: txReflectedDbm, reflectedAtPaDbm, vswrAtPa },
     rx: rxM.matched ? null : { vswr: rxM.vswr, returnLossDb: rxM.returnLossDb, mismatchDb: rxM.mismatchDb, inBand: rxM.inBand },
   };
-  return { distanceM, paths, pathLossDb, fsplDb: fspl, rxPowerDbm, antennaMismatch, polarisation, p2p: p2pInfo, wallNoise, noiseSources, waterfall: wf, inputPowerDbm, marginDb, status, cascade, requiredSnrDb: cascade.requiredSnrDb, nearField, warnings };
+  return { distanceM, paths, pathLossDb, fsplDb: fspl, rxPowerDbm, antennaMismatch, polarisation, p2p: p2pInfo, wallNoise, noiseSources, compression, waterfall: wf, inputPowerDbm, marginDb, status, cascade, requiredSnrDb: cascade.requiredSnrDb, nearField, warnings };
 }
 
 // ---------------------------------------------------------------- multi-antenna (branch) IEM zones

@@ -911,3 +911,17 @@ body.vnalab-open { overflow: hidden; }
   body:not(.report-open) #leftpanel-body { display: block !important; overflow: visible !important; height: auto !important; }
 }
 @media print { body:not(.report-open) .pane h2 > *, body:not(.report-open) .pane > *:not(h2):not(canvas) { display: none !important; } body:not(.report-open) .pane h2 { display: block !important; margin: 0 0 2mm; font-size: 11pt; color: #000; } }
+
+/* Analogue vs digital readout (same layout as the extra budget rows) */
+.mode-body { margin: 4px 0 0; }
+.mode-body > div { display: block; padding: 3px 0; border-bottom: 1px solid var(--grid-major); }
+.mode-body dt { font-size: 12px; color: var(--ink-soft); }
+.mode-body dd { margin: 0; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.mode-body dd[data-severity="warning"] { color: var(--warn-text); }
+#mode-line { font-size: 13px; margin: 6px 0 0; }
+#readout-extra dd[data-severity="info"] { color: var(--ink); }
+@media print { #mode-panel { break-inside: avoid; } }
+.ppl-extra { margin: 8px 0; }
+.ppl-extra-list { list-style: none; margin: 4px 0 6px; padding: 0; }
+.ppl-extra-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 0; }
+.ppl-extra-name { overflow-wrap: anywhere; }

@@ -404,7 +404,7 @@ function checkChainItem(c, path, errors) {
   if (!isObj(c) || !CHAIN_KINDS.includes(c.kind)) { errors.push(`${path}.kind invalid`); return; }
   if (c.id !== undefined && !isSafeId(c.id)) errors.push(`${path}.id must be a short plain string`);
   if (c.cableType !== undefined && !isSafeId(c.cableType)) errors.push(`${path}.cableType invalid`);
-  for (const k of ['lengthM', 'gainDb', 'nfDb', 'lossDb', 'insertionLossDb', 'ports', 'couplingDb', 'excessLossDb', 'isolationDb', 'rejectionDb', 'iip3Dbm', 'oip3Dbm', 'maxInputDbm', 'dcSupplyV', 'dcSupplyMa', 'dcNeedV', 'dcNeedMa', 'powerV', 'powerMa', 'passLoMHz', 'passHiMHz', 'reverseIsolationDb', 'sfdrDbHz23', 'fibreKm', 'fibreLossDbPerKm', 'connectorLossDb', 'bwMinMHz', 'bwMaxMHz']) {
+  for (const k of ['lengthM', 'gainDb', 'nfDb', 'lossDb', 'insertionLossDb', 'ports', 'couplingDb', 'excessLossDb', 'isolationDb', 'rejectionDb', 'iip3Dbm', 'oip3Dbm', 'op1dBDbm', 'maxInputDbm', 'dcSupplyV', 'dcSupplyMa', 'dcNeedV', 'dcNeedMa', 'powerV', 'powerMa', 'passLoMHz', 'passHiMHz', 'reverseIsolationDb', 'sfdrDbHz23', 'fibreKm', 'fibreLossDbPerKm', 'connectorLossDb', 'bwMinMHz', 'bwMaxMHz']) {
     if (c[k] !== undefined && !(isNum(c[k]) && Math.abs(c[k]) <= SL.coordM)) errors.push(`${path}.${k} must be a bounded number`);
   }
   if (c.fibreKm !== undefined && !(isNum(c.fibreKm) && c.fibreKm >= 0 && c.fibreKm <= 100)) errors.push(`${path}.fibreKm must be between 0 and 100`);

@@ -29,7 +29,8 @@ import { mountCoordination } from './ui/coordination.js';
 import { mountGlossary } from './ui/glossary.js';
 import { mountPanels } from './ui/panels.js';
 import { activeLink as pickActiveLink, solveCached } from './view/util.js';
-import { budgetExtras } from './ui/budgetExtras.js';
+import { budgetExtras, modeContrast } from './ui/budgetExtras.js';
+import { modeReport } from './model/digital-link.js';
 import { fresnelView, fresnelFor } from './view/fresnelDraw.js';
 import { pathRows } from './ui/fields.js';
 
@@ -376,6 +377,21 @@ function renderExtras(r, scene = null, link = null) {
   dl.hidden = rows.length === 0;
 }
 
+function renderMode(r, link) {
+  const body = $('mode-body'), line = $('mode-line');
+  let m = null;
+  try { m = r && link && Number.isFinite(r.inputPowerDbm) ? modeContrast(modeReport(r.inputPowerDbm, link)) : null; } catch { m = null; }
+  const sig = JSON.stringify(m);
+  if (body.dataset.sig === sig) return;
+  body.dataset.sig = sig;
+  body.replaceChildren(...(m ? m.rows : []).map((x) => {
+    const d = document.createElement('div'), dt = document.createElement('dt'), dd = document.createElement('dd');
+    dt.textContent = x.label; dd.textContent = x.value; dd.dataset.severity = x.severity; d.append(dt, dd); return d;
+  }));
+  line.textContent = m ? m.line : '';
+  $('mode-panel').hidden = !m;
+}
+
 function renderPaths(r, scene) {
   const body = $('paths-body');
   const rows = r ? [...pathRows(r, scene, scene.units.length), ...noisePathRows(r.noiseSources, (m) => formatLength(m, scene.units.length)), ...peoplePathRows(scene, pickActiveLink(scene, store.getSelection()), (l) => solveLink(scene, l))] : [];
@@ -409,6 +425,7 @@ function renderResults(scene) {
     status.dataset.status = r.status;
     renderWarnings(r.warnings);
     renderExtras(r, scene, link);
+    renderMode(r, link);
     renderPaths(r, scene);
     showError(loadError);
   } catch (err) {
@@ -416,6 +433,7 @@ function renderResults(scene) {
     status.dataset.status = '';
     renderWarnings([]);
     renderExtras(null);
+    renderMode(null, null);
     renderPaths(null, scene);
     showError(`Could not solve link: ${err.message}`);
   }

@@ -4,6 +4,7 @@
 import { applyFmPreset } from './model/fm-presets.js';
 import { solveLink, chainLossDb } from './model/rf.js';
 import { overloadStep } from './model/overload.js';
+import { modeReport } from './model/digital-link.js';
 import { squelchState } from './model/squelch.js';
 import { RX_PRESETS } from './model/rx-params.js';
 import { imdSummary, evenOrderImd } from './model/imd.js';
@@ -734,6 +735,55 @@ export function weakTvReport(variant) {
   const sc = weakTvScene(variant), r = solveLink(sc, sc.links[0]);
   const ns = r.noiseSources;
   return { scene: sc, result: r, noise: ns, marginDb: r.marginDb, floorDbm: ns ? ns.floorAfterDbm : r.cascade.noiseFloorDbm, riseDb: ns ? ns.riseDb : 0, channel: tvChannelOf(sc.links[0].freqMHz, 8).n };
+}
+
+/**
+ * Booster overload by a strong nearby transmitter (compression.js): boosterOverloadScene(variant) -> a 606.1 MHz mic 137 m from a receive rack whose antenna
+ * feeds a 12 dB booster and 20 m of LMR-240, with a business UHF handheld radio (33 dBm ERP, assumed) keyed 1 m from the receive antenna.
+ * variant 'plain' = no booster, 'overloaded' = booster straight on the antenna, 'filtered' = a 600-612 MHz bandpass ahead of the booster.
+ */
+export function boosterOverloadScene(variant = 'overloaded') {
+  return make('mic', (s, l) => {
+    s.stage = { width: 160, depth: 20 }; s.environment.floor = 'wood'; s.environment.model = 'free-space';
+    l.name = 'Mic at the far end'; l.freqMHz = 606.1; l.tx.powerDbm = 10;
+    l.tx.pos = { x: 3, y: 10, z: 1.5 }; l.tx.antenna = omni(); l.rx.antenna = omni();
+    l.rx.pos = { x: 140, y: 10, z: 1.5 }; l.rx.diversity.antennaB.pos = { x: 140, y: 9.4, z: 1.5 };
+    l.chain = [];
+    if (variant === 'filtered') l.chain.push(createChainItemFromPreset('filter-bandpass', { passLoMHz: 600, passHiMHz: 612 }));
+    if (variant !== 'plain') l.chain.push(createChainItemFromPreset('booster-12'));
+    l.chain.push(createChainItem('cable', { cableType: 'lmr-240', lengthM: 20 }));
+    s.noiseSources = [createNoiseSource('ptt-business-uhf', { name: 'Crew radio 1 m from the antenna', pos: { x: 140, y: 11, z: 1.5 } })];
+  });
+}
+export function boosterOverloadReport(variant) {
+  const sc = boosterOverloadScene(variant), r = solveLink(sc, sc.links[0]), c = r.compression;
+  const boost = c && c.stages.find((x) => x.op1dBDbm !== null);
+  return { scene: sc, result: r, marginDb: r.marginDb, compressionDb: c ? c.totalDb : 0, interfererDbm: c ? c.strongest.rawDbm : null, boosterOutDbm: boost ? boost.linearOutDbm : null, op1dBDbm: boost ? boost.op1dBDbm : null };
+}
+
+/**
+ * Analogue FM versus digital at the same receiver input level (digital-link.js): modeContrastScene(type, level) -> a 10 m mic link on 606.1 MHz with a fixed pad
+ * chosen so the receiver input is exactly MODE_CONTRAST_LEVELS[level] dBm. type 'analog-fm' or 'digital' (the default digital preset, fixed QPSK 3/4, assumed).
+ * 'weak' sits 1 dB under the digital frame-error cliff but only 5 dB under the FM threshold knee; 'good' is well above both.
+ */
+export const MODE_CONTRAST_LEVELS = Object.freeze({ weak: -107, good: -85 });
+export function modeContrastScene(type = 'analog-fm', level = 'weak') {
+  const build = (padDb) => make('mic', (s, l) => {
+    s.stage = { width: 30, depth: 20 }; s.environment.floor = 'wood'; s.environment.model = 'free-space';
+    l.name = type === 'digital' ? 'Digital mic' : 'Analogue FM mic'; l.freqMHz = 606.1;
+    l.tx.pos = { x: 3, y: 10, z: 1.5 }; l.tx.antenna = omni(); l.rx.antenna = omni();
+    l.rx.pos = { x: 13, y: 10, z: 1.5 }; l.rx.diversity.antennaB.pos = { x: 13, y: 9.4, z: 1.5 };
+    l.chain = [createChainItem('attenuator', { lossDb: padDb })];
+    l.rx.squelch = { enabled: false, thresholdDbm: -125, hysteresisDb: 3 };
+    if (type === 'digital') l.modulation = { type: 'digital', digital: { preset: 'mic-qpsk-fixed', fixedOrder: null, overrides: {} } };
+  });
+  const probe = solveLink(build(0), build(0).links[0]);
+  const pad = Math.round((probe.inputPowerDbm - MODE_CONTRAST_LEVELS[level]) * 10) / 10;
+  return build(pad);
+}
+export function modeContrastReport(type, level) {
+  const sc = modeContrastScene(type, level), l = sc.links[0], r = solveLink(sc, l);
+  return { scene: sc, result: r, inputDbm: r.inputPowerDbm, ...modeReport(r.inputPowerDbm, l) };
 }
 
 /**
@@ -1807,6 +1857,30 @@ export const EXAMPLES = [
     title: 'Strong TV: the failure contrast, a strong signal in the channel',
     note: 'Problem: the same mic on channel 33 where the block is strong (-45 dBm at the antenna, assumed) puts -60.8 dBm of noise in the 200 kHz channel. The floor rises 51.2 dB and only 3.7 dB of margin is left, so the link is marginal. A strong broadcast channel is not usable: pick another one.',
     build: () => ({ scene: weakTvScene('strong-cochannel') }),
+  },
+  {
+    id: 'booster-overloaded-by-radio',
+    title: 'Booster overload: a keyed crew radio 1 m from the receive antenna',
+    note: 'Problem: a 12 dB booster sits straight on the receive antenna and a crew radio (33 dBm ERP, assumed) is keyed 1 m away, putting +1.9 dBm at the antenna. The booster would put out 13.9 dBm against an output 1 dB point of 10.4 dBm (OIP3 20 dBm assumed, minus 9.6 dB), so it compresses 3.5 dB and the wanted mic loses the same. The margin falls from 7.6 dB without the booster to 4.1 dB, only while the radio is keyed. A booster raises weak signals and everything strong beside them.',
+    build: () => ({ scene: boosterOverloadScene('overloaded') }),
+  },
+  {
+    id: 'booster-filtered-before-radio',
+    title: 'Booster behind a bandpass filter: the radio never reaches it',
+    note: 'Best practice: the same booster behind a 600 to 612 MHz bandpass filter (30 dB stopband rejection, assumed) sees the crew radio at only -17.6 dBm at its output. It stays far below the 10.4 dBm output 1 dB point, so there is no compression and the margin is 7.6 dB, the same as with no radio keyed. The filter costs 1.5 dB of loss but it protects the booster from every out-of-band transmitter. Compare with the overloaded example, where the margin is 4.1 dB.',
+    build: () => ({ scene: boosterOverloadScene('filtered') }),
+  },
+  {
+    id: 'analog-fm-weak-gradual',
+    title: 'Analogue FM at -107 dBm: noisy, but still there',
+    note: 'Compare: at -107 dBm the receiver sees a CNR of 6.0 dB, 5.0 dB under the FM threshold knee of 11 dB (assumed). The audio is hissy at 19.5 dB SNR but the voice is still carried, and it was 51.5 dB at -85 dBm: analogue noise grows gradually as the signal falls. The FM signal takes 110 kHz of the 200 kHz channel (Carson). The next example is the digital mic at the same level.',
+    build: () => ({ scene: modeContrastScene('analog-fm', 'weak') }),
+  },
+  {
+    id: 'digital-weak-cliff',
+    title: 'Digital mic at -107 dBm: the same level, the cliff',
+    note: 'Compare: the same -107 dBm with a digital mic (fixed QPSK 3/4 in a 200 kHz channel, assumed) is 1.1 dB under the frame-error cliff and the audio is muted. The cliff is only 0.6 dB wide, from a frame error rate of 1e-3 at -105.6 dBm to 90 percent at -106.3 dBm, so the audio is perfect one moment and gone the next. At -85 dBm it is clean with 20.9 dB to spare. Digital is the better link until it fails, and then it fails all at once.',
+    build: () => ({ scene: modeContrastScene('digital', 'weak') }),
   },
   {
     id: 'presenter-with-backup-bodypack',

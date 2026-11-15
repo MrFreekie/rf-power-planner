@@ -19,6 +19,36 @@ export function fresnelRows(fr) {
   return rows;
 }
 
+const sgn = (x, d = 1) => `${x >= 0 ? '+' : '-'}${Math.abs(x).toFixed(d)}`;
+const LEVEL_WORD = { ok: 'OK', hot: 'HOT', compressed: 'COMPRESSED' };
+
+/** Booster compression rows from result.compression: one summary row, then one row per active stage (input, OP1dB, compression, headroom, level in words). */
+export function compressionRows(c) {
+  if (!c || !Array.isArray(c.stages) || !c.stages.length) return [];
+  const total = fin(c.totalDb) ? c.totalDb : 0;
+  const rows = [{ label: 'Booster compression', value: total > 0.05 ? `${total.toFixed(1)} dB less gain for the wanted signal${c.strongest && c.strongest.name ? ` (driven by ${c.strongest.name})` : ''}${total >= 1 ? ' WARNING' : ''}` : 'none: every active stage has headroom', severity: total >= 1 ? 'warning' : total > 0.05 ? 'info' : 'ok' }];
+  for (const st of c.stages) {
+    if (!fin(st.op1dBDbm)) continue;
+    rows.push({ label: `Stage ${st.label}`, value: `in ${fin(st.inputDbm) ? st.inputDbm.toFixed(1) : '-'} dBm, OP1dB ${st.op1dBDbm.toFixed(1)} dBm, compression ${(st.compressionDb || 0).toFixed(1)} dB, headroom ${fin(st.headroomDb) ? sgn(st.headroomDb) : '-'} dB: ${LEVEL_WORD[st.level] || st.level}`, severity: st.level === 'compressed' ? 'warning' : st.level === 'hot' ? 'info' : 'ok' });
+  }
+  return rows;
+}
+
+/** Analogue versus digital rows from modeReport(): [{ label, value, severity }] and a plain-language line. Pure. */
+export function modeContrast(m) {
+  if (!m || !m.analog || !m.digital) return null;
+  const a = m.analog, d = m.digital, cl = d.cliff || {};
+  const rows = [
+    { label: 'Receiver input', value: `${m.inputDbm.toFixed(1)} dBm, CNR ${m.cnrDb.toFixed(1)} dB`, severity: 'ok' },
+    { label: 'Analogue FM', value: `${Math.round(a.occupiedBwKHz)} kHz wide, threshold CNR ${a.thresholdCnrDb.toFixed(0)} dB (${sgn(a.thresholdMarginDb)} dB), audio SNR ${a.audioSnrDb.toFixed(1)} dB, quality ${Math.round(a.quality)} %: ${a.usable ? 'USABLE' : 'NOISY'}`, severity: a.usable ? 'ok' : a.quality > 20 ? 'info' : 'warning' },
+    { label: 'Digital', value: `${Math.round(d.occupiedBwKHz)} kHz wide, ${String(d.state).toUpperCase()}${d.order ? `, ${d.order}-point` : ''}, frame errors ${(d.frameErrorRate * 100).toFixed(d.frameErrorRate < 0.1 ? 2 : 0)} %, quality ${Math.round(d.quality)} %, ${sgn(d.concealMarginDb)} dB from the conceal point`, severity: /down|mute/i.test(d.state) ? 'warning' : /degrad|conceal/i.test(d.state) ? 'info' : 'ok' },
+    { label: 'Digital cliff', value: `${fin(cl.cliffWidthDb) ? cl.cliffWidthDb.toFixed(1) : '-'} dB wide, from degraded to down`, severity: 'ok' },
+  ];
+  const w = fin(cl.cliffWidthDb) ? cl.cliffWidthDb : 0;
+  const line = `Analogue FM fades gradually: audio SNR falls about 1 dB for each dB of signal, so a weak link gets hissy long before it fails. Digital stays clean until the cliff, then drops from good to muted within about ${w.toFixed(1)} dB. ${d.quality < 50 && a.quality > 5 ? 'At this level the digital link has already fallen off the cliff while analogue is still audible.' : d.quality >= 90 ? 'At this level digital is clean.' : ''}`.trim();
+  return { rows, line };
+}
+
 export function budgetExtras(r, fr = null, more = []) {
   const rows = [];
   if (!r) return rows;
@@ -42,6 +72,6 @@ export function budgetExtras(r, fr = null, more = []) {
     const rise = fin(wn.riseDb) ? wn.riseDb : 0, ch = fin(wn.marginChangeDb) ? wn.marginChangeDb : 0;
     rows.push({ label: 'Video wall noise', value: `${wn.dbm.toFixed(1)} dBm in ${fin(wn.bandwidthKHz) ? Math.round(wn.bandwidthKHz) : '-'} kHz, noise floor +${rise.toFixed(1)} dB, margin ${ch >= 0 ? '+' : ''}${ch.toFixed(1)} dB${rise >= 3 ? ' WARNING' : ''}`, severity: rise >= 3 ? 'warning' : rise >= 0.5 ? 'info' : 'ok' });
   }
-  rows.push(...extra, ...more);
+  rows.push(...compressionRows(r.compression), ...extra, ...more);
   return rows;
 }
