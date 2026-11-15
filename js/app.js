@@ -495,6 +495,12 @@ try {
   mountSpectrumMap({ button: $('btn-map'), store });
 } catch (err) { console.error('spectrum map', err); $('btn-map').hidden = true; }
 
+// coordination lab pop-out (optional)
+try {
+  const { mountCoordLab } = await import('./view/coordLab.js');
+  mountCoordLab({ button: $('btn-lab'), store });
+} catch (err) { console.error('coordination lab', err); $('btn-lab').hidden = true; }
+
 // venue underlay button and dialog (optional: a failure must not break the planner)
 try {
   const { mountVenue } = await import('./ui/venue.js');

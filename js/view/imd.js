@@ -3,7 +3,7 @@
 import { createCanvasHost, activeLink, setFont, haloText } from './util.js';
 import { imd } from '../imdTracker.js';
 import { formatPower } from '../model/units.js';
-import { evenOrderImd } from '../model/imd.js';
+import { evenOrderImd, imdSummary } from '../model/imd.js';
 import { createZoom, decimate } from './spectraZoom.js';
 
 const MIN_SPAN = 0.04;
@@ -18,6 +18,11 @@ export function zoomAxis(view, factor, at = 0.5) {
 export function panAxis(view, frac) {
   const span = view.b - view.a, a = Math.min(1 - span, Math.max(0, view.a + frac * span));
   return { a, b: a + span };
+}
+/** Distinct third-order products on wanted channels (imdSummary.inChannelThirdOrderDistinctCount); falls back to the row count if the summary fails. */
+export function distinctThird(scene, state) {
+  try { const v = imdSummary(scene).inChannelThirdOrderDistinctCount; if (Number.isFinite(v)) return v; } catch { /* fall through */ }
+  return state && state.coordination ? state.coordination.length : 0;
 }
 export const FULL_VIEW = Object.freeze({ a: 0, b: 1 });
 
@@ -79,6 +84,7 @@ export function mountImd({ container, store }) {
   const sweep = el('canvas', 'imd-sweep');
   const slopes = el('p', 'hint imd-slopes');
   const coordH = el('h3', 'cv-sug-h', 'Coordination check');
+  const coordHead = el('p', 'imd-headline', '', { role: 'status' }), coordSub = el('p', 'hint imd-headline-sub', '');
   const tableWrap = el('div', 'cv-table-wrap');
   const table = el('table', 'cv-table');
   table.innerHTML = '<thead><tr><th scope="col">Product</th><th scope="col">Lands on</th><th class="num" scope="col">Offset</th><th class="num" scope="col">C/I</th><th scope="col">Severity</th></tr></thead><tbody></tbody>';
@@ -90,7 +96,7 @@ export function mountImd({ container, store }) {
   evenTable.innerHTML = '<caption class="hint">Products of the transmitter tones in the nonlinear stage, and radiated second harmonics. Levels are at the receiver input.</caption><thead><tr><th scope="col">Product</th><th class="num" scope="col">Frequency</th><th class="num" scope="col">Level</th><th scope="col">Lands in</th><th scope="col">Severity</th></tr></thead><tbody></tbody>';
   const evenBody = evenTable.querySelector('tbody'); evenWrap.append(evenTable);
   const evenNote = el('p', 'hint imd-even-note');
-  body.append(legend, spec, nums, sweepH, sweep, slopes, coordH, tableWrap, evenH, evenNote, evenWrap, note);
+  body.append(legend, spec, nums, sweepH, sweep, slopes, coordH, coordHead, coordSub, tableWrap, evenH, evenNote, evenWrap, note);
   container.append(h2, msg, body);
 
   // legend (DOM, so it wraps on phones)
@@ -283,7 +289,7 @@ export function mountImd({ container, store }) {
     if (!state) return 'The intermod demo is off.';
     const n = state.noise, unit = scene.units.power;
     if (id === 'sweep') return `Worst product level and noise floor rise against the distance between the receive antenna and the nearest transmitter. ${slopes.textContent} ${viewText(id)}`.trim();
-    return `${scene.imd.transmitters.length} carriers, noise floor rise ${n.riseDb.toFixed(1)} dB, total floor ${fmtDbm(n.totalDbm, unit)}, ${state.coordination.length} products land on wanted channels. ${viewText(id)}`;
+    return `${scene.imd.transmitters.length} carriers, noise floor rise ${n.riseDb.toFixed(1)} dB, total floor ${fmtDbm(n.totalDbm, unit)}, ${distinctThird(scene, state)} distinct third-order products land on wanted channels (${state.coordination.length} in all mechanisms and orders). ${viewText(id)}`;
   }
   function tableOf(id) {
     if (!state) return { caption: '', cols: [], rows: [] };
@@ -316,7 +322,7 @@ export function mountImd({ container, store }) {
     nEls.th.textContent = fmtDbm(n.thermalDbm, unit); nEls.im.textContent = fmtDbm(n.imSumDbm, unit);
     nEls.sk.textContent = fmtDbm(n.txNoiseSkirtDbm, unit); nEls.de.textContent = `${n.desenseDb.toFixed(1)} dB`;
     nEls.tot.textContent = fmtDbm(n.totalDbm, unit); nEls.rise.textContent = `+${n.riseDb.toFixed(1)} dB`;
-    spec.setAttribute('aria-label', `Intermod spectrum with ${scene.imd.transmitters.length} carriers. Noise floor rise ${n.riseDb.toFixed(1)} dB. ${state.coordination.length} products land on wanted channels. Press Enter to enlarge.`);
+    spec.setAttribute('aria-label', `Intermod spectrum with ${scene.imd.transmitters.length} carriers. Noise floor rise ${n.riseDb.toFixed(1)} dB. ${distinctThird(scene, state)} distinct third-order products land on wanted channels. Press Enter to enlarge.`);
     const sp = state.sweep;
     const parts = [];
     if (sp) {
@@ -326,6 +332,7 @@ export function mountImd({ container, store }) {
       }
     }
     slopes.textContent = parts.length ? parts.join('; ') + '.' : '';
+    { const d3 = distinctThird(scene, state); coordHead.textContent = `${d3} distinct third-order product${d3 === 1 ? '' : 's'} land${d3 === 1 ? 's' : ''} on wanted channels.`; coordSub.textContent = `All mechanisms and orders, one row per mechanism: ${state.coordination.length} (the same frequency is counted again for each mechanism that makes it, and fifth-order products are included).`; }
     tbody.textContent = '';
     const byId = new Map(scene.imd.transmitters.map((t) => [t.id, t]));
     const rows = state.coordination.slice(0, 12);

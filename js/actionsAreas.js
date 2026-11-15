@@ -324,3 +324,22 @@ export function setTvChannelWidth(store, mhz) {
   store.update((d) => { d.tvChannelWidthMHz = mhz; });
   return true;
 }
+
+// ---- coordination lab ---------------------------------------------------------------------------------------------------
+
+/**
+ * applyFrequencyPlan(store, assignments): assignments = [{ id, freqMHz }] for links and Intermod transmitters (matched by id). One undoable update.
+ * Unknown ids and non-positive or non-finite frequencies are ignored. Returns the number of frequencies written.
+ */
+export function applyFrequencyPlan(store, assignments) {
+  const list = (Array.isArray(assignments) ? assignments : []).filter((a) => a && typeof a.id === 'string' && Number.isFinite(a.freqMHz) && a.freqMHz > 0 && a.freqMHz < 100000);
+  let n = 0;
+  if (!list.length) return 0;
+  store.update((d) => {
+    for (const a of list) {
+      const t = (d.links || []).find((l) => l.id === a.id) || ((d.imd && d.imd.transmitters) || []).find((x) => x.id === a.id);
+      if (t) { t.freqMHz = Math.round(a.freqMHz * 1e6) / 1e6; n++; }
+    }
+  });
+  return n;
+}

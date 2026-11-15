@@ -10,7 +10,7 @@ import {
 } from '../model/spectrum-map.js';
 import { setTvChannelWidth } from '../actionsAreas.js';
 
-export const PAD = 14, MAX_K = 40, MIN_PX = 3;
+export const PAD = 14, MAX_K = 40, MIN_PX = 3, FIT_MIN_K = 0.4;
 export const FLAG_TEXT = Object.freeze({
   S: 'S, stated: a defined standard or a figure read from a source.',
   I: 'I, inferred: recalled from the regulation, not read from the primary page.',
@@ -27,10 +27,13 @@ const fmtF = (f) => (f >= 1000 ? `${(f / 1000).toFixed(4).replace(/0+$/, '').rep
 
 // ------------------------------------------------------------------------------------------------ pure axis view
 /** mapView(segId | null, cw) -> { segId, width, k, segments: [{...segment, px0, px1, k}], breaks: [{px0, px1, fromMHz, toMHz}] }. null is the overview at scale 1 (scrolls). */
-export function mapView(segId, cw = 800) {
+export function mapView(segId, cw = 800, fit = false) {
   const L = axisLayout();
   const s = segId ? L.segments.find((q) => q.id === segId) : null;
-  if (!s) return { segId: null, k: 1, width: Math.max(cw, L.totalPx + 2 * PAD), segments: L.segments.map((q) => ({ ...q, px0: PAD + q.x0, px1: PAD + q.x1, k: 1 })), breaks: L.breaks.map((b) => ({ ...b, px0: PAD + b.x0, px1: PAD + b.x1 })) };
+  if (!s) {
+    const kf = (cw - 2 * PAD) / L.totalPx, k = fit && kf >= FIT_MIN_K ? Math.min(kf, 1.5) : 1; // fit only when it stays readable, else full size and scroll
+    return { segId: null, k, fitted: k !== 1 || (fit && kf >= FIT_MIN_K), full: L.totalPx + 2 * PAD, width: Math.max(cw, L.totalPx * k + 2 * PAD), segments: L.segments.map((q) => ({ ...q, px0: PAD + q.x0 * k, px1: PAD + q.x1 * k, k })), breaks: L.breaks.map((b) => ({ ...b, px0: PAD + b.x0 * k, px1: PAD + b.x1 * k })) };
+  }
   const k = clamp((cw - 2 * PAD) / s.widthPx, 0.3, MAX_K);
   return { segId: s.id, k, width: Math.max(cw, s.widthPx * k + 2 * PAD), segments: [{ ...s, px0: PAD, px1: PAD + s.widthPx * k, k }], breaks: [] };
 }
@@ -80,8 +83,8 @@ const ROW = 20, HEAD = 36, AXIS_Y = 40;
  * buildMap(opts) -> the whole drawing as data. opts: { segId, cw, scene, showTv, showOcc, occSetting, env }.
  * Returns { view, width, height, bands, markers, overlaps, offAxis, tv, wifi, noise, strip, hits, y: {...} }.
  */
-export function buildMap({ segId = null, cw = 800, scene = null, showTv = true, showOcc = true, occSetting = null, env = 'quiet' } = {}) {
-  const view = mapView(segId, cw);
+export function buildMap({ segId = null, cw = 800, fit = false, scene = null, showTv = true, showOcc = true, occSetting = null, env = 'quiet' } = {}) {
+  const view = mapView(segId, cw, fit);
   const tvWidth = tvWidthOf(scene), regions = regionsFor(tvWidth);
   const out = { view, tvWidth, hits: [], y: {} };
   let y = AXIS_Y + 22;
@@ -224,8 +227,10 @@ export function drawMap(ctx, w, h, th, map, { hoverPx = null, selected = null } 
     ctx.save(); ctx.beginPath(); ctx.rect(s.px0, 0, Math.max(0, s.px1 - s.px0), AXIS_Y - 2); ctx.clip();
     ctx.fillStyle = th.ink; setFont(ctx, th, 12, 'bold'); ctx.textAlign = 'left'; ctx.textBaseline = 'top';
     ctx.fillText(s.id, s.px0 + 3, 3);
-    ctx.fillStyle = th.inkSoft; setFont(ctx, th, 11); ctx.fillText(s.label, s.px0 + 3 + tw(s.id, 12) + 6, 4);
-    ctx.fillStyle = th.inkSoft; ctx.fillText(`${s.startMHz}-${s.endMHz} MHz`, s.px0 + 3, 19);
+    const sw = s.px1 - s.px0 - 6, range = `${s.startMHz}-${s.endMHz} MHz`;
+    ctx.fillStyle = th.inkSoft; setFont(ctx, th, 11);
+    if (tw(s.id, 12) + 6 + tw(s.label, 11) <= sw) ctx.fillText(s.label, s.px0 + 3 + tw(s.id, 12) + 6, 4); // a label that does not fit is left out (the segment list and info carry it)
+    if (tw(range, 11) <= sw) ctx.fillText(range, s.px0 + 3, 19); else if (tw(`${s.startMHz}`, 11) <= sw) ctx.fillText(`${s.startMHz}`, s.px0 + 3, 19);
     ctx.restore();
     if (!view.segId) { ctx.strokeStyle = th.grid; ctx.strokeRect(s.px0 + 0.5, 1.5, Math.max(0, s.px1 - s.px0 - 1), AXIS_Y - 5); ctx.strokeStyle = th.ink; }
   }
@@ -316,11 +321,11 @@ export function drawMap(ctx, w, h, th, map, { hoverPx = null, selected = null } 
 // ------------------------------------------------------------------------------------------------ DOM
 export function mountSpectrumMap({ doc = document, button, store, hostFactory = (c, d) => createCanvasHost(c, d) } = {}) {
   const el = (tag, cls, text, attrs) => { const e = doc.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; if (attrs) for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); return e; };
-  const st = { segId: null, showTv: true, showOcc: true, occ: { 6: 'us-top10', 8: 'uk-city' }, env: 'quiet', selected: null, hoverPx: null };
+  const st = { segId: null, fit: true, showTv: true, showOcc: true, occ: { 6: 'us-top10', 8: 'uk-city' }, env: 'quiet', selected: null, hoverPx: null };
   let map = null, scroll = null;
   const width = () => tvWidthOf(store.getScene());
   const cw = () => (scroll && scroll.clientWidth) || 800;
-  const build = () => buildMap({ segId: st.segId, cw: cw(), scene: store.getScene(), showTv: st.showTv, showOcc: st.showOcc, occSetting: st.occ[width()], env: st.env });
+  const build = () => buildMap({ segId: st.segId, cw: cw(), fit: st.fit, scene: store.getScene(), showTv: st.showTv, showOcc: st.showOcc, occSetting: st.occ[width()], env: st.env });
   const segLabel = (id) => { const s = axisLayout().segments.find((q) => q.id === id); return s ? `${s.id}: ${s.label}, ${s.startMHz}-${s.endMHz} MHz` : ''; };
 
   const zoom = createZoom({
@@ -365,8 +370,10 @@ export function mountSpectrumMap({ doc = document, button, store, hostFactory = 
   const envSel = el('select', null, null, { 'aria-label': 'Noise environment for the simulated noise floor' });
   for (const [v, t] of ENVIRONMENTS) { const o = el('option', null, t, { value: v }); envSel.append(o); }
   envSel.addEventListener('change', () => { st.env = envSel.value; refresh(); });
+  const fitChk = chk('Fit the whole axis to the window when it stays readable (untick for full size and scroll)', 'fit');
+  const scrollHint = el('p', 'map-scrollhint', '', { role: 'status' });
   const illus = el('p', 'map-illus', `${ILLUSTRATIVE}: TV occupancy and the noise floor are simulated to show how the tools look, not measurements of any site.`, { role: 'note' });
-  bar.append(nav, widthBox, tvChk.lab, occChk.lab, occSel, envSel);
+  bar.append(nav, widthBox, fitChk.lab, tvChk.lab, occChk.lab, occSel, envSel);
 
   const segList = el('details', 'map-list'); segList.append(el('summary', null, 'Zoom to a segment (keyboard list)'));
   const segWrap = el('div', 'map-btns'); segList.append(segWrap);
@@ -379,7 +386,7 @@ export function mountSpectrumMap({ doc = document, button, store, hostFactory = 
   const warn = el('p', 'map-warn', '', { role: 'status' });
   const info = el('div', 'map-info', null, { role: 'region', 'aria-label': 'Band information', 'aria-live': 'polite', tabindex: '-1' });
   const note = el('p', 'hint', 'Gaps between segments are removed and shown as // so one axis reaches 5.8 GHz. Click a segment name to zoom in, or a band for its details. Regional rules differ.');
-  zoom.slot.append(bar, illus, warn, note, segList, bandList, info);
+  zoom.slot.append(bar, scrollHint, illus, warn, note, segList, bandList, info);
 
   function showInfo(hit) {
     info.textContent = '';
@@ -399,6 +406,8 @@ export function mountSpectrumMap({ doc = document, button, store, hostFactory = 
     canvas.style.width = `${map.width}px`; canvas.style.height = `${map.height}px`;
     const w = map.tvWidth;
     for (const k of Object.keys(radios)) radios[k].checked = Number(k) === w;
+    fitChk.c.checked = st.fit; fitChk.c.disabled = !!st.segId;
+    scrollHint.textContent = map.width > cw() + 2 ? `Scroll sideways: the map is ${Math.round(map.width)} px wide and the window shows ${cw()} px. Use the zoom buttons below to jump to a segment.` : (!st.segId && map.view.k !== 1 ? `Whole axis fitted to the window (scale ${map.view.k.toFixed(2)}); untick Fit for full size.` : '');
     tvChk.c.checked = st.showTv; occChk.c.checked = st.showOcc; occChk.c.disabled = !st.showTv;
     occSel.textContent = '';
     for (const k of occupancyChoices(w)) occSel.append(el('option', null, k, { value: k }));

@@ -4,11 +4,12 @@
 import { applyFmPreset } from './model/fm-presets.js';
 import { solveLink, chainLossDb } from './model/rf.js';
 import { overloadStep } from './model/overload.js';
+import { squelchState } from './model/squelch.js';
 import { RX_PRESETS } from './model/rx-params.js';
 import { imdSummary, evenOrderImd } from './model/imd.js';
 import { toneMpxReport } from './model/tone-mpx.js';
-import { createPerson, personLinkName, offsetFromPack, DEFAULT_MIC_OFFSET, DEFAULT_IEM_OFFSET } from './model/people.js';
-import { wallNoiseSourcesFromReflectors, createNoiseSource, engCrewSources, noiseSourceAt } from './model/noise-sources.js';
+import { createPerson, personLinkName, offsetFromPack, rotateOffset, personPackPositions, DEFAULT_MIC_OFFSET, DEFAULT_IEM_OFFSET } from './model/people.js';
+import { wallNoiseSourcesFromReflectors, createNoiseSource, engCrewSources, noiseSourceAt, noiseEvents } from './model/noise-sources.js';
 import { tvChannelList, tvChannelOf } from './model/spectrum-map.js';
 import { createDefaultScene, createDefaultLink, createChainItem, createReflector, createBranch, createZone, createDefaultImd, createImdTransmitter, createPlatform, createAudience, createCeiling, createChainItemFromPreset, newId, syncScene, migrateAntennaPolarisation } from './model/scene.js';
 
@@ -769,6 +770,105 @@ export function bandPeopleScene() {
       s.links.push(mic, iem); s.people.push(person);
     }
     void l0;
+  });
+}
+
+/** Move a person of a scene and carry their packs with them (pure twin of actions.movePerson): the links keep the person's stored offsets. */
+export function movePersonInScene(scene, personName, pos) {
+  const sc = structuredClone(scene), p = sc.people.find((x) => x.name === personName);
+  p.pos = { x: pos.x, y: pos.y };
+  const packs = personPackPositions(p);
+  const mic = sc.links.find((l) => l.id === p.micLinkId), iem = sc.links.find((l) => l.id === p.iemLinkId);
+  if (mic && packs.mic) mic.tx.pos = packs.mic;
+  if (iem && packs.iem) iem.rx.pos = packs.iem;
+  return sc;
+}
+/** Margins of the links of a scene by name: { 'Anna mic': dB, ... }. */
+export const linkMargins = (scene) => Object.fromEntries(scene.links.map((l) => [l.name, solveLink(scene, l).marginDb]));
+/** The singer's walk in the four-piece band: from the start (8, 7.5) at the centre of the stage to the stage-right front corner. */
+export const BAND_WALK_TO = Object.freeze({ x: 14.5, y: 8.5 });
+export const bandWalkEndScene = () => movePersonInScene(bandPeopleScene(), 'Anna', BAND_WALK_TO);
+
+/**
+ * Presenter with a backup bodypack (people model): one person, a main mic bodypack on the belt (owned by the person, follows them) and a hot-spare backup
+ * bodypack on the other hip on its own frequency (a second mic link beside it; the people model gives a person one mic link, so the spare is not owned
+ * and does not follow a move). FOH receivers 12 m away. Frequencies from the third-order clean IEM8 plan (illustrative).
+ */
+export const PRESENTER_PLAN_MHZ = Object.freeze({ main: 606.1, backup: 607.3, iem: 614.1 });
+export function presenterScene() {
+  return make('mic', (s) => {
+    s.stage = { width: 20, depth: 14 }; s.environment.floor = 'wood';
+    s.links = []; s.people = [];
+    const person = createPerson({ name: 'Presenter', role: 'presenter', colour: 'teal', pos: { x: 10, y: 12 }, facingDeg: 180 });
+    const rxAt = (l) => { l.rx.pos = { x: 10, y: 0.8, z: 1.5 }; l.rx.diversity.antennaB.pos = { x: 10.6, y: 0.8, z: 1.5 }; l.chain = [createChainItem('cable', { cableType: 'lmr-240', lengthM: 10 })]; };
+    const abs = (o) => { const r = rotateOffset(o, person.facingDeg); return { x: person.pos.x + r.x, y: person.pos.y + r.y, z: r.z }; };
+    const mic = createDefaultLink('mic'); mic.name = 'Presenter mic'; mic.freqMHz = PRESENTER_PLAN_MHZ.main; rxAt(mic); mic.tx.pos = abs(DEFAULT_MIC_OFFSET.bodypack);
+    const backup = createDefaultLink('mic'); backup.name = 'Presenter backup pack'; backup.freqMHz = PRESENTER_PLAN_MHZ.backup; rxAt(backup);
+    backup.tx.pos = abs({ dx: -DEFAULT_MIC_OFFSET.bodypack.dx, dy: DEFAULT_MIC_OFFSET.bodypack.dy, dz: DEFAULT_MIC_OFFSET.bodypack.dz });
+    const iem = createDefaultLink('iem'); iem.name = personLinkName(person, 'iem'); iem.freqMHz = PRESENTER_PLAN_MHZ.iem;
+    iem.tx.pos = { x: 10, y: 0.8, z: 2.0 }; iem.tx.powerDbm = 14; iem.rx.pos = abs(DEFAULT_IEM_OFFSET);
+    person.micLinkId = mic.id; person.iemLinkId = iem.id;
+    person.micOffset = offsetFromPack(person, mic.tx.pos); person.iemOffset = offsetFromPack(person, iem.rx.pos);
+    s.links.push(mic, backup, iem); s.people.push(person);
+  });
+}
+
+/**
+ * Two mics on one weak TV block (item 22 follow-up): weakTvScene('on-channel') with a second mic 1.0 MHz above the first, both inside the flat part of
+ * UK channel 33 (570.4 and 571.4 MHz), and the IMD panel on with the two mics: the TV block noise is shared (same level in both 200 kHz channels), the
+ * third-order products 569.4 and 572.4 MHz fall a full MHz from either channel, so the usual coordination rules still apply.
+ */
+export const WEAK_TV_SECOND_MIC_MHZ = 571.4;
+export function weakTvTwoMicScene() {
+  const s = weakTvScene('on-channel');
+  const a = s.links[0], b = createDefaultLink('mic');
+  b.name = 'Mic 2 at FOH'; b.freqMHz = WEAK_TV_SECOND_MIC_MHZ; b.tx.pos = { x: 3, y: 12, z: 1.5 }; b.tx.antenna = structuredClone(a.tx.antenna); b.rx.antenna = structuredClone(a.rx.antenna);
+  b.rx.pos = { x: 22, y: 11, z: 1.2 }; b.rx.diversity.antennaB.pos = { x: 22, y: 10.4, z: 1.2 }; b.chain = structuredClone(a.chain);
+  a.name = 'Mic 1 at FOH';
+  s.links.push(b);
+  const m = createDefaultImd(); m.enabled = true; m.rxAntennaPos = { ...a.rx.pos }; m.rxAntenna = structuredClone(a.rx.antenna);
+  m.transmitters = [['Mic 1', a.freqMHz, a.tx.pos], ['Mic 2', b.freqMHz, b.tx.pos]].map(([name, f, pos]) => createImdTransmitter({ name, freqMHz: f, powerDbm: 14, pos: { ...pos } }));
+  s.imd = m;
+  return syncScene(s);
+}
+
+/**
+ * Squelch noise burst: the speedlight geometry of noise-flash-at-pit, moved well away from the FOH receive antenna, and the mic transmitter off between
+ * songs (carrier absent). The squelch is set at -90 dBm with 3 dB of hysteresis, above the average floor but below the peak of each flash: every flash opens
+ * the gate for its 1 ms pulse (a pop or a burst of hiss), while the average noise alone never does.
+ */
+export function squelchBurstScene() {
+  return make('mic', (s, l) => {
+    s.stage = { width: 30, depth: 20 }; s.environment.floor = 'wood'; s.environment.model = 'free-space';
+    l.name = 'Mic at FOH (transmitter off)'; l.freqMHz = 606.1; l.tx.pos = { x: 3, y: 10, z: 1.5 }; l.tx.powerDbm = -60; l.tx.antenna = omni(); l.rx.antenna = omni();
+    l.rx.pos = { x: 22, y: 10, z: 1.2 }; l.rx.diversity.antennaB.pos = { x: 22, y: 9.4, z: 1.2 };
+    l.chain = [createChainItem('cable', { cableType: 'lmr-240', lengthM: 5 })];
+    l.rx.squelch = { enabled: true, thresholdDbm: -90, hysteresisDb: 3 };
+    s.noiseSources = [createNoiseSource('speedlight-flash', { name: 'Photographer speedlight', pos: { x: 0.5, y: 14, z: 1.5 } })];
+  });
+}
+/** squelchBurstReport(seconds = 10) -> the noise in the channel, the squelch states and the event timeline of the speedlight. */
+export function squelchBurstReport(seconds = 10) {
+  const sc = squelchBurstScene(), l = sc.links[0], r = solveLink(sc, l), n = r.noiseSources, src = n.sources[0];
+  const floor = n.floorBeforeDbm, sum = (a, b) => 10 * Math.log10(Math.pow(10, a / 10) + Math.pow(10, b / 10));
+  const idle = sum(floor, src.averageDbm), burst = sum(floor, src.peakDbm);
+  const q = l.rx.squelch;
+  const ev = noiseEvents(sc.noiseSources[0], seconds);
+  return {
+    scene: sc, floorDbm: floor, avgDbm: src.averageDbm, peakDbm: src.peakDbm, distanceM: src.distanceM, idleLevelDbm: idle, burstLevelDbm: burst, thresholdDbm: q.thresholdDbm,
+    idleOpen: squelchState(false, idle, q).open, burstOpen: squelchState(false, burst, q).open, headroomBurstDb: burst - q.thresholdDbm, headroomIdleDb: idle - q.thresholdDbm,
+    events: ev.length, openMs: ev.reduce((a, e) => a + (e.t1 - e.t0) * 1000, 0), seconds,
+  };
+}
+
+/** Coordination examples as IMD scenes the lab can load: three 14 dBm mics at similar distance, the first is the wanted one. */
+export const COORD_PLANS_MHZ = Object.freeze({ equal: [600.0, 600.4, 600.8], spread: [600.0, 601.0, 603.3] });
+export function coordScene(which) {
+  const f = COORD_PLANS_MHZ[which];
+  return imdScene('mic', f[0], f.map((fm, i) => [`Mic ${i + 1}${i === 0 ? ' (wanted)' : ''}`, fm, 14, 7.5 + i * 0.3, 4, 1.5]), {}, (s, l) => {
+    s.stage = { width: 14, depth: 10 }; s.environment.floor = 'wood';
+    l.rx.pos = { x: 11, y: 4, z: 1.2 }; l.rx.diversity.antennaB.pos = { x: 11, y: 3.4, z: 1.2 };
+    s.imd.rxAntennaPos = { ...l.rx.pos };
   });
 }
 
@@ -1707,6 +1807,42 @@ export const EXAMPLES = [
     title: 'Strong TV: the failure contrast, a strong signal in the channel',
     note: 'Problem: the same mic on channel 33 where the block is strong (-45 dBm at the antenna, assumed) puts -60.8 dBm of noise in the 200 kHz channel. The floor rises 51.2 dB and only 3.7 dB of margin is left, so the link is marginal. A strong broadcast channel is not usable: pick another one.',
     build: () => ({ scene: weakTvScene('strong-cochannel') }),
+  },
+  {
+    id: 'presenter-with-backup-bodypack',
+    title: 'Presenter: a main bodypack and a hot-spare backup',
+    note: 'Best practice: a presenter wears the main mic bodypack on the belt and a hot-spare backup on the other hip, 0.3 m apart, on a different frequency (607.3 against 606.1 MHz) so the two never share a channel. At 11 m the margins are 34.6 dB (main) and 34.0 dB (backup), and with the IEM at 614.1 MHz no third-order product comes closer than 1200 kHz to any channel. The person owns the main mic and the IEM, so moving them carries both; the spare is a separate link and stays put (a person has one mic link). Frequencies are illustrative.',
+    build: () => ({ scene: presenterScene() }),
+  },
+  {
+    id: 'two-mics-one-weak-tv-block',
+    title: 'Weak TV: two mics sharing one weak block',
+    note: 'Less ideal: two mics 1.0 MHz apart (570.4 and 571.4 MHz) both sit on the weak channel 33 block (-85 dBm at the antenna, assumed). The TV noise is the same in both 200 kHz channels (-100.8 dBm, floor +11.5 dB), leaving 43.3 dB and 43.4 dB of margin. Their two third-order products, 569.4 and 572.4 MHz, land 1000 kHz from the nearest channel, so the IMD panel shows no hit; a third mic still needs a coordinated frequency.',
+    build: () => ({ scene: weakTvTwoMicScene() }),
+  },
+  {
+    id: 'squelch-noise-burst',
+    title: 'Squelch: a flash burst opens the gate',
+    note: 'Problem: a photographer speedlight 21.9 m from the FOH antenna is a 1 ms click 3 times a second: -70.5 dBm at its peak, -95.8 dBm on average, against a floor of -112.0 dBm. With the mic transmitter off the idle level is -95.7 dBm, 5.7 dB under the -90 dBm squelch, but each flash reaches -70.5 dBm, 19.5 dB over it, so in 10 s the gate opens 30 times for 30 ms and the desk hears pops. A carrier squelch cannot tell a flash from a mic: a pilot squelch needs a locked pilot and ignores it.',
+    build: () => ({ scene: squelchBurstScene() }),
+  },
+  {
+    id: 'band-four-piece-walk',
+    title: 'Four-piece band: the singer walks, her packs go with her',
+    note: 'Compare: Anna walks from the middle of the stage (8, 7.5) to the stage-right front (14.5, 8.5) and her handheld and IEM pack move with her, offsets kept. Her mic margin falls from 36.8 to 30.7 dB (-6.1 dB) while her IEM rises from 36.8 to 47.7 dB (+10.9 dB) because she is nearer the IEM antenna. The other six links do not change (0.0 dB). The scene is the start; the walk moves her mic only.',
+    build: () => ({ scene: bandPeopleScene(), walk: { to: { ...bandWalkEndScene().links[0].tx.pos }, speedMps: 0.8, pingPong: true } }),
+  },
+  {
+    id: 'coord-equal-spacing',
+    title: 'Coordination: three mics equally spaced by 400 kHz',
+    note: 'Problem: three mics at 600.0, 600.4 and 600.8 MHz: 2f2-f1 lands on mic 3, 2f2-f3 on mic 1 and f1+f3-f2 on mic 2, three distinct third-order hits (two 2-mic, one 3-mic; the panel lists 8 products counting fifth order and the reverse path). The products reach -67.4 dBm in the channel and lift the worst floor by 45.6 dB. Load it in the coordination lab and compare it with the spread plan.',
+    build: () => ({ scene: coordScene('equal') }),
+  },
+  {
+    id: 'coord-spread-plan',
+    title: 'Coordination: the same three mics on a spread plan',
+    note: 'Best practice: the same mics at 600.0, 601.0 and 603.3 MHz: no third-order product comes closer than 1000 kHz to a channel (hand: 2f2-f1 = 602.0, 2f1-f2 = 599.0, f1+f3-f2 = 602.3, f2+f3-f1 = 604.3). Nothing lands in a channel, so the products add no noise; the floor still rises 9.4 dB from the transmitter noise skirts of mics about 3 m away (assumed model). The wanted mic keeps 50.9 dB of margin, the same as in the equal plan.',
+    build: () => ({ scene: coordScene('spread') }),
   },
 ];
 

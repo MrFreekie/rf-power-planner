@@ -877,3 +877,23 @@ body.vnalab-open { overflow: hidden; }
 .map-flag { font-weight: 700; }
 .spectrum-dialog .map-bar, .spectrum-dialog .map-list, .spectrum-dialog .map-info, .spectrum-dialog .map-illus, .spectrum-dialog .map-warn { margin-left: 14px; margin-right: 14px; }
 @media (max-width: 480px) { .map-dialog { width: 100vw; max-width: 100vw; } }
+
+/* coordination lab pop-out */
+.lab-dialog { width: min(96vw, 1100px); max-width: 96vw; }
+.lab-canvas { display: block; touch-action: none; max-width: none; cursor: default; }
+.lab-canvas:focus-visible { outline: 3px solid var(--focus); outline-offset: -3px; box-shadow: none; }
+.lab-hits { margin: 6px 14px; font-size: 13px; font-weight: 600; }
+.lab-hits[data-ok="false"] { color: var(--warn-text); }
+.lab-list { list-style: none; margin: 4px 14px; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 4px 12px; }
+.lab-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; font-size: 13px; }
+.lab-row input[type="number"] { width: 90px; min-height: 32px; }
+.lab-name { min-width: 90px; }
+.lab-cand { margin: 0 14px; max-height: 260px; }
+.lab-candsum { margin: 4px 14px; }
+.lab-dialog .cv-sug-h { margin: 8px 14px 2px; font-size: 14px; }
+.imd-headline { margin: 4px 0 0; font-weight: 700; }
+.imd-headline-sub { margin: 0 0 6px; }
+@media (max-width: 480px) { .lab-dialog { width: 100vw; max-width: 100vw; } .lab-list { grid-template-columns: 1fr; } }
+
+.map-scrollhint { margin: 4px 14px; font-size: 13px; font-weight: 600; }
+.map-scrollhint:empty { display: none; }
