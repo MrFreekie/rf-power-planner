@@ -15,6 +15,7 @@ export const TOOLTIPS = Object.freeze({
   'u-mw': 'Show powers in milliwatts.',
   'u-m': 'Show lengths in metres.',
   'u-ft': 'Show lengths in feet.',
+  'btn-cmd': 'Find any command, example or panel by typing. Shortcut: Ctrl+K, or / when you are not typing in a field.',
   'btn-undo': 'Undo the last change (Ctrl+Z).',
   'btn-redo': 'Redo the change you just undid (Ctrl+Shift+Z).',
   'btn-walk-all': 'Walk every microphone and Intermod transmitter together by the same shift. Press again to stop.',

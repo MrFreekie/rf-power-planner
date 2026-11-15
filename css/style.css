@@ -1029,3 +1029,41 @@ body.vnalab-open { overflow: hidden; }
 }
 @media print { body.plan-print #workspace, body.plan-print #brandbar, body.plan-print #toolbar { display: none !important; } }
 @media print { body.plan-print .plan-dialog::backdrop { background: none !important; } }
+
+/* ---- Command palette ---- */
+.cmd-dialog { width: min(92vw, 640px); max-width: 92vw; padding: 12px 14px; border: 1px solid var(--ink); background: var(--paper); color: var(--ink); top: 12vh; margin: 0 auto; }
+.cmd-dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
+.cmd-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; }
+.cmd-label { font-weight: 600; }
+.cmd-input { width: 100%; box-sizing: border-box; font: inherit; font-size: 16px; padding: 8px 10px; min-height: 40px; }
+.cmd-count { margin: 4px 0; font-size: 13px; color: var(--ink-soft); }
+.cmd-list { list-style: none; margin: 0; padding: 0; max-height: 50vh; overflow-y: auto; border: 1px solid var(--line); }
+.cmd-opt { display: flex; align-items: center; gap: 8px; padding: 6px 10px; min-height: 34px; cursor: pointer; border-bottom: 1px solid var(--line); }
+.cmd-opt.active { background: var(--ink); color: var(--paper); }
+.cmd-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.cmd-group { font-size: 12px; opacity: 0.85; white-space: nowrap; }
+.cmd-key { font: 12px var(--mono, monospace); border: 1px solid currentColor; padding: 0 5px; border-radius: 3px; white-space: nowrap; }
+.cmd-hint { margin: 6px 0 0; font-size: 13px; color: var(--ink-soft); }
+@media (max-width: 480px) { .cmd-dialog { width: 100vw; max-width: 100vw; top: 0; } .cmd-group { white-space: normal; max-width: 8em; text-align: right; } }
+@media (pointer: coarse), (max-width: 800px) { .cmd-opt { min-height: 44px; } .cmd-close, .cmd-input { min-height: 44px; } }
+@media print { .cmd-dialog { display: none !important; } }
+
+/* ---- Compare dialog ---- */
+.cmp-dialog { width: min(98vw, 1200px); max-width: 98vw; }
+.cmp-dialog .spectrum-dialog-canvas, .cmp-dialog .spectrum-dialog-table { display: none; }
+.cmp-out h3 { margin: 10px 0 2px; font-size: 14px; }
+.cmp-out h4 { margin: 6px 0 2px; font-size: 13px; }
+.cmp-head { margin: 2px 0; padding-left: 18px; }
+.cmp-head li { margin: 2px 0; }
+.cmp-bars { list-style: none; margin: 2px 0; padding: 0; }
+.cmp-bars li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(80px, 30%); gap: 8px; align-items: center; padding: 2px 0; font-size: 13px; }
+.cmp-bar-track { display: block; height: 10px; border: 1px solid var(--line); }
+.cmp-bar { display: block; height: 100%; }
+.cmp-bar.cmp-pos { background: #3b82c4; }
+.cmp-bar.cmp-neg { background: #d9722e; }
+@media (max-width: 480px) { .cmp-dialog { width: 100vw; max-width: 100vw; } .cmp-bars li { grid-template-columns: 1fr; } }
+@media (pointer: coarse), (max-width: 800px) {
+  .cmp-dialog .meas-bar button, .cmp-dialog .meas-bar select, .cmp-dialog .meas-bar input[type=text] { min-height: 44px !important; }
+}
+@media print { body:not(.report-open) .cmp-dialog { display: none !important; } }
+.cmp-dialog .spectrum-dialog-sum { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

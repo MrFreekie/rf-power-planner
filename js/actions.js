@@ -973,3 +973,12 @@ export function ensureOwnAntennaB(store, linkId) {
   });
   return ok;
 }
+
+/** Replace the whole scene with a copy of `scene` (a Compare snapshot): one undo step, the walk is stopped first. Returns true when applied. */
+export function restoreScene(store, scene) {
+  if (!scene || !Array.isArray(scene.links) || !scene.links.length) return false;
+  stopWalk();
+  const copy = structuredClone(scene);
+  store.update(() => copy);
+  return true;
+}

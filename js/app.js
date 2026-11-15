@@ -559,6 +559,19 @@ try {
   mountMeasure({ button: $('btn-meas'), store });
 } catch (err) { console.error('measurements', err); $('btn-meas').hidden = true; }
 try {
+  const { mountPalette, collectToolbarItems, collectSectionItems, exampleItems } = await import('./ui/commandPalette.js');
+  mountPalette({ button: $('btn-cmd'), getItems: () => [
+    ...collectToolbarItems(document),
+    { id: 'cmd:btn-plan-fit', label: 'Fit all (plan view)', group: 'Command', keywords: 'zoom fit view reset', run: () => { const b = $('btn-plan-fit'); if (b) b.click(); } },
+    ...collectSectionItems(document),
+    ...exampleItems(EXAMPLES, (id) => { applyExample(id); }),
+  ] });
+} catch (err) { console.error('command palette', err); $('btn-cmd').hidden = true; }
+try {
+  const { mountCompare } = await import('./view/compareDialog.js');
+  mountCompare({ button: $('btn-compare'), store });
+} catch (err) { console.error('compare', err); $('btn-compare').hidden = true; }
+try {
   const { mountPlanExport } = await import('./view/planExport.js');
   mountPlanExport({ button: $('btn-plan-export'), store });
 } catch (err) { console.error('plan export', err); $('btn-plan-export').hidden = true; }
