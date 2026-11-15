@@ -111,11 +111,14 @@ export function findItem(scene, id) {
   for (const p of scene.platforms || []) if (p.id === id) return { type: 'platform', item: p };
   for (const a of scene.audience || []) if (a.id === id) return { type: 'audience', item: a };
   for (const o of scene.overheadPanels || []) if (o.id === id) return { type: 'panel', item: o };
+  for (const p of scene.people || []) if (p.id === id) return { type: 'person', item: p };
+  for (const n of scene.noiseSources || []) if (n.id === id) return { type: 'noise', item: n };
   return null;
 }
 /** The link the side view and detail overlays follow: the selection's link, else the first link. */
 export function activeLink(scene, selection) {
   const f = findItem(scene, selection);
+  if (f && f.type === 'person') { const id = f.item.micLinkId || f.item.iemLinkId, l = id && (scene.links || []).find((q) => q.id === id); if (l) return l; }
   return (f && f.link) || (scene.links && scene.links[0]) || null;
 }
 export function selectableIds(scene) {
@@ -125,6 +128,8 @@ export function selectableIds(scene) {
   for (const p of scene.platforms || []) ids.push(p.id);
   for (const a of scene.audience || []) ids.push(a.id);
   for (const o of scene.overheadPanels || []) ids.push(o.id);
+  for (const p of scene.people || []) if (p.pos) ids.push(p.id);
+  for (const n of scene.noiseSources || []) ids.push(n.id);
   return ids;
 }
 

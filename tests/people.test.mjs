@@ -157,3 +157,33 @@ test('four-piece band example: every person has a mic and an IEM, links are name
   // IEM carrier frequencies all differ from the mic frequencies
   assert.equal(new Set(s.links.map((l) => l.freqMHz)).size, 8);
 });
+
+test('names: sanitizeName and migrate strip control characters, trim and cut; clean names and older files are unchanged; validation rejects bad names', async () => {
+  const { sanitizeName, NAME_LIMITS } = await import('../js/model/scene.js');
+  assert.equal(sanitizeName('  Wall\u0000 \u001f A  ', 40, 'x'), 'Wall  A');
+  assert.equal(sanitizeName('Left wall', 40, 'x'), 'Left wall');
+  assert.equal(sanitizeName('a'.repeat(60), 40, 'x'), 'a'.repeat(40));
+  assert.equal(sanitizeName('\u0007  ', 40, 'Reflector'), 'Reflector');
+  assert.equal(sanitizeName(42, 40, 'Reflector'), 'Reflector');
+  const sc = createDefaultScene();
+  const r = { id: 'r1', name: '  Back\u0000wall  ', material: 'brick', p1: { x: 0, y: 0 }, p2: { x: 3, y: 0 }, zMin: 0, zMax: 3 };
+  const bad = structuredClone(sc); bad.reflectors = [{ ...r }];
+  assert.equal(validateScene(bad).ok, false);
+  const m = migrateScene(bad);
+  assert.equal(m.reflectors[0].name, 'Backwall'); assert.equal(validateScene(m).ok, true);
+  const good = structuredClone(sc); good.reflectors = [{ ...r, name: 'Back wall' }];
+  assert.equal(migrateScene(good).reflectors[0].name, 'Back wall');
+  const noName = structuredClone(sc); noName.reflectors = [{ ...r }]; delete noName.reflectors[0].name;
+  assert.equal(migrateScene(noName).reflectors[0].name, undefined);
+  const long = structuredClone(sc); long.reflectors = [{ ...r, name: 'x'.repeat(NAME_LIMITS.reflector + 1) }];
+  assert.equal(validateScene(long).ok, false); assert.equal(migrateScene(long).reflectors[0].name.length, 40);
+  const obj = structuredClone(sc); obj.reflectors = [{ ...r, name: { evil: 1 } }];
+  assert.equal(validateScene(obj).ok, false); assert.equal(migrateScene(obj).reflectors[0].name, 'Reflector');
+  const pe = structuredClone(sc); pe.people = [createPerson({ id: 'p1', name: 'Al\u0001ice ' })];
+  assert.equal(validateScene(pe).ok, false); assert.equal(migrateScene(pe).people[0].name, 'Alice');
+  const { createNoiseSource } = await import('../js/model/noise-sources.js');
+  const ns = structuredClone(sc); ns.noiseSources = [createNoiseSource('led-light-pwm', { id: 'n1', name: ' Hum\u0000mer ' })];
+  assert.equal(validateScene(ns).ok, false); assert.equal(migrateScene(ns).noiseSources[0].name, 'Hummer');
+  const nsLong = structuredClone(sc); nsLong.noiseSources = [createNoiseSource('led-light-pwm', { id: 'n1', name: 'y'.repeat(81) })];
+  assert.equal(validateScene(nsLong).ok, false);
+});

@@ -28,7 +28,7 @@ import { mountCompare } from './ui/compare.js';
 import { mountCoordination } from './ui/coordination.js';
 import { mountGlossary } from './ui/glossary.js';
 import { mountPanels } from './ui/panels.js';
-import { activeLink as pickActiveLink } from './view/util.js';
+import { activeLink as pickActiveLink, solveCached } from './view/util.js';
 import { budgetExtras } from './ui/budgetExtras.js';
 import { fresnelView, fresnelFor } from './view/fresnelDraw.js';
 import { pathRows } from './ui/fields.js';
@@ -360,9 +360,11 @@ function renderWarnings(list) {
   ul.hidden = items.length === 0;
 }
 
+import { peopleBudgetRows } from './ui/peopleUi.js';
+import { noiseBudgetRows, noisePathRows } from './ui/noiseUi.js';
 function renderExtras(r, scene = null, link = null) {
   const dl = $('readout-extra');
-  const rows = budgetExtras(r, fresnelView.on && scene && link ? fresnelFor(scene, link) : null);
+  const rows = budgetExtras(r, fresnelView.on && scene && link ? fresnelFor(scene, link) : null, scene && link ? [...peopleBudgetRows(scene, link, (l) => solveLink(scene, l)), ...noiseBudgetRows(r && r.noiseSources)] : []);
   const sig = JSON.stringify(rows);
   if (dl.dataset.sig === sig) return;
   dl.dataset.sig = sig;
@@ -376,7 +378,7 @@ function renderExtras(r, scene = null, link = null) {
 
 function renderPaths(r, scene) {
   const body = $('paths-body');
-  const rows = r ? pathRows(r, scene, scene.units.length) : [];
+  const rows = r ? [...pathRows(r, scene, scene.units.length), ...noisePathRows(r.noiseSources, (m) => formatLength(m, scene.units.length))] : [];
   $('paths-summary').textContent = `Paths (${rows.length})`;
   $('paths-len-h').textContent = `Length (${scene.units.length})`;
   const sig = JSON.stringify([rows, scene.units.length]);

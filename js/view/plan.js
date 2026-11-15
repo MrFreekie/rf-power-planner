@@ -28,6 +28,11 @@ import { planExtent, farBounds } from './planExtent.js';
 import { drawWallNoise } from './wallNoiseDraw.js';
 import { drawFresnelPlan, fresnelView } from './fresnelDraw.js';
 import { drawAreas } from './areasDraw.js';
+import { drawPeoplePlan } from './peopleDraw.js';
+import { drawNoiseSources } from './noiseDraw.js';
+import { moveNoiseSource } from '../actionsAreas.js';
+import { movePerson } from '../actions.js';
+import { offsetFromPack, linkOwners } from '../model/people.js';
 import { updateAudience, updateOverheadPanel, addAudience } from '../actionsAreas.js';
 
 const LOBE_STEP = 6; // degrees
@@ -145,6 +150,8 @@ export function createPlanView(canvas, store) {
     // links: lines first, then lobes and icons on top
     for (const link of scene.links) drawLinkLine(ctx, th, scene, link, link === link0, w);
     for (const link of scene.links) drawLinkEnds(ctx, th, scene, link, sel, w);
+    drawPeoplePlan(ctx, th, vp, scene, sel, handles, hoverKey, w);
+    drawNoiseSources(ctx, th, vp, scene, sel, handles, hoverKey, w);
     for (const link of scene.links) drawAntennaB(ctx, th, link, sel);
     for (const link of scene.links) drawBranches(ctx, th, vp, link, handles);
     for (const link of scene.links) drawRxCableTags(ctx, th, vp, link, placer, scene.units.length, w);
@@ -345,6 +352,10 @@ export function createPlanView(canvas, store) {
       const pl = (store.getScene().platforms || []).find((q) => q.id === hd.itemId);
       return { key, plat: pl && { ...pl }, startPtr: w0 ? { x: w0.x, y: w0.y } : { x: hd.wx, y: hd.wy } };
     }
+    if (hd.kind === 'person') {
+      const pe = (store.getScene().people || []).find((q) => q.id === hd.itemId);
+      return { key, startPos: pe && pe.pos ? { ...pe.pos } : null, startPtr: w0 ? { x: w0.x, y: w0.y } : { x: hd.wx, y: hd.wy } };
+    }
     const r = (store.getScene().reflectors || []).find((q) => q.id === hd.itemId);
     return { key, p1: r && { ...r.p1 }, p2: r && { ...r.p2 }, startW: { x: hd.wx, y: hd.wy } };
   }
@@ -378,6 +389,17 @@ export function createPlanView(canvas, store) {
       }
       return;
     }
+    if (hd.kind === 'noise') {
+      const bd = bounds(store.getScene().stage);
+      moveNoiseSource(store, hd.itemId, { x: clamp(target.x, bd.x0, bd.x1), y: clamp(target.y, bd.y0, bd.y1) }, { coalesce: state.key });
+      return;
+    }
+    if (hd.kind === 'person') {
+      if (!state.startPos) return;
+      const bd = bounds(store.getScene().stage), snap = (v) => (shiftDown ? round2(v) : Math.round(v * 20) / 20);
+      movePerson(store, hd.itemId, { x: clamp(snap(state.startPos.x + ptr.x - state.startPtr.x), bd.x0, bd.x1), y: clamp(snap(state.startPos.y + ptr.y - state.startPtr.y), bd.y0, bd.y1) }, { coalesce: state.key });
+      return;
+    }
     if (hd.kind === 'rxBRot') {
       const l = store.getScene().links.find((q) => q.id === hd.linkId); const b = l && l.rx.diversity && l.rx.diversity.antennaB;
       if (!b || !b.pos) return;
@@ -399,6 +421,7 @@ export function createPlanView(canvas, store) {
       if (hd.kind === 'tx' || hd.kind === 'rx') {
         const l = s.links.find((q) => q.id === hd.linkId); if (!l) return;
         l[hd.kind].pos.x = cx(target.x); l[hd.kind].pos.y = cy(target.y);
+        syncPersonOffset(s, l);
       } else if (hd.kind === 'rxB') {
         const l = s.links.find((q) => q.id === hd.linkId); const b = l?.rx.diversity?.antennaB; if (!b) return;
         b.pos = { ...b.pos, x: cx(target.x), y: cy(target.y) };
@@ -419,10 +442,27 @@ export function createPlanView(canvas, store) {
     }, { coalesce: state.key });
   }
 
+  /** A dragged pack changes its owner's stored offset, so a later group move keeps the new arrangement. */
+  function syncPersonOffset(s, link) {
+    const o = linkOwners(s.people).get(link.id); if (!o) return;
+    const person = s.people.find((q) => q.id === o.personId); if (!person || !person.pos) return;
+    const e = o.which === 'iem' ? link.rx : link.tx;
+    person[o.which === 'iem' ? 'iemOffset' : 'micOffset'] = offsetFromPack(person, e.pos);
+  }
   function nudge(dx, dy, big) {
     const id = store.getSelection(); const f = findItem(store.getScene(), id);
     if (!f) { cycle(1); return; } // nothing selected yet: the first arrow press selects the first item
     const step = big ? 0.5 : 0.05;
+    if (f.type === 'noise') {
+      if (f.item.pos) moveNoiseSource(store, id, { x: f.item.pos.x + dx * step, y: f.item.pos.y + dy * step }, { coalesce: `plan-nudge-${id}` });
+      announce(`${f.item.name} moved`, { key: 'move', delay: 350 });
+      return;
+    }
+    if (f.type === 'person') {
+      if (f.item.pos) movePerson(store, id, { x: round2(f.item.pos.x + dx * step), y: round2(f.item.pos.y + dy * step) }, { coalesce: `plan-nudge-${id}` });
+      announce(`${f.item.name} and their packs moved`, { key: 'move', delay: 350 });
+      return;
+    }
     store.update((s) => {
       const g = findItem(s, id), bd = bounds(s.stage);
       if (!g) return;

@@ -19,7 +19,7 @@ export function fresnelRows(fr) {
   return rows;
 }
 
-export function budgetExtras(r, fr = null) {
+export function budgetExtras(r, fr = null, more = []) {
   const rows = [];
   if (!r) return rows;
   const extra = fresnelRows(fr);
@@ -42,6 +42,6 @@ export function budgetExtras(r, fr = null) {
     const rise = fin(wn.riseDb) ? wn.riseDb : 0, ch = fin(wn.marginChangeDb) ? wn.marginChangeDb : 0;
     rows.push({ label: 'Video wall noise', value: `${wn.dbm.toFixed(1)} dBm in ${fin(wn.bandwidthKHz) ? Math.round(wn.bandwidthKHz) : '-'} kHz, noise floor +${rise.toFixed(1)} dB, margin ${ch >= 0 ? '+' : ''}${ch.toFixed(1)} dB${rise >= 3 ? ' WARNING' : ''}`, severity: rise >= 3 ? 'warning' : rise >= 0.5 ? 'info' : 'ok' });
   }
-  rows.push(...extra);
+  rows.push(...extra, ...more);
   return rows;
 }

@@ -849,3 +849,5 @@ body.vnalab-open { overflow: hidden; }
 .imd-zoombar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .imd-zoombar button { min-height: 32px; }
 .imd canvas[role="button"]:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.ppl-bar { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.ppl-margins { margin: 6px 0 0; padding-left: 18px; font-size: 12px; }

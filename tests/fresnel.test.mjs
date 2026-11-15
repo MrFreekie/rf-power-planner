@@ -117,3 +117,19 @@ test('FOH examples: low antennas behind a standing crowd are blocked, raised ant
   assert.deepEqual(Object.keys(fresnelForScene(low.s)), low.s.links.map((l) => l.id));
   assert.equal(validateScene(low.s).ok, true);
 });
+
+test('p2p-truck-hill: fresnel.js and p2p.js agree (hill clearance -21.13 m, -69 percent of F1, blocked, edge loss 13.8 dB); without the hill the floor fractions agree within sampling', async () => {
+  const { p2pScene } = await import('../js/examples.js');
+  const { solveLink } = await import('../js/model/rf.js');
+  const { fresnelClearance } = await import('../js/model/fresnel.js');
+  const s = p2pScene('truck'), l = s.links[0], r = solveLink(s, l).p2p, fz = fresnelClearance(s, l);
+  // hand check: line of sight at 3 km = 12 + (6 - 12) x 3/8 = 9.75 m; earth bulge 3000 x 5000 / (2 x 4/3 x 6371000) = 0.883 m; clearance 9.75 - 0.883 - 30 = -21.13 m; F1 = sqrt(0.4948 x 3000 x 5000 / 8000) = 30.46 m -> -0.694
+  assert.ok(Math.abs(fz.worst.fraction - r.minClearanceFraction) < 0.01, `${fz.worst.fraction} vs ${r.minClearanceFraction}`);
+  assert.ok(Math.abs(fz.worst.fraction - (-0.694)) < 0.005);
+  assert.equal(fz.status, 'blocked'); assert.equal(fz.worst.category, 'obstacle'); assert.equal(fz.meets60, r.meetsSixtyPercent);
+  const ob = fz.obstacles.find((o) => o.category === 'obstacle');
+  assert.ok(Math.abs(ob.edgeLossDb - r.diffractionLossDb) < 0.05, `${ob.edgeLossDb} vs ${r.diffractionLossDb}`);
+  const s2 = p2pScene('truck', { hill: false }), r2 = solveLink(s2, s2.links[0]).p2p, fz2 = fresnelClearance(s2, s2.links[0]);
+  assert.ok(!fz2.obstacles.some((o) => o.category === 'obstacle'));
+  assert.ok(Math.abs(fz2.minFraction - r2.minClearanceFraction) < 0.02, `${fz2.minFraction} vs ${r2.minClearanceFraction}`);
+});

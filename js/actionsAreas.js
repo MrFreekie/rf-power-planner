@@ -6,6 +6,7 @@ import { CEILING_MATERIALS, CEILING_LIMITS } from './model/ceiling.js';
 import { ANTENNA_BANDS } from './model/antenna-band.js';
 import { antennaOf } from './actions.js';
 import { WALL_CONSTRUCTIONS, WALL_NOISE_LIMITS } from './model/ledwall.js';
+import { NOISE_CATALOGUE, NOISE_SOURCE_LIMITS, createNoiseSource, engCrewSources } from './model/noise-sources.js';
 
 const fin = Number.isFinite;
 const clampTo = (v, [lo, hi]) => Math.min(hi, Math.max(lo, v));
@@ -225,4 +226,92 @@ export function setImdHarmonic(store, txId, patch = {}, o = {}) {
     const m = imdIn(d), t = m && (m.transmitters || []).find((x) => x.id === txId); if (!t) return;
     for (const k of ['h2Dbc', 'harmonicFilterDb']) { if (patch[k] === null) delete t[k]; else if (fin(patch[k])) t[k] = clampTo(patch[k], EVEN_LIMITS.harmonicDb); }
   }, opts(o));
+}
+
+// ---- noise sources (items 34 / 34a) --------------------------------------------------------------------------------------------
+
+const NS_NUM_LIMITS = {
+  fieldDbuvmAt10m: NOISE_SOURCE_LIMITS.fieldDbuvm, tiltDbPerDecade: NOISE_SOURCE_LIMITS.tiltDbPerDecade, freqMHz: NOISE_SOURCE_LIMITS.bandMHz, erpDbm: NOISE_SOURCE_LIMITS.erpDbm,
+  bwKHz: NOISE_SOURCE_LIMITS.bwKHz, dutyCycle: NOISE_SOURCE_LIMITS.dutyCycle, pulseWidthMs: NOISE_SOURCE_LIMITS.pulseWidthMs, repHz: NOISE_SOURCE_LIMITS.repHz,
+  onS: NOISE_SOURCE_LIMITS.timeS, holdS: NOISE_SOURCE_LIMITS.timeS, bandMinMHz: NOISE_SOURCE_LIMITS.bandMHz, bandMaxMHz: NOISE_SOURCE_LIMITS.bandMHz,
+};
+
+/** addNoiseSource(store, kind, overrides) -> id, or null at the cap or for an unknown kind. */
+export function addNoiseSource(store, kind, overrides = {}) {
+  if (!NOISE_CATALOGUE[kind]) return null;
+  let id = null;
+  store.update((d) => {
+    if (!Array.isArray(d.noiseSources)) d.noiseSources = [];
+    if (d.noiseSources.length >= NOISE_SOURCE_LIMITS.max) return;
+    const n = d.noiseSources.length;
+    const src = createNoiseSource(kind, { pos: { x: 2 + (n % 5), y: 2 + Math.floor(n / 5), z: 1.5 }, ...overrides });
+    d.noiseSources.push(src); id = src.id;
+  });
+  return id;
+}
+
+/** addEngCrew(store, centre) -> ids of the five sources (fewer when the cap is reached). Each source is separately editable. */
+export function addEngCrew(store, centre = { x: 5, y: -3, z: 0 }) {
+  const ids = [];
+  store.update((d) => {
+    if (!Array.isArray(d.noiseSources)) d.noiseSources = [];
+    for (const s of engCrewSources(centre)) { if (d.noiseSources.length >= NOISE_SOURCE_LIMITS.max) break; d.noiseSources.push(s); ids.push(s.id); }
+  });
+  return ids;
+}
+
+/** addWallNoiseSource(store, reflectorId) -> id of the linked video-wall source (existing one if present). */
+export function addWallNoiseSource(store, reflectorId) {
+  let id = null;
+  store.update((d) => {
+    const r = (d.reflectors || []).find((x) => x.id === reflectorId);
+    if (!r) return;
+    if (!Array.isArray(d.noiseSources)) d.noiseSources = [];
+    const have = d.noiseSources.find((n) => n.reflectorId === reflectorId);
+    if (have) { id = have.id; return; }
+    if (d.noiseSources.length >= NOISE_SOURCE_LIMITS.max) return;
+    const z0 = fin(r.zMin) ? r.zMin : 0, z1 = fin(r.zMax) ? r.zMax : 3;
+    const src = createNoiseSource('video-wall', { id: `ns-${r.id}`.slice(0, 64), name: r.name ? `${r.name} (video wall)` : 'Video wall', reflectorId: r.id, pos: { x: (r.p1.x + r.p2.x) / 2, y: (r.p1.y + r.p2.y) / 2, z: z0 + (z1 - z0) / 2 } });
+    d.noiseSources.push(src); id = src.id;
+  });
+  return id;
+}
+
+/**
+ * updateNoiseSource(store, id, patch, { coalesce }): patch keys name, enabled, kind (resets the figures to that kind's defaults, keeps name, position, enabled),
+ * pos {x, y, z}, and the numeric figures in NS_NUM_LIMITS (clamped). Unknown keys and bad numbers are ignored.
+ */
+export function updateNoiseSource(store, id, patch = {}, o = {}) {
+  return store.update((d) => {
+    const s = (d.noiseSources || []).find((x) => x.id === id);
+    if (!s) return;
+    if (typeof patch.name === 'string') s.name = patch.name.replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 80) || s.name;
+    if (typeof patch.enabled === 'boolean') s.enabled = patch.enabled;
+    if (typeof patch.kind === 'string' && NOISE_CATALOGUE[patch.kind] && patch.kind !== s.kind && !s.reflectorId) {
+      const fresh = createNoiseSource(patch.kind);
+      for (const k of Object.keys(s)) if (!['id', 'name', 'enabled', 'pos'].includes(k)) delete s[k];
+      Object.assign(s, { kind: patch.kind }, Object.fromEntries(Object.entries(fresh).filter(([k]) => !['id', 'name', 'enabled', 'pos', 'kind'].includes(k))));
+      if (/^[A-Z]/.test(s.name) && Object.values(NOISE_CATALOGUE).some((c) => c.label === s.name)) s.name = NOISE_CATALOGUE[patch.kind].label;
+    }
+    if (patch.pos && typeof patch.pos === 'object') {
+      if (!s.pos) s.pos = { x: 0, y: 0, z: 1.5 };
+      for (const k of ['x', 'y']) if (fin(patch.pos[k])) s.pos[k] = clampTo(round2(patch.pos[k]), NOISE_SOURCE_LIMITS.coord);
+      if (fin(patch.pos.z)) s.pos.z = clampTo(round2(patch.pos.z), NOISE_SOURCE_LIMITS.zM);
+    }
+    for (const [k, lim] of Object.entries(NS_NUM_LIMITS)) if (fin(patch[k])) s[k] = clampTo(patch[k], lim);
+  }, opts(o));
+}
+
+/** moveNoiseSource(store, id, { x, y }, { coalesce }). */
+export function moveNoiseSource(store, id, pos, o = {}) { return updateNoiseSource(store, id, { pos }, o); }
+
+/** removeNoiseSource(store, id): a linked video-wall source is muted rather than removed (its wall block stays), so the wall noise stops. */
+export function removeNoiseSource(store, id) {
+  return store.update((d) => {
+    const i = (d.noiseSources || []).findIndex((x) => x.id === id);
+    if (i < 0) return;
+    const s = d.noiseSources[i];
+    if (s.reflectorId) { s.enabled = false; return; }
+    d.noiseSources.splice(i, 1);
+  });
 }

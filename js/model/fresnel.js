@@ -30,8 +30,8 @@ import { audienceHeadM } from './audience.js';
 
 export const FRESNEL_CLEARANCE_FRACTION = 0.6;
 export const FRESNEL_SAMPLES = 64;
-export const FRESNEL_CATEGORIES = Object.freeze(['floor', 'stage', 'platform', 'foh', 'audience', 'wall', 'ceiling', 'truss']);
-const ALREADY_MODELLED = Object.freeze({ floor: true, stage: true, platform: true, foh: true, audience: true, wall: true, ceiling: false, truss: false });
+export const FRESNEL_CATEGORIES = Object.freeze(['floor', 'stage', 'platform', 'foh', 'audience', 'wall', 'ceiling', 'truss', 'obstacle']);
+const ALREADY_MODELLED = Object.freeze({ floor: true, stage: true, platform: true, foh: true, audience: true, wall: true, ceiling: false, truss: false, obstacle: true });
 const C = 299792458;
 const FOH_RE = /desk|rack|foh|console|mix/i, TRUSS_RE = /truss/i;
 
@@ -133,6 +133,13 @@ export function fresnelClearance(scene, link, { freqMHz, fraction = FRESNEL_CLEA
       if (fr < mn) { mn = fr; lim = st.o.id; }
     }
     profile.push({ s, xM: x, uM: s * L, z: p.z, f1M: f1, r60M: fraction * f1, minFraction: mn, limiting: lim });
+  }
+  // p2p only: link.p2p.obstacle { distanceM, heightM } is a knife edge (a hill) at one distance: the clearance is measured there exactly (the sampling above
+  // could miss it) and is the SAME quantity p2p.js p2pGeometry uses (line of sight minus earth bulge minus the obstacle height), so both modules agree.
+  const ob = link && link.kind === 'p2p' && link.p2p && link.p2p.obstacle;
+  if (ob && Number.isFinite(ob.distanceM) && Number.isFinite(ob.heightM) && ob.distanceM > 0 && ob.distanceM < d) {
+    const x = ob.distanceM, zLos = A.z + dz * (x / d), c = zLos - earthBulgeM(x, d, K) - ob.heightM;
+    state.push({ o: { id: 'obstacle', name: 'Obstacle (hill)', category: 'obstacle' }, minFraction: c / Math.max(fresnelRadiusM(x, d, f), 1e-9), clearanceM: c, xM: x });
   }
   const results = state.map((st) => {
     const blocked = st.minFraction < 0;

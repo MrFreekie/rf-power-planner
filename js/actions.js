@@ -172,6 +172,7 @@ export function removeReflector(store, id) {
   return store.update((d) => {
     const i = d.reflectors.findIndex((r) => r.id === id);
     if (i >= 0) d.reflectors.splice(i, 1);
+    if (Array.isArray(d.noiseSources)) d.noiseSources = d.noiseSources.filter((n) => n.reflectorId !== id); // the linked video-wall source goes with its wall
   });
 }
 

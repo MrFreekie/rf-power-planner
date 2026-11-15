@@ -7,6 +7,13 @@ import { CABLES, ANTENNAS, SURFACES, MATERIALS, BANDS, GROUND_PLANE_LABELS, GROU
 import { setAntennaField, setAntennaType, antennaOf } from '../actions.js';
 import { POLARISATION_LABELS, ORIENTATION_HINT, POLARISATION_HINT } from './antennaFields.js';
 import { CHAIN_PRESETS, DC_MODES, FILTER_TYPES } from '../model/chain-presets.js';
+import { announce } from '../view/a11y.js';
+import { NOISE_CATALOGUE, NOISE_SOURCE_LIMITS, dutyOf } from '../model/noise-sources.js';
+import { catalogueOptions, flagText, behaviourText, FLAG_WORDS } from './noiseUi.js';
+import { addNoiseSource, addEngCrew, addWallNoiseSource, updateNoiseSource, removeNoiseSource } from '../actionsAreas.js';
+import { PERSON_ROLES, PERSON_COLOURS, PEOPLE_LIMITS } from '../model/people.js';
+import { addPerson, updatePerson, assignMic, assignIem, removePerson, reorderPerson } from '../actions.js';
+import { linkChoices, personMargins } from './peopleUi.js';
 import { cleanName, limitMessage, renameReflector } from './nameInput.js';
 import { addAudience, updateAudience, removeAudience, setCeiling, addOverheadPanel, updateOverheadPanel, removeOverheadPanel, setP2pField, setAntennaDesignBand, densityChoiceId, setWallField, setImdIntercept, setImdFilter, addImdBand, updateImdBand, removeImdBand, setImdHarmonic } from '../actionsAreas.js';
 import { IIP2_PRESETS, DEFAULT_IIP2_DBM, IIP4_OVER_IIP2_DB } from '../model/imd-even.js';
@@ -55,7 +62,7 @@ const KIND_NAMES = {
   rof: 'RF over fibre', coupler: 'Directional coupler', biastee: 'Bias tee', dcblock: 'DC block', activesplitter: 'Active splitter', activecombiner: 'Active combiner',
 };
 const PREVIEW_KINDS = new Set(['splitter', 'combiner']);
-const SECTION_FOR = { tx: 'tx', rx: 'rx', reflector: 'refl', link: 'link', platform: 'plats', audience: 'aud', panel: 'ovh' };
+const SECTION_FOR = { tx: 'tx', rx: 'rx', reflector: 'refl', link: 'link', platform: 'plats', audience: 'aud', panel: 'ovh', person: 'ppl', noise: 'noise' };
 
 export function mountInspector({ container, store }) {
   container.classList.add('inspector');
@@ -380,6 +387,10 @@ export function mountInspector({ container, store }) {
 
     const audb = section('aud', 'Audience', `A crowd absorbs signal below head height: ${AUDIENCE_DB_PER_M_PER_PERSON} dB per metre per person per square metre, capped at ${AUDIENCE_MAX_LOSS_DB} dB per path (assumed, unverified). Drag an audience area onto the plan, or add one here.`);
     buildAudience(audb, c);
+    const ppb = section('ppl', 'People', 'A person carries a mic and an in-ear pack. Dragging a person moves both packs together; each link stays selectable on its own. Body contact and dampness apply to both packs.');
+    buildPeople(ppb, c);
+    const nsb = section('noise', 'Noise sources', 'Things that raise the receiver noise floor: displays and lights, power electronics, camera flash, crew radios and phones. All catalogue figures are planning values; the letter in brackets is the least certain figure (S rule or class limit, I inferred, U unverified guess). Average power raises the floor; the peak is what a squelch or meter sees during a burst.');
+    buildNoise(nsb, c);
     const ovb = section('ovh', 'Ceiling and overhead panels', 'A ceiling and flown panels reflect signal back down. Heights are above the ground. Panels are drawn on the plan and in the side view.');
     buildOverhead(ovb, c);
 
@@ -630,7 +641,7 @@ export function mountInspector({ container, store }) {
 
     const p2pb = c.link.kind === 'p2p' ? section('p2p', 'Point-to-point path', 'Heights are above a common flat datum. Terrain profiles, multiple edges, rain and ducting are not modelled.') : null;
     if (p2pb) buildP2p(p2pb);
-    const secs = ['stage', 'plats', ...(p2pb ? ['p2p'] : []), 'aud', 'ovh', 'link', 'tx', 'rx', 'env', 'chain', ...(refs.chainB ? ['chainB'] : []), 'refl'];
+    const secs = ['stage', 'plats', ...(p2pb ? ['p2p'] : []), 'ppl', 'noise', 'aud', 'ovh', 'link', 'tx', 'rx', 'env', 'chain', ...(refs.chainB ? ['chainB'] : []), 'refl'];
     if (c.scene.imd && c.scene.imd.enabled) { buildImd(section('imd', 'Intermod demo'), c); secs.unshift('imd'); }
     container.append(...secs.map((n) => refs[n].details));
   }
@@ -776,6 +787,128 @@ export function mountInspector({ container, store }) {
   }
 
   // ---- audience areas -------------------------------------------------------------------------
+  function buildNoise(body, c) {
+    const srcs = c.scene.noiseSources || [];
+    const list = el('ul', 'refl-list');
+    srcs.forEach((n) => {
+      const li = el('li');
+      const b = button(n.name || 'Noise source', `ns:${n.id}`, () => store.select(n.id));
+      b.setAttribute('aria-pressed', String(c.sel === n.id));
+      li.append(b); list.append(li);
+    });
+    if (!srcs.length) body.append(el('p', 'hint', 'No noise sources. Pick a kind below and add it, or add an ENG crew.'));
+    body.append(list);
+    // catalogue picker
+    const pick = el('select'); pick.id = 'ns-kind-pick'; pick.dataset.fkey = 'ns-pick'; pick.setAttribute('aria-label', 'Noise source kind to add');
+    for (const g of catalogueOptions()) { const og = el('optgroup'); og.label = g.label; for (const [id, t] of g.options) { const o = el('option', null, t); o.value = id; og.append(o); } pick.append(og); }
+    const pickDesc = el('p', 'hint ns-pick-desc');
+    const showPick = () => { const d = NOISE_CATALOGUE[pick.value]; pickDesc.textContent = d ? `${d.note} Confidence: ${flagText(pick.value)}.` : ''; };
+    pick.addEventListener('change', showPick); showPick();
+    const row = el('div', 'ppl-bar');
+    row.append(pick,
+      button('Add noise source', 'ns-add', (e) => { addOrLimit(store, e && e.currentTarget, 'noise source', () => addNoiseSource(store, pick.value)); }, { label: 'Add the selected kind of noise source to the scene' }),
+      button('Add ENG crew', 'ns-eng', (e) => { const ids = addEngCrew(store, { x: 5, y: -3, z: 0 }); if (ids.length) { store.select(ids[0]); announce(`ENG crew added: ${ids.length} noise sources`, { key: 'ns', delay: 100 }); } else showLimit(e.currentTarget, 'noise source'); }, { label: 'Add an ENG crew: camera transmitter, two PTT radios, an LED light and a generator, each separately editable' }));
+    body.append(row, pickDesc);
+    const n0 = c.found?.type === 'noise' ? c.found.item : null;
+    if (!n0) return;
+    const id = n0.id, linked = !!n0.reflectorId;
+    const N = (cc) => (cc.scene.noiseSources || []).find((q) => q.id === id) || n0;
+    const upd = (patch, o) => updateNoiseSource(store, id, patch, o);
+    const def = (cc) => NOISE_CATALOGUE[N(cc).kind] || { params: {}, flags: {} };
+    const val0 = (cc, k, d) => { const v = N(cc)[k]; return Number.isFinite(v) ? v : def(cc).params[k] ?? d; };
+    const type = (NOISE_CATALOGUE[n0.kind] || { params: {} }).params.type, beh = (NOISE_CATALOGUE[n0.kind] || {}).behaviour;
+    const form = el('div', 'refl-form');
+    const fnum = (k, label, lim, step, unit, decimals = 1) => numberField({ key: `ns-${k}`, label: `${label}${def(c).flags[k] ? ` [${def(c).flags[k]}]` : ''}`, min: lim[0], max: lim[1], step, unit, decimals, get: (cc) => val0(cc, k, 0), set: (cc, v, o) => upd({ [k]: v }, o) });
+    const lenN = (key, label, sub, axis) => numberField({
+      key: `ns-${key}`, label, decimals: 2,
+      min: (cc) => lengthToUi(dispRange(cc.scene, axis, NOISE_SOURCE_LIMITS.coord[0], NOISE_SOURCE_LIMITS.coord[1])[0], cc.lu), max: (cc) => lengthToUi(dispRange(cc.scene, axis, NOISE_SOURCE_LIMITS.coord[0], NOISE_SOURCE_LIMITS.coord[1])[1], cc.lu),
+      step: (cc) => (cc.lu === 'ft' ? 0.5 : 0.1), unit: (cc) => cc.lu,
+      get: (cc) => lengthToUi(sub === 'z' ? (N(cc).pos?.z ?? 0) : dispAxis(cc.scene, axis, N(cc).pos?.[sub] ?? 0), cc.lu),
+      set: (cc, v, o) => upd({ pos: { [sub]: sub === 'z' ? lengthFromUi(v, cc.lu) : internalAxis(cc.scene, axis, lengthFromUi(v, cc.lu)) } }, o),
+    });
+    form.append(
+      textField({ key: 'ns-name', label: 'Name', get: (cc) => N(cc).name, fallback: () => NOISE_CATALOGUE[n0.kind]?.label || 'Noise source', set: (cc, v, o) => upd({ name: v }, o) }),
+      selectField({ key: 'ns-kind', label: linked ? 'Kind (linked to a reflector wall)' : 'Kind', options: catalogueOptions().flatMap((g) => g.options), get: (cc) => N(cc).kind, set: (cc, v) => { if (!linked) upd({ kind: v }); } }),
+      selectField({ key: 'ns-enabled', label: 'State', options: [['on', 'On'], ['off', 'Muted (off)']], get: (cc) => (N(cc).enabled === false ? 'off' : 'on'), set: (cc, v) => { upd({ enabled: v === 'on' }); announce(`${n0.name} ${v === 'on' ? 'on' : 'muted'}`, { key: 'ns', delay: 100 }); } }),
+    );
+    if (!linked) form.append(lenN('x', 'Position x (0 = centre line)', 'x', 'x'), lenN('y', 'Position y (0 = front edge)', 'y', 'y'), lenN('z', 'Height above floor', 'z', null));
+    const info = el('p', 'hint ns-info');
+    updaters.push((cc) => { const d = NOISE_CATALOGUE[N(cc).kind]; const t = d ? `${d.note} Behaviour: ${behaviourText(N(cc), dutyOf)}. Confidence: ${flagText(N(cc).kind)} (${Object.keys(FLAG_WORDS).map((k) => `${k} ${FLAG_WORDS[k]}`).join('; ')}).` : ''; if (info.textContent !== t) info.textContent = t; });
+    if (!linked) {
+      if (type === 'narrowband') form.append(fnum('freqMHz', 'Frequency', NOISE_SOURCE_LIMITS.bandMHz, 1, 'MHz', 3), fnum('erpDbm', 'ERP while on', NOISE_SOURCE_LIMITS.erpDbm, 1, 'dBm'), fnum('bwKHz', 'Occupied bandwidth', NOISE_SOURCE_LIMITS.bwKHz, 1, 'kHz'));
+      else form.append(fnum('fieldDbuvmAt10m', beh === 'impulsive' ? 'Peak field at 10 m' : 'Field at 10 m', NOISE_SOURCE_LIMITS.fieldDbuvm, 1, 'dBuV/m (120 kHz)'), fnum('tiltDbPerDecade', 'Tilt', NOISE_SOURCE_LIMITS.tiltDbPerDecade, 1, 'dB per decade'));
+      if (beh === 'intermittent') form.append(fnum('dutyCycle', 'Duty cycle (fraction on)', NOISE_SOURCE_LIMITS.dutyCycle, 0.01, '0 to 1', 3), fnum('onS', 'Typical on time', NOISE_SOURCE_LIMITS.timeS, 0.1, 's', 2));
+      if (beh === 'impulsive' || beh === 'pulsed-tdma') form.append(fnum('pulseWidthMs', 'Pulse width', NOISE_SOURCE_LIMITS.pulseWidthMs, 0.1, 'ms', 3), fnum('repHz', 'Repetition rate', NOISE_SOURCE_LIMITS.repHz, 1, 'Hz', 2));
+    } else buildWallFields(form, c, n0.reflectorId);
+    const contrib = el('p', 'hint ns-contrib'); contrib.setAttribute('role', 'status');
+    updaters.push((cc) => {
+      const r = cc.result && cc.result.noiseSources, s = r && (r.sources || []).find((q) => q.id === id);
+      const t = linked ? 'The wall noise is summed in the link budget as Video wall noise.' : s && Number.isFinite(s.averageDbm) ? `At the active receiver, ${s.distanceM.toFixed(1)} m away: average ${s.averageDbm.toFixed(1)} dBm, peak ${s.peakDbm.toFixed(1)} dBm${s.inChannel === false ? `, ${Math.abs(s.offsetMHz).toFixed(1)} MHz off channel` : ''}.` : (N(cc).enabled === false ? 'Muted: no contribution.' : 'No contribution at the active receiver.');
+      if (contrib.textContent !== t) contrib.textContent = t;
+    });
+    const bar = el('div', 'ppl-bar');
+    bar.append(button(linked ? 'Mute wall noise' : 'Delete noise source', 'ns-del', () => { removeNoiseSource(store, id); if (!linked) store.select(null); announce(linked ? 'Wall noise muted' : 'Noise source deleted', { key: 'ns', delay: 100 }); }, { label: linked ? 'Mute this video wall noise source' : 'Delete this noise source', cls: 'danger' }));
+    body.append(form, info, contrib, bar);
+  }
+
+  function buildPeople(body, c) {
+    const people = c.scene.people || [];
+    const list = el('ul', 'refl-list');
+    people.forEach((p) => {
+      const li = el('li');
+      const b = button(p.name || 'Person', `ppl:${p.id}`, () => store.select(p.id));
+      b.setAttribute('aria-pressed', String(c.sel === p.id));
+      li.append(b); list.append(li);
+    });
+    if (!people.length) body.append(el('p', 'hint', 'No people. Add one, then choose the mic and in-ear links they carry.'));
+    body.append(list);
+    body.append(button('Add person', 'ppl-add', (e) => { addOrLimit(store, e && e.currentTarget, 'person', () => addPerson(store, { pos: { x: 0, y: 1 } })); }, { label: `Add a person (up to ${PEOPLE_LIMITS.max})` }));
+    const p0 = c.found?.type === 'person' ? c.found.item : null;
+    if (!p0) return;
+    const id = p0.id, idx = people.findIndex((q) => q.id === id);
+    const P = (cc) => (cc.scene.people || []).find((q) => q.id === id);
+    const upd = (patch, o) => updatePerson(store, id, patch, o);
+    const linkSelect = (which) => selectField({
+      key: `ppl-${which}`, label: which === 'iem' ? 'In-ear link' : 'Mic link',
+      options: (cc) => linkChoices(cc.scene, P(cc) || p0, which).map((x) => [x.value, x.label]),
+      get: (cc) => (P(cc) || {})[which === 'iem' ? 'iemLinkId' : 'micLinkId'] || '',
+      set: (cc, v) => {
+        const ch = linkChoices(cc.scene, P(cc) || p0, which).find((x) => x.value === v);
+        const act = which === 'iem' ? assignIem : assignMic;
+        if (ch && ch.swap) {
+          const ok = typeof window === 'undefined' || typeof window.confirm !== 'function' || window.confirm(`${ch.label.replace(/ \(.*$/, '')} is carried by someone else. Swap links with them?`);
+          if (!ok) { sync(); return; }
+          act(store, id, v, { swap: true });
+        } else act(store, id, v || null);
+        announce(`${p0.name} ${which === 'iem' ? 'in-ear' : 'mic'} link updated`, { key: 'ppl', delay: 200 });
+      },
+    });
+    const form = el('div', 'refl-form');
+    form.append(
+      textField({ key: 'ppl-name', label: 'Name', maxLength: PEOPLE_LIMITS.nameChars, get: (cc) => P(cc)?.name, fallback: () => `Person ${idx + 1}`, set: (cc, v, o) => upd({ name: v }, o) }),
+      selectField({ key: 'ppl-role', label: 'Role', options: PERSON_ROLES.map((r) => [r, r.charAt(0).toUpperCase() + r.slice(1)]), get: (cc) => P(cc)?.role || 'singer', set: (cc, v) => upd({ role: v }) }),
+      selectField({ key: 'ppl-colour', label: 'Colour tag', options: PERSON_COLOURS.map((r) => [r, r.charAt(0).toUpperCase() + r.slice(1)]), get: (cc) => P(cc)?.colour || 'red', set: (cc, v) => upd({ colour: v }) }),
+      numberField({ key: 'ppl-facing', label: 'Facing (0 = upstage, 90 = right)', min: -360, max: 360, step: 5, unit: '°', decimals: 0, get: (cc) => P(cc)?.facingDeg ?? 0, set: (cc, v, o) => upd({ facingDeg: v }, o) }),
+      linkSelect('mic'), linkSelect('iem'),
+      selectField({ key: 'ppl-contact', label: 'Body contact (both packs)', options: Object.entries(ANTENNA_CONTACT_LABELS), get: (cc) => P(cc)?.contact ?? 'free', set: (cc, v) => upd({ contact: v }) }),
+      selectField({ key: 'ppl-damp', label: 'Dampness (both packs)', options: Object.entries(ANTENNA_DAMPNESS_LABELS), get: (cc) => P(cc)?.dampness ?? 'dry', set: (cc, v) => upd({ dampness: v }) }),
+    );
+    const marg = el('ul', 'ppl-margins'); marg.setAttribute('aria-label', 'Margins of the links this person carries');
+    updaters.push((cc) => {
+      const rows = personMargins(cc.scene, P(cc) || p0, (l) => solveCached(cc.scene, l));
+      const sig = rows.map((r) => r.text + r.name).join('|');
+      if (marg.dataset.sig === sig) return; marg.dataset.sig = sig;
+      marg.replaceChildren(...(rows.length ? rows : [{ text: 'No links assigned yet.', name: '' }]).map((r) => { const li = el('li', null, r.name ? `${r.name}: ${r.text}` : r.text); return li; }));
+    });
+    const bar = el('div', 'ppl-bar');
+    const up = button('Move up', 'ppl-up', () => { reorderPerson(store, id, Math.max(0, idx - 1)); announce('Person moved up the list', { key: 'ppl', delay: 100 }); }, { label: 'Move this person up the list' });
+    const dn = button('Move down', 'ppl-down', () => { reorderPerson(store, id, Math.min(people.length - 1, idx + 1)); announce('Person moved down the list', { key: 'ppl', delay: 100 }); }, { label: 'Move this person down the list' });
+    up.disabled = idx <= 0; dn.disabled = idx >= people.length - 1;
+    const del = button('Delete person', 'ppl-del', () => { removePerson(store, id); store.select(null); announce('Person deleted; their links stay', { key: 'ppl', delay: 100 }); }, { label: 'Delete this person (the links stay in the scene)', cls: 'danger' });
+    bar.append(up, dn, del);
+    body.append(form, marg, bar);
+  }
+
   function buildAudience(body, c) {
     const areas = c.scene.audience || [];
     const list = el('ul', 'refl-list');
@@ -1203,6 +1336,41 @@ export function mountInspector({ container, store }) {
     try { return chainItemLossDb(item, f); } catch { return NaN; }
   }
 
+  /** Construction and wall-noise fields of one reflector (ledwall.js). Shown inside the linked video-wall noise source. */
+  function buildWallFields(form, c, rid) {
+    const R = (cc) => (cc.scene.reflectors || []).find((q) => q.id === rid);
+    // video wall: construction and noise (ledwall.js); shown for every reflector, the noise rows follow the preset
+    const wallFlag = (flag) => (flag ? ` [${flag}]` : '');
+    form.append(
+      selectField({
+        key: 'refl-cons', label: 'Construction', options: [['none', 'Not specified (use the material above)'], ...Object.entries(WALL_CONSTRUCTIONS).map(([id, k]) => [id, k.label + wallFlag(k.flag)])],
+        get: (cc) => R(cc)?.construction || 'none', set: (cc, v) => setWallField(store, rid, 'construction', v),
+      }),
+    );
+    if (String(c.scene.reflectors.find((q) => q.id === rid).construction || '').startsWith('mesh')) form.append(numberField({
+      key: 'refl-hole', label: 'Mesh hole size', min: 0.01, max: 2000, step: 1, unit: 'mm (shielding falls as holes approach half a wavelength)', decimals: 1,
+      get: (cc) => R(cc)?.holeSizeMm ?? 10, set: (cc, v, o) => setWallField(store, rid, 'holeSizeMm', v, o),
+    }));
+    form.append(selectField({
+      key: 'refl-noise', label: 'Wall noise', options: Object.entries(WALL_NOISE_PRESETS).map(([id, p]) => [id, p.label + wallFlag(p.flag)]),
+      get: (cc) => R(cc)?.noise?.preset || 'off', set: (cc, v) => setWallField(store, rid, 'preset', v),
+    }));
+    const np = c.scene.reflectors.find((q) => q.id === rid).noise?.preset || 'off';
+    if (np !== 'off') {
+      const NL = WALL_NOISE_LIMITS;
+      if (np === 'custom') form.append(
+        numberField({ key: 'refl-nlevel', label: 'Noise level', min: NL.levelDbuvmAt10m[0], max: NL.levelDbuvmAt10m[1], step: 1, unit: 'dBuV/m at 10 m, 600 MHz', decimals: 1, get: (cc) => R(cc)?.noise?.levelDbuvmAt10m ?? 40, set: (cc, v, o) => setWallField(store, rid, 'levelDbuvmAt10m', v, o) }),
+        numberField({ key: 'refl-ntilt', label: 'Noise tilt', min: NL.tiltDbPerDecade[0], max: NL.tiltDbPerDecade[1], step: 1, unit: 'dB per decade of frequency', decimals: 1, get: (cc) => R(cc)?.noise?.tiltDbPerDecade ?? 0, set: (cc, v, o) => setWallField(store, rid, 'tiltDbPerDecade', v, o) }),
+      );
+      form.append(
+        numberField({ key: 'refl-nrear', label: 'Rear loss', min: NL.rearLossDb[0], max: NL.rearLossDb[1], step: 1, unit: 'dB behind the wall', decimals: 1, get: (cc) => R(cc)?.noise?.rearLossDb ?? 8, set: (cc, v, o) => setWallField(store, rid, 'rearLossDb', v, o) }),
+        numberField({ key: 'refl-nheight', label: 'Noisy height', min: NL.heightM[0], max: NL.heightM[1], step: 0.1, unit: 'm above the bottom edge', decimals: 1, get: (cc) => R(cc)?.noise?.heightM ?? ((R(cc)?.zMax ?? 3) - (R(cc)?.zMin ?? 0)), set: (cc, v, o) => setWallField(store, rid, 'heightM', v, o) }),
+        selectField({ key: 'refl-nface', label: 'Facing (front = left of start to end)', options: [['left', 'Left of start to end'], ['right', 'Right of start to end']], get: (cc) => R(cc)?.noise?.facing || 'left', set: (cc, v) => setWallField(store, rid, 'facing', v) }),
+      );
+      form.append(el('p', 'hint', 'Presets are EMC emission limits (flag I) or assumed (U). The noise shows on the plan and in the link budget when the receiver floor rises.'));
+    }
+  }
+
   function buildReflectors(body, c) {
     const list = el('ul', 'refl-list');
     c.scene.reflectors.forEach((r) => {
@@ -1253,36 +1421,10 @@ export function mountInspector({ container, store }) {
         get: (cc) => lengthToUi(R(cc)?.zMax ?? 1, cc.lu), set: (cc, v, o) => setPath(store, `${base}.zMax`, lengthFromUi(v, cc.lu), o),
       }),
     );
-    // video wall: construction and noise (ledwall.js); shown for every reflector, the noise rows follow the preset
-    const wallFlag = (flag) => (flag ? ` [${flag}]` : '');
-    form.append(
-      selectField({
-        key: 'refl-cons', label: 'Construction', options: [['none', 'Not specified (use the material above)'], ...Object.entries(WALL_CONSTRUCTIONS).map(([id, k]) => [id, k.label + wallFlag(k.flag)])],
-        get: (cc) => R(cc)?.construction || 'none', set: (cc, v) => setWallField(store, rid, 'construction', v),
-      }),
-    );
-    if (String(c.scene.reflectors[idx].construction || '').startsWith('mesh')) form.append(numberField({
-      key: 'refl-hole', label: 'Mesh hole size', min: 0.01, max: 2000, step: 1, unit: 'mm (shielding falls as holes approach half a wavelength)', decimals: 1,
-      get: (cc) => R(cc)?.holeSizeMm ?? 10, set: (cc, v, o) => setWallField(store, rid, 'holeSizeMm', v, o),
-    }));
-    form.append(selectField({
-      key: 'refl-noise', label: 'Wall noise', options: Object.entries(WALL_NOISE_PRESETS).map(([id, p]) => [id, p.label + wallFlag(p.flag)]),
-      get: (cc) => R(cc)?.noise?.preset || 'off', set: (cc, v) => setWallField(store, rid, 'preset', v),
-    }));
-    const np = c.scene.reflectors[idx].noise?.preset || 'off';
-    if (np !== 'off') {
-      const NL = WALL_NOISE_LIMITS;
-      if (np === 'custom') form.append(
-        numberField({ key: 'refl-nlevel', label: 'Noise level', min: NL.levelDbuvmAt10m[0], max: NL.levelDbuvmAt10m[1], step: 1, unit: 'dBuV/m at 10 m, 600 MHz', decimals: 1, get: (cc) => R(cc)?.noise?.levelDbuvmAt10m ?? 40, set: (cc, v, o) => setWallField(store, rid, 'levelDbuvmAt10m', v, o) }),
-        numberField({ key: 'refl-ntilt', label: 'Noise tilt', min: NL.tiltDbPerDecade[0], max: NL.tiltDbPerDecade[1], step: 1, unit: 'dB per decade of frequency', decimals: 1, get: (cc) => R(cc)?.noise?.tiltDbPerDecade ?? 0, set: (cc, v, o) => setWallField(store, rid, 'tiltDbPerDecade', v, o) }),
-      );
-      form.append(
-        numberField({ key: 'refl-nrear', label: 'Rear loss', min: NL.rearLossDb[0], max: NL.rearLossDb[1], step: 1, unit: 'dB behind the wall', decimals: 1, get: (cc) => R(cc)?.noise?.rearLossDb ?? 8, set: (cc, v, o) => setWallField(store, rid, 'rearLossDb', v, o) }),
-        numberField({ key: 'refl-nheight', label: 'Noisy height', min: NL.heightM[0], max: NL.heightM[1], step: 0.1, unit: 'm above the bottom edge', decimals: 1, get: (cc) => R(cc)?.noise?.heightM ?? ((R(cc)?.zMax ?? 3) - (R(cc)?.zMin ?? 0)), set: (cc, v, o) => setWallField(store, rid, 'heightM', v, o) }),
-        selectField({ key: 'refl-nface', label: 'Facing (front = left of start to end)', options: [['left', 'Left of start to end'], ['right', 'Right of start to end']], get: (cc) => R(cc)?.noise?.facing || 'left', set: (cc, v) => setWallField(store, rid, 'facing', v) }),
-      );
-      form.append(el('p', 'hint', 'Presets are EMC emission limits (flag I) or assumed (U). The noise shows on the plan and in the link budget when the receiver floor rises.'));
-    }
+    // video wall noise lives in the Noise sources section; the wall data stays on the reflector
+    const linked = (c.scene.noiseSources || []).find((n) => n.reflectorId === rid);
+    form.append(el('p', 'hint', 'Construction and video wall noise are edited under Noise sources.'));
+    form.append(button(linked ? 'Edit video wall noise' : 'Add video wall noise source', 'refl-wallnoise', () => { const nid = linked ? linked.id : addWallNoiseSource(store, rid); if (nid) store.select(nid); }, { label: 'Open the video wall noise source of this reflector' }));
     form.append(button('Remove reflector', 'refl-remove', () => { removeReflector(store, rid); store.select(null); }, { cls: 'danger' }));
     body.append(form);
   }
@@ -1295,7 +1437,9 @@ export function mountInspector({ container, store }) {
       c.link.chain.map((x, i) => `${x.id || i}:${x.kind}`),
       c.link.kind === 'iem' ? (c.link.rx.chain || []).map((x, i) => `${x.id || i}:${x.kind}`) : null,
       c.link.kind !== 'iem' && c.link.rx.diversity && c.link.rx.diversity.enabled && c.link.rx.diversity.antennaB ? (Array.isArray(c.link.rx.diversity.antennaB.chain) ? c.link.rx.diversity.antennaB.chain.map((x, i) => `${x.id || i}:${x.kind}`) : 'same') : null,
-      c.scene.reflectors.map((r) => `${r.id}:${r.id === c.sel ? `${r.construction || ''}/${(r.noise && r.noise.preset) || ''}` : ''}`),
+      c.scene.reflectors.map((r) => `${r.id}:${r.id === c.sel || (c.found?.type === 'noise' && c.found.item.reflectorId === r.id) ? `${r.construction || ''}/${(r.noise && r.noise.preset) || ''}` : ''}`),
+      (c.scene.noiseSources || []).map((n) => `${n.id}:${n.kind}:${n.reflectorId || ''}`),
+      (c.scene.people || []).map((p) => `${p.id}:${p.micLinkId || ''}:${p.iemLinkId || ''}`), c.scene.links.map((l) => `${l.id}:${l.kind}`),
       (c.scene.platforms || []).map((p) => p.id),
       (c.scene.audience || []).map((a) => a.id), (c.scene.overheadPanels || []).map((o) => o.id), !!(c.scene.ceiling),
       c.scene.imd && c.scene.imd.enabled ? c.scene.imd.transmitters.map((t) => t.id) : null,
@@ -1309,6 +1453,8 @@ export function mountInspector({ container, store }) {
     for (const r of c.scene.reflectors) names.set(`refl:${r.id}`, r.name || 'Reflector');
     for (const p of c.scene.platforms || []) names.set(`plat:${p.id}`, p.name || 'Platform');
     for (const a of c.scene.audience || []) names.set(`aud:${a.id}`, a.name || 'Audience');
+    for (const n of c.scene.noiseSources || []) names.set(`ns:${n.id}`, n.name || 'Noise source');
+    for (const p of c.scene.people || []) names.set(`ppl:${p.id}`, p.name || 'Person');
     for (const o of c.scene.overheadPanels || []) names.set(`ovh:${o.id}`, o.name || 'Overhead panel');
     for (const b of container.querySelectorAll('button[data-fkey]')) { const t = names.get(b.dataset.fkey); if (t !== undefined && b.textContent !== t) b.textContent = t; }
   }

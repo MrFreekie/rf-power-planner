@@ -330,6 +330,23 @@ export const SCENE_LIMITS = Object.freeze({
   coordM: 10000, zoneCoordM: 2000, zM: 1000, maxFreqMHz: 1e6, maxDb: 1000, maxIdChars: 64,
 });
 const SL = SCENE_LIMITS;
+/** Name rules (reflector 40 characters, person and noise source 80): a string, control characters removed, trimmed, cut to the limit. */
+export const NAME_LIMITS = Object.freeze({ reflector: 40, person: PEOPLE_LIMITS.nameChars, noiseSource: 80 });
+// eslint-disable-next-line no-control-regex
+const CONTROL_RE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g;
+/** sanitizeName(value, max, fallback) -> a clean name; a non-string or an empty result gives the fallback. Names that are already clean come back unchanged. */
+export function sanitizeName(v, max, fallback) {
+  if (typeof v !== 'string') return fallback;
+  const t = v.replace(CONTROL_RE, '').trim().slice(0, max).trim();
+  return t.length ? t : fallback;
+}
+const nameErrors = (v, max, path, errors) => {
+  if (v === undefined) return;
+  if (typeof v !== 'string') errors.push(`${path}.name must be a string`);
+  else if (v.length > max) errors.push(`${path}.name must be at most ${max} characters`);
+  else if (CONTROL_RE.test(v)) { CONTROL_RE.lastIndex = 0; errors.push(`${path}.name must not contain control characters`); }
+  CONTROL_RE.lastIndex = 0;
+};
 const ID_RE = /^[A-Za-z0-9_.:-]+$/;
 /** A key or id that is safe to use as a lookup key: short, plain characters, and not an Object.prototype name. */
 const isSafeId = (v) => typeof v === 'string' && v.length >= 1 && v.length <= SL.maxIdChars && ID_RE.test(v) && !(v in Object.prototype);
@@ -547,6 +564,8 @@ export function validateScene(scene) {
       const seenPe = new Set(), owned = new Set();
       scene.people.forEach((pe, i) => {
         validatePerson(pe, `people[${i}]`, errors, scene);
+        if (isObj(pe) && typeof pe.name === 'string' && CONTROL_RE.test(pe.name)) errors.push(`people[${i}].name must not contain control characters`);
+        CONTROL_RE.lastIndex = 0;
         if (!isObj(pe)) return;
         if (typeof pe.id === 'string') { if (seenPe.has(pe.id)) errors.push(`people[${i}].id is not unique`); seenPe.add(pe.id); }
         for (const k of ['micLinkId', 'iemLinkId']) if (typeof pe[k] === 'string') { if (owned.has(pe[k])) errors.push(`people[${i}].${k} is already assigned to another person`); owned.add(pe[k]); }
@@ -560,6 +579,7 @@ export function validateScene(scene) {
       const seenNs = new Set();
       scene.noiseSources.forEach((n, i) => {
         validateNoiseSource(n, `noiseSources[${i}]`, errors);
+        if (isObj(n)) nameErrors(n.name, NAME_LIMITS.noiseSource, `noiseSources[${i}]`, errors);
         if (isObj(n) && typeof n.id === 'string') { if (seenNs.has(n.id)) errors.push(`noiseSources[${i}].id is not unique`); seenNs.add(n.id); }
       });
     }
@@ -639,6 +659,7 @@ export function validateScene(scene) {
     const p = `reflectors[${i}]`;
     if (!isObj(r)) { errors.push(`${p} must be an object`); return; }
     checkId(r.id, p);
+    nameErrors(r.name, NAME_LIMITS.reflector, p, errors);
     if (!isSafeId(r.material)) errors.push(`${p}.material must be a short plain string`);
     checkPos(r.p1, `${p}.p1`, errors, ['x', 'y']);
     checkPos(r.p2, `${p}.p2`, errors, ['x', 'y']);
@@ -890,6 +911,10 @@ export function migrateScene(raw) {
     const add = wallNoiseSourcesFromReflectors(s);
     if (add.length && (!Array.isArray(s.noiseSources) || s.noiseSources.length + add.length <= NOISE_SOURCE_LIMITS.max)) s.noiseSources = [...(Array.isArray(s.noiseSources) ? s.noiseSources : []), ...add];
   }
+  // Names (item 2): control characters removed, trimmed, cut to the limit; a name that is already clean is not touched.
+  if (Array.isArray(s.reflectors)) for (const r of s.reflectors) if (isObj(r) && r.name !== undefined) { const n = sanitizeName(r.name, NAME_LIMITS.reflector, 'Reflector'); if (n !== r.name) r.name = n; }
+  if (Array.isArray(s.people)) for (const pe of s.people) if (isObj(pe) && pe.name !== undefined) { const n = sanitizeName(pe.name, NAME_LIMITS.person, 'Person'); if (n !== pe.name) pe.name = n; }
+  if (Array.isArray(s.noiseSources)) for (const n0 of s.noiseSources) if (isObj(n0) && n0.name !== undefined) { const n = sanitizeName(n0.name, NAME_LIMITS.noiseSource, 'Noise source'); if (n !== n0.name) n0.name = n; }
   if (Array.isArray(s.people)) prunePeople(s); // item 36: no reference to a link that is gone, wrong or already owned
   syncScene(s);
   // while (s.version < SCHEMA_VERSION) { apply step; s.version++ }

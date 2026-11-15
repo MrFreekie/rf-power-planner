@@ -12,6 +12,7 @@ import { attachInteraction } from './interact.js';
 import { tracePaths, antennaFrame } from '../model/rf.js';
 import { tiltFromPointer, stepTilt, tiltText, tiltHandleLength, placeLabel, TILT_COARSE_STEP, TILT_FINE_STEP } from '../ui/antennaFields.js';
 import { drawTiltGauge } from './tiltGauge.js';
+import { drawPersonSide } from './peopleDraw.js';
 import { setAntennaField } from '../actions.js';
 import { SURFACES } from '../model/library.js';
 import * as icons from './icons.js';
@@ -272,6 +273,7 @@ export function createSideView(canvas, store) {
       icons.drawStand(ctx, vp, s, -fl, { view: 'side', ink, fill, heightM: z });
       icons.drawAntenna(ctx, vp, s, -(z + fl), { view: 'side', ink, fill, type: e.antenna.type, pol: e.antenna.polarisation, rollDeg: e.antenna.rollDeg, groundPlane: e.antenna.groundPlane, angleDeg: angle });
     }
+    if (hasPerson) drawPersonSide(ctx, th, store.getScene(), link, role, s, vp.worldToScreen(s, -fl).y, p.y, !leftEnd);
     // height dimension line beside the item
     const dx = p.x + (leftEnd ? -26 : 26), f0 = vp.worldToScreen(s, -fl).y;
     ctx.strokeStyle = th.inkSoft; ctx.lineWidth = 1;
