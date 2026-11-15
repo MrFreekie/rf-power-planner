@@ -321,8 +321,9 @@ function applyNoisePatch(s, patch) {
 }
 
 /** setReflectorName(store, id, name, { coalesce }): rename a reflector by id with the same cleaning as the other names (control characters stripped, 80 characters). The inspector field should call this instead of nameInput.renameReflector (40 characters, no control-character strip). */
+export const REFLECTOR_NAME_MAX = 80;
 export function setReflectorName(store, id, name, o = {}) {
-  const clean = String(name ?? '').replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 80);
+  const clean = String(name ?? '').replace(/[\u0000-\u001f\u007f]/g, '').slice(0, REFLECTOR_NAME_MAX);
   return store.update((d) => { const r = (d.reflectors || []).find((x) => x.id === id); if (r) r.name = clean; }, opts(o));
 }
 

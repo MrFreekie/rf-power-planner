@@ -10,12 +10,12 @@ import { CHAIN_PRESETS, DC_MODES, FILTER_TYPES } from '../model/chain-presets.js
 import { announce } from '../view/a11y.js';
 import { NOISE_CATALOGUE, NOISE_SOURCE_LIMITS, dutyOf } from '../model/noise-sources.js';
 import { catalogueOptions, flagText, behaviourText, FLAG_WORDS } from './noiseUi.js';
-import { addNoiseSource, addEngCrew, addWallNoiseSource, updateNoiseSource, removeNoiseSource } from '../actionsAreas.js';
+import { addNoiseSource, addEngCrew, addWallNoiseSource, updateNoiseSource, removeNoiseSource, setReflectorName, REFLECTOR_NAME_MAX } from '../actionsAreas.js';
 import { PERSON_ROLES, PERSON_COLOURS, PEOPLE_LIMITS } from '../model/people.js';
 import { addPerson, updatePerson, assignMic, assignIem, assignExtraMic, removeExtraMic, removePerson, reorderPerson } from '../actions.js';
 import { confirmDialog } from './confirmDialog.js';
 import { linkChoices, personMargins, extraChoices } from './peopleUi.js';
-import { cleanName, limitMessage, renameReflector } from './nameInput.js';
+import { cleanName, limitMessage } from './nameInput.js';
 import { addAudience, updateAudience, removeAudience, setCeiling, addOverheadPanel, updateOverheadPanel, removeOverheadPanel, setP2pField, setAntennaDesignBand, densityChoiceId, setWallField, setImdIntercept, setImdFilter, addImdBand, updateImdBand, removeImdBand, setImdHarmonic } from '../actionsAreas.js';
 import { IIP2_PRESETS, DEFAULT_IIP2_DBM, IIP4_OVER_IIP2_DB } from '../model/imd-even.js';
 import { WALL_CONSTRUCTIONS, WALL_NOISE_PRESETS, WALL_NOISE_LIMITS } from '../model/ledwall.js';
@@ -1433,7 +1433,7 @@ export function mountInspector({ container, store }) {
       set: (cc, v, o) => setPath(store, `${base}.${sub}`, internalAxis(cc.scene, axis, lengthFromUi(v, cc.lu)), o),
     });
     form.append(
-      textField({ key: 'refl-name', label: 'Name', get: (cc) => R(cc)?.name, fallback: (cc) => `Reflector ${idx + 1}`, set: (cc, v, o) => renameReflector(store, rid, v, o) }),
+      textField({ key: 'refl-name', label: 'Name', maxLength: REFLECTOR_NAME_MAX, get: (cc) => R(cc)?.name, fallback: (cc) => `Reflector ${idx + 1}`, set: (cc, v, o) => setReflectorName(store, rid, v, o) }),
       selectField({
         key: 'refl-mat', label: 'Material', options: Object.entries(MATERIALS).map(([id, m]) => [id, m.name]),
         get: (cc) => R(cc)?.material, set: (cc, v) => setPath(store, `${base}.material`, v),

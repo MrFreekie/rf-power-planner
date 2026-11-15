@@ -49,7 +49,7 @@ export function createZoom({ doc, hostFactory, describe, table, draw, onClose })
   function open(spectrumId, from) {
     if (dlg.open) close(false);
     id = spectrumId; opener = from || null; hover = null; lastTable = '';
-    if (!host) host = hostFactory(canvas, (ctx, w, h, th) => draw(id, ctx, w, h, th, hover));
+    if (!host) host = hostFactory(canvas, (ctx, w, h, th) => { if (id !== null) draw(id, ctx, w, h, th, hover); }); // a frame queued before a close must not draw with no id
     dlg.showModal();
     update();
     closeBtn.focus();
