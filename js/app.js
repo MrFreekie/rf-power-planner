@@ -558,6 +558,10 @@ try {
   const { mountMeasure } = await import('./view/measureDialog.js');
   mountMeasure({ button: $('btn-meas'), store });
 } catch (err) { console.error('measurements', err); $('btn-meas').hidden = true; }
+try {
+  const { mountPlanExport } = await import('./view/planExport.js');
+  mountPlanExport({ button: $('btn-plan-export'), store });
+} catch (err) { console.error('plan export', err); $('btn-plan-export').hidden = true; }
 
 // venue underlay button and dialog (optional: a failure must not break the planner)
 try {

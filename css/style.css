@@ -1001,3 +1001,31 @@ body.vnalab-open { overflow: hidden; }
   .meas-import input[type=checkbox] { width: 44px; height: 44px; vertical-align: middle; }
 }
 @media print { body:not(.report-open) .meas-dialog { display: none !important; } }
+
+/* ---- Export plan ---- */
+.plan-dialog { width: min(98vw, 1300px); max-width: 98vw; }
+.plan-coord { border: 1px solid var(--ink); padding: 4px 10px; background: var(--paper); }
+.plan-coord h3 { margin: 2px 0; font-size: 14px; }
+.plan-coord ul { margin: 2px 0; padding-left: 18px; font-size: 13px; }
+.plan-bad { font-weight: 600; color: var(--warn-text); }
+.plan-tablewrap { max-height: 45vh; }
+.plan-table td, .plan-table th { white-space: normal; }
+.plan-print-title { display: none; }
+.plan-dialog .spectrum-dialog-canvas, .plan-dialog .spectrum-dialog-table { display: none; }
+@media (max-width: 480px) { .plan-dialog { width: 100vw; max-width: 100vw; } }
+@media (pointer: coarse), (max-width: 800px) {
+  .plan-dialog .meas-bar button, .plan-dialog .meas-bar select, .plan-dialog .meas-bar input[type=text] { min-height: 44px !important; }
+  .plan-dialog .meas-bar input[type=checkbox] { width: 44px; height: 44px; vertical-align: middle; }
+}
+@media print {
+  body.plan-print > *:not(.plan-dialog) { display: none !important; }
+  body.plan-print .plan-dialog { display: block !important; position: static !important; width: auto !important; max-width: none !important; border: 0 !important; box-shadow: none !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; }
+  body.plan-print .plan-dialog > * { display: none !important; }
+  body.plan-print .plan-dialog .spectrum-dialog-slot, body.plan-print .plan-dialog .plan-body { display: block !important; padding: 0 !important; border: 0 !important; }
+  body.plan-print .plan-body > * { display: none !important; }
+  body.plan-print .plan-body > .plan-print-title, body.plan-print .plan-body > .plan-tablewrap { display: block !important; }
+  body.plan-print .plan-tablewrap { max-height: none !important; overflow: visible !important; border: 0 !important; }
+  body:not(.plan-print) .plan-dialog { display: none !important; }
+}
+@media print { body.plan-print #workspace, body.plan-print #brandbar, body.plan-print #toolbar { display: none !important; } }
+@media print { body.plan-print .plan-dialog::backdrop { background: none !important; } }
