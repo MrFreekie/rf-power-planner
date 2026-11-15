@@ -7,6 +7,7 @@ import { CABLES, ANTENNAS, SURFACES, MATERIALS, BANDS, GROUND_PLANE_LABELS, GROU
 import { setAntennaField, setAntennaType, antennaOf } from '../actions.js';
 import { POLARISATION_LABELS, ORIENTATION_HINT, POLARISATION_HINT } from './antennaFields.js';
 import { CHAIN_PRESETS, DC_MODES, FILTER_TYPES } from '../model/chain-presets.js';
+import { cleanName, limitMessage, renameReflector } from './nameInput.js';
 import { addAudience, updateAudience, removeAudience, setCeiling, addOverheadPanel, updateOverheadPanel, removeOverheadPanel, setP2pField, setAntennaDesignBand, densityChoiceId, setWallField, setImdIntercept, setImdFilter, addImdBand, updateImdBand, removeImdBand, setImdHarmonic } from '../actionsAreas.js';
 import { IIP2_PRESETS, DEFAULT_IIP2_DBM, IIP4_OVER_IIP2_DB } from '../model/imd-even.js';
 import { WALL_CONSTRUCTIONS, WALL_NOISE_PRESETS, WALL_NOISE_LIMITS } from '../model/ledwall.js';
@@ -144,18 +145,38 @@ export function mountInspector({ container, store }) {
     return row;
   }
 
+  /** Text field. spec: {key,label,get(c),set(c,v,opts), fallback(c) (name used when left empty), maxLength (default 40)}. Spaces are kept, control characters dropped, the limit is announced. */
   function textField(spec) {
+    const max = spec.maxLength || 40;
     const input = el('input');
     input.type = 'text';
-    input.maxLength = 40;
+    input.maxLength = max;
     input.autocomplete = 'off';
+    input.spellcheck = false;
     const { row } = fieldRow(spec.label, input, spec.key, '');
+    const note = el('span', 'field-limit');
+    note.setAttribute('role', 'status'); note.hidden = true;
+    row.append(note);
+    const showLimit = () => { const m = limitMessage(input.value, max); note.hidden = !m; note.textContent = m; };
     input.addEventListener('focus', () => { session++; });
     input.addEventListener('input', () => {
+      const clean = cleanName(input.value, max);
+      if (clean !== input.value) input.value = clean;
+      showLimit();
       const c = getCtx();
-      if (c.link) spec.set(c, input.value, { coalesce: `insp:${spec.key}:${session}` });
+      if (!c.link) return;
+      input.setAttribute('aria-invalid', String(clean === '' && !!spec.fallback));
+      if (clean === '' && spec.fallback) return; // empty while typing: keep the old name until the field is left
+      spec.set(c, clean, { coalesce: `insp:${spec.key}:${session}` });
     });
-    updaters.push((c) => { if (document.activeElement !== input) input.value = spec.get(c) ?? ''; });
+    input.addEventListener('change', () => {
+      const c = getCtx();
+      if (c.link && spec.fallback && input.value.trim() === '') spec.set(c, spec.fallback(c), { coalesce: `insp:${spec.key}:${session}` });
+      input.setAttribute('aria-invalid', 'false');
+      input.value = spec.get(getCtx()) ?? '';
+      showLimit();
+    });
+    updaters.push((c) => { if (document.activeElement !== input) { input.value = spec.get(c) ?? ''; showLimit(); } });
     return row;
   }
 
@@ -1210,7 +1231,7 @@ export function mountInspector({ container, store }) {
       set: (cc, v, o) => setPath(store, `${base}.${sub}`, internalAxis(cc.scene, axis, lengthFromUi(v, cc.lu)), o),
     });
     form.append(
-      textField({ key: 'refl-name', label: 'Name', get: (cc) => R(cc)?.name, set: (cc, v, o) => setPath(store, `${base}.name`, v, o) }),
+      textField({ key: 'refl-name', label: 'Name', get: (cc) => R(cc)?.name, fallback: (cc) => `Reflector ${idx + 1}`, set: (cc, v, o) => renameReflector(store, rid, v, o) }),
       selectField({
         key: 'refl-mat', label: 'Material', options: Object.entries(MATERIALS).map(([id, m]) => [id, m.name]),
         get: (cc) => R(cc)?.material, set: (cc, v) => setPath(store, `${base}.material`, v),
@@ -1274,14 +1295,23 @@ export function mountInspector({ container, store }) {
       c.link.chain.map((x, i) => `${x.id || i}:${x.kind}`),
       c.link.kind === 'iem' ? (c.link.rx.chain || []).map((x, i) => `${x.id || i}:${x.kind}`) : null,
       c.link.kind !== 'iem' && c.link.rx.diversity && c.link.rx.diversity.enabled && c.link.rx.diversity.antennaB ? (Array.isArray(c.link.rx.diversity.antennaB.chain) ? c.link.rx.diversity.antennaB.chain.map((x, i) => `${x.id || i}:${x.kind}`) : 'same') : null,
-      c.scene.reflectors.map((r) => `${r.id}:${r.name}:${r.id === c.sel ? `${r.construction || ''}/${(r.noise && r.noise.preset) || ''}` : ''}`),
-      (c.scene.platforms || []).map((p) => `${p.id}:${p.name}`),
-      (c.scene.audience || []).map((a) => `${a.id}:${a.name}`), (c.scene.overheadPanels || []).map((o) => `${o.id}:${o.name}`), !!(c.scene.ceiling),
+      c.scene.reflectors.map((r) => `${r.id}:${r.id === c.sel ? `${r.construction || ''}/${(r.noise && r.noise.preset) || ''}` : ''}`),
+      (c.scene.platforms || []).map((p) => p.id),
+      (c.scene.audience || []).map((a) => a.id), (c.scene.overheadPanels || []).map((o) => o.id), !!(c.scene.ceiling),
       c.scene.imd && c.scene.imd.enabled ? c.scene.imd.transmitters.map((t) => t.id) : null,
       c.scene.imd && c.scene.imd.enabled ? (c.scene.imd.bands || []).length : null,
     ]);
   }
 
+  /** Keep the list buttons in step with renamed items without rebuilding the form (a rebuild per keystroke would break typing and undo). */
+  function relabelLists(c) {
+    const names = new Map();
+    for (const r of c.scene.reflectors) names.set(`refl:${r.id}`, r.name || 'Reflector');
+    for (const p of c.scene.platforms || []) names.set(`plat:${p.id}`, p.name || 'Platform');
+    for (const a of c.scene.audience || []) names.set(`aud:${a.id}`, a.name || 'Audience');
+    for (const o of c.scene.overheadPanels || []) names.set(`ovh:${o.id}`, o.name || 'Overhead panel');
+    for (const b of container.querySelectorAll('button[data-fkey]')) { const t = names.get(b.dataset.fkey); if (t !== undefined && b.textContent !== t) b.textContent = t; }
+  }
   function sync() {
     const c = getCtx();
     const sel = c.sel ?? null;
@@ -1303,6 +1333,7 @@ export function mountInspector({ container, store }) {
         if (t) { t.focus({ preventScroll: true }); if (pos && 'setSelectionRange' in t) { try { t.setSelectionRange(pos[0], pos[1]); } catch { /* number inputs */ } } }
       }
     }
+    relabelLists(c);
     for (const u of updaters) { try { u(c); } catch (err) { console.warn('inspector field update failed', err); } }
   }
 

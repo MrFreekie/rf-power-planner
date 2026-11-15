@@ -4,6 +4,22 @@ import { createCanvasHost, activeLink, setFont, haloText } from './util.js';
 import { imd } from '../imdTracker.js';
 import { formatPower } from '../model/units.js';
 import { evenOrderImd } from '../model/imd.js';
+import { createZoom, decimate } from './spectraZoom.js';
+
+const MIN_SPAN = 0.04;
+/** Zoom a view {a,b} (fractions 0..1 of the full axis) by `factor` (>1 zooms in) about fraction `at` of the visible part. Pure. */
+export function zoomAxis(view, factor, at = 0.5) {
+  const span = view.b - view.a, ns = Math.min(1, Math.max(MIN_SPAN, span / (factor > 0 ? factor : 1)));
+  const k = Math.min(1, Math.max(0, at)), centre = view.a + span * k;
+  const a = Math.min(1 - ns, Math.max(0, centre - ns * k));
+  return { a, b: a + ns };
+}
+/** Pan a view by a fraction of its own span, keeping it inside 0..1. Pure. */
+export function panAxis(view, frac) {
+  const span = view.b - view.a, a = Math.min(1 - span, Math.max(0, view.a + frac * span));
+  return { a, b: a + span };
+}
+export const FULL_VIEW = Object.freeze({ a: 0, b: 1 });
 
 export const MECH_COLORS = { 'front-end': '#4a78b5', 'tx-reverse': '#c77a1f', pim: '#7d5ba6' };
 export const MECH_NAMES = { 'front-end': 'Receiver front end (over the air)', 'tx-reverse': 'Transmitter reverse intermod', pim: 'Passive intermod (PIM)' };
@@ -53,14 +69,14 @@ export function mountImd({ container, store }) {
   const msg = el('p', 'hint', 'The intermod demo is off. Switch on Intermod in the toolbar to see carriers, products and the noise floor.');
   const body = el('div');
   const legend = el('div', 'imd-legend');
-  const spec = el('canvas', 'imd-spec'); spec.setAttribute('role', 'img');
+  const spec = el('canvas', 'imd-spec');
   const nums = el('dl', 'mpx-nums imd-nums');
   const nEls = {};
   for (const [k, label] of [['th', 'Thermal floor'], ['im', 'IM sum'], ['sk', 'TX noise skirt'], ['de', 'Desense'], ['tot', 'Total floor'], ['rise', 'Rise']]) {
     const d = el('div'); d.append(el('dt', null, label)); const dd = el('dd', null, '-'); d.append(dd); nums.append(d); nEls[k] = dd;
   }
   const sweepH = el('h3', 'cv-sug-h', 'Distance sweep (receive antenna moved away from the nearest transmitter)');
-  const sweep = el('canvas', 'imd-sweep'); sweep.setAttribute('role', 'img');
+  const sweep = el('canvas', 'imd-sweep');
   const slopes = el('p', 'hint imd-slopes');
   const coordH = el('h3', 'cv-sug-h', 'Coordination check');
   const tableWrap = el('div', 'cv-table-wrap');
@@ -89,22 +105,22 @@ export function mountImd({ container, store }) {
 
   let state = null, link = null, scene = null;
 
-  function draw(ctx, w, h, th) {
+  function draw(ctx, w, h, th, view = FULL_VIEW) {
     if (!state) return;
     const s = state.spectrum;
     const unit = scene.units.power;
     const L = 40, R = 10, T = 14, B = 26;
     const pw = w - L - R, ph = h - T - B;
-    const f0 = s.freqMHz[0], f1 = s.freqMHz[s.freqMHz.length - 1];
+    const F0 = s.freqMHz[0], F1 = s.freqMHz[s.freqMHz.length - 1], f0 = F0 + (F1 - F0) * view.a, f1 = F0 + (F1 - F0) * view.b;
     const { lo, hi } = spectrumRange(s);
     const X = (f) => L + ((f - f0) / (f1 - f0)) * pw;
     const Y = (v) => T + ph - ((Math.min(Math.max(v, lo), hi) - lo) / (hi - lo)) * ph;
     ctx.fillStyle = th.paper2; ctx.fillRect(L, T, pw, ph);
     setFont(ctx, th, 11); ctx.fillStyle = th.inkSoft; ctx.textAlign = 'right';
     for (let v = lo; v <= hi; v += 10) { const y = Math.round(Y(v)) + 0.5; ctx.strokeStyle = th.grid; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(L + pw, y); ctx.stroke(); ctx.fillText(String(unit === 'dBW' ? v - 30 : v), L - 4, y + 4); }
-    const span = f1 - f0, step = span > 8 ? 2 : span > 4 ? 1 : 0.5;
+    const span = f1 - f0, step = span > 8 ? 2 : span > 4 ? 1 : span > 2 ? 0.5 : span > 0.8 ? 0.2 : 0.05;
     ctx.textAlign = 'center';
-    for (let f = Math.ceil(f0 / step) * step; f <= f1; f += step) { const x = Math.round(X(f)) + 0.5; ctx.strokeStyle = th.grid; ctx.beginPath(); ctx.moveTo(x, T); ctx.lineTo(x, T + ph); ctx.stroke(); ctx.fillStyle = th.inkSoft; ctx.fillText(f.toFixed(step < 1 ? 1 : 0), x, h - 12); }
+    for (let f = Math.ceil(f0 / step) * step; f <= f1; f += step) { const x = Math.round(X(f)) + 0.5; ctx.strokeStyle = th.grid; ctx.beginPath(); ctx.moveTo(x, T); ctx.lineTo(x, T + ph); ctx.stroke(); ctx.fillStyle = th.inkSoft; ctx.fillText(f.toFixed(step < 0.1 ? 2 : step < 1 ? 1 : 0), x, h - 12); }
     ctx.fillText(`MHz   (dB${unit === 'dBW' ? 'W' : 'm'})`, L + pw / 2, h - 1);
     ctx.strokeStyle = th.ink; ctx.lineWidth = 1; ctx.strokeRect(L + 0.5, T + 0.5, pw - 1, ph - 1);
     ctx.save(); ctx.beginPath(); ctx.rect(L, T, pw, ph); ctx.clip();
@@ -168,13 +184,13 @@ export function mountImd({ container, store }) {
     }
   }
 
-  function drawSweep(ctx, w, h, th) {
+  function drawSweep(ctx, w, h, th, view = FULL_VIEW) {
     const sp = state && state.sweep;
     if (!sp || !sp.distanceM.length) { if (state) haloText(ctx, th, 'Needs at least two transmitters', w / 2, h / 2, { align: 'center', color: th.inkSoft }); return; }
     const unit = scene.units.power;
     const L = 40, R = 10, T = 8, gap = 26;
     const h1 = Math.round((h - T - 36 - gap) * 0.62), h2 = h - T - 36 - gap - h1;
-    const pw = w - L - R, d0 = sp.distanceM[0], d1 = sp.distanceM[sp.distanceM.length - 1];
+    const pw = w - L - R, D0 = sp.distanceM[0], D1 = sp.distanceM[sp.distanceM.length - 1], d0 = D0 + (D1 - D0) * view.a, d1 = D0 + (D1 - D0) * view.b;
     const X = (d) => L + ((d - d0) / (d1 - d0)) * pw;
     const vals = [...sp.worstProductDbm, ...sp.worstFrontEndDbm, ...sp.worstReverseDbm, ...sp.worstPimDbm, sp.thermalDbm].filter((v) => Number.isFinite(v) && v > NONE_DBM);
     let hi = Math.ceil((Math.max(...vals) + 5) / 10) * 10, lo = Math.floor((sp.thermalDbm - 8) / 10) * 10;
@@ -191,7 +207,8 @@ export function mountImd({ container, store }) {
     frame(T, h1, lo, hi, 20, (v) => String(unit === 'dBW' ? v - 30 : v), `product level (${unit === 'dBW' ? 'dBW' : 'dBm'})`);
     frame(T + h1 + gap, h2, 0, rmax, rmax > 40 ? 20 : 10, String, 'noise floor rise (dB)');
     setFont(ctx, th, 11); ctx.fillStyle = th.inkSoft; ctx.textAlign = 'center';
-    for (let d = Math.ceil(d0); d <= d1; d += 2) ctx.fillText(String(d), X(d), h - 16);
+    const dStep = d1 - d0 > 20 ? 2 : d1 - d0 > 8 ? 1 : d1 - d0 > 3 ? 0.5 : 0.1;
+    for (let d = Math.ceil(d0 / dStep) * dStep; d <= d1 + 1e-9; d += dStep) ctx.fillText(String(Math.round(d * 100) / 100), X(d), h - 16);
     ctx.fillText('receive antenna distance from the nearest transmitter (m)', L + pw / 2, h - 3);
     const line = (arr, y, color, wd, dash) => {
       ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = wd; ctx.setLineDash(dash); ctx.beginPath(); let on = false;
@@ -219,8 +236,73 @@ export function mountImd({ container, store }) {
     if (Number.isFinite(best) && best >= d0 && best <= d1) haloText(ctx, th, `now ${best.toFixed(1)} m`, Math.min(X(best) + 6, L + pw - 50), T + h1 + gap - 4, { px: 11, weight: '600', color: th.fail });
   }
 
-  const sHost = createCanvasHost(spec, draw);
-  const wHost = createCanvasHost(sweep, drawSweep);
+  const sHost = createCanvasHost(spec, (c, w, h, t) => draw(c, w, h, t));
+  const wHost = createCanvasHost(sweep, (c, w, h, t) => drawSweep(c, w, h, t));
+  // ---- enlarged view (same pattern as the spectra dialog) with axis zoom ----
+  const views = { spectrum: { ...FULL_VIEW }, sweep: { ...FULL_VIEW } };
+  const TITLES = { spectrum: 'Intermodulation spectrum', sweep: 'Intermodulation distance sweep' };
+  const zoom = createZoom({
+    doc: document,
+    hostFactory: (canvas, d) => createCanvasHost(canvas, d),
+    describe: (id) => ({ title: TITLES[id], summary: summaryOf(id) }),
+    table: (id) => tableOf(id),
+    draw: (id, ctx, w, h, th) => (id === 'sweep' ? drawSweep(ctx, w, h, th, views.sweep) : draw(ctx, w, h, th, views.spectrum)),
+  });
+  const zbar = el('div', 'imd-zoombar', null);
+  zbar.setAttribute('role', 'group'); zbar.setAttribute('aria-label', 'Zoom the horizontal axis');
+  const zbtn = (text, label, fn) => { const b = el('button', null, text); b.type = 'button'; b.title = label; b.setAttribute('aria-label', label); b.addEventListener('click', fn); zbar.append(b); return b; };
+  const zread = el('span', 'hint imd-zoomread', ''); zread.setAttribute('role', 'status');
+  const curId = () => zoom.state.id;
+  const setView = (v) => { const id = curId(); if (!id) return; views[id] = v; zread.textContent = viewText(id); zoom.update(); };
+  zbtn('Zoom in', 'Zoom in on the horizontal axis (plus key or mouse wheel)', () => setView(zoomAxis(views[curId()], 1.6)));
+  zbtn('Zoom out', 'Zoom out on the horizontal axis (minus key or mouse wheel)', () => setView(zoomAxis(views[curId()], 1 / 1.6)));
+  zbtn('\u2190', 'Pan left (left arrow key)', () => setView(panAxis(views[curId()], -0.25)));
+  zbtn('\u2192', 'Pan right (right arrow key)', () => setView(panAxis(views[curId()], 0.25)));
+  zbtn('Reset zoom', 'Show the whole axis (key 0)', () => setView({ ...FULL_VIEW }));
+  zbar.append(zread);
+  zoom.slot.append(zbar);
+  zoom.canvas.addEventListener('wheel', (e) => { e.preventDefault(); const b = zoom.canvas.getBoundingClientRect(); const at = Math.min(1, Math.max(0, (e.clientX - b.left - 40) / Math.max(1, b.width - 50))); setView(zoomAxis(views[curId()], e.deltaY < 0 ? 1.25 : 1 / 1.25, at)); }, { passive: false });
+  zoom.canvas.addEventListener('keydown', (e) => {
+    const id = curId(); if (!id) return;
+    if (e.key === '+' || e.key === '=') setView(zoomAxis(views[id], 1.6));
+    else if (e.key === '-' || e.key === '_') setView(zoomAxis(views[id], 1 / 1.6));
+    else if (e.key === '0') setView({ ...FULL_VIEW });
+    else if (e.key === 'ArrowLeft') setView(panAxis(views[id], -0.25));
+    else if (e.key === 'ArrowRight') setView(panAxis(views[id], 0.25));
+    else return;
+    e.preventDefault(); e.stopImmediatePropagation();
+  }, true);
+  function viewText(id) {
+    const v = views[id], full = v.a === 0 && v.b === 1;
+    if (!state) return '';
+    if (id === 'sweep') { const d = state.sweep?.distanceM; if (!d || !d.length) return ''; const a = d[0] + (d[d.length - 1] - d[0]) * v.a, b = d[0] + (d[d.length - 1] - d[0]) * v.b; return full ? 'Showing the whole distance range.' : `Showing ${a.toFixed(1)} to ${b.toFixed(1)} m.`; }
+    const f = state.spectrum.freqMHz, a = f[0] + (f[f.length - 1] - f[0]) * v.a, b = f[0] + (f[f.length - 1] - f[0]) * v.b;
+    return full ? 'Showing the whole frequency span.' : `Showing ${a.toFixed(2)} to ${b.toFixed(2)} MHz.`;
+  }
+  function summaryOf(id) {
+    if (!state) return 'The intermod demo is off.';
+    const n = state.noise, unit = scene.units.power;
+    if (id === 'sweep') return `Worst product level and noise floor rise against the distance between the receive antenna and the nearest transmitter. ${slopes.textContent} ${viewText(id)}`.trim();
+    return `${scene.imd.transmitters.length} carriers, noise floor rise ${n.riseDb.toFixed(1)} dB, total floor ${fmtDbm(n.totalDbm, unit)}, ${state.coordination.length} products land on wanted channels. ${viewText(id)}`;
+  }
+  function tableOf(id) {
+    if (!state) return { caption: '', cols: [], rows: [] };
+    const unit = scene.units.power;
+    if (id === 'sweep') {
+      const sp = state.sweep; if (!sp) return { caption: 'No sweep', cols: [], rows: [] };
+      const idx = decimate(sp.distanceM.length, 40);
+      return { caption: 'Distance sweep', cols: ['Distance (m)', `Worst product (${unit})`, 'Rise (dB)'], rows: idx.map((i) => [sp.distanceM[i].toFixed(1), fmtDbm(sp.worstProductDbm[i], unit), sp.riseDb[i].toFixed(1)]) };
+    }
+    const rows = state.spectrum.markers.slice().sort((a, b) => a.fMHz - b.fMHz).slice(0, 80).map((m) => [m.label || m.kind, `${m.fMHz.toFixed(3)} MHz`, fmtDbm(m.levelDbm, unit), m.collidesWith ? 'hits a wanted channel' : '']);
+    return { caption: 'Carriers and products', cols: ['Marker', 'Frequency', 'Level', 'Note'], rows };
+  }
+  function openZoom(id) { if (!state) return; views[id] = { ...FULL_VIEW }; zread.textContent = viewText(id); zoom.open(id, id === 'sweep' ? sweep : spec); }
+  for (const [cv, id, name] of [[spec, 'spectrum', 'intermodulation spectrum'], [sweep, 'sweep', 'intermodulation distance sweep']]) {
+    cv.setAttribute('role', 'button'); cv.setAttribute('tabindex', '0'); cv.setAttribute('aria-haspopup', 'dialog'); cv.title = `Click or press Enter to enlarge the ${name}`; cv.style.cursor = 'zoom-in';
+    cv.addEventListener('click', () => openZoom(id));
+    cv.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openZoom(id); } });
+  }
+  sweep.setAttribute('aria-label', 'Intermod distance sweep. Press Enter to enlarge.');
   spec.style.height = '250px'; sweep.style.height = '260px';
 
   function render() {
@@ -234,7 +316,7 @@ export function mountImd({ container, store }) {
     nEls.th.textContent = fmtDbm(n.thermalDbm, unit); nEls.im.textContent = fmtDbm(n.imSumDbm, unit);
     nEls.sk.textContent = fmtDbm(n.txNoiseSkirtDbm, unit); nEls.de.textContent = `${n.desenseDb.toFixed(1)} dB`;
     nEls.tot.textContent = fmtDbm(n.totalDbm, unit); nEls.rise.textContent = `+${n.riseDb.toFixed(1)} dB`;
-    spec.setAttribute('aria-label', `Intermod spectrum with ${scene.imd.transmitters.length} carriers. Noise floor rise ${n.riseDb.toFixed(1)} dB. ${state.coordination.length} products land on wanted channels.`);
+    spec.setAttribute('aria-label', `Intermod spectrum with ${scene.imd.transmitters.length} carriers. Noise floor rise ${n.riseDb.toFixed(1)} dB. ${state.coordination.length} products land on wanted channels. Press Enter to enlarge.`);
     const sp = state.sweep;
     const parts = [];
     if (sp) {
@@ -274,10 +356,11 @@ export function mountImd({ container, store }) {
     }
     if (evRows.length > 14) { const tr = el('tr'); const td = el('td', null, `+ ${evRows.length - 14} more`); td.colSpan = 5; tr.append(td); evenBody.append(tr); }
     sHost.invalidate(); wHost.invalidate();
+    if (zoom.isOpen()) { if (state) zoom.update(); else zoom.close(); }
   }
 
   const u1 = imd.subscribe(render);
   const u2 = store.subscribe(() => render());
   render();
-  return { destroy() { u1(); u2(); sHost.destroy(); wHost.destroy(); container.textContent = ''; } };
+  return { destroy() { u1(); u2(); zoom.destroy(); sHost.destroy(); wHost.destroy(); container.textContent = ''; } };
 }

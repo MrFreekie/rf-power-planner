@@ -7,6 +7,8 @@ import { overloadStep } from './model/overload.js';
 import { RX_PRESETS } from './model/rx-params.js';
 import { imdSummary, evenOrderImd } from './model/imd.js';
 import { toneMpxReport } from './model/tone-mpx.js';
+import { createPerson, personLinkName, offsetFromPack, DEFAULT_MIC_OFFSET, DEFAULT_IEM_OFFSET } from './model/people.js';
+import { wallNoiseSourcesFromReflectors, createNoiseSource, engCrewSources } from './model/noise-sources.js';
 import { createDefaultScene, createDefaultLink, createChainItem, createReflector, createBranch, createZone, createDefaultImd, createImdTransmitter, createPlatform, createAudience, createCeiling, createChainItemFromPreset, newId, syncScene, migrateAntennaPolarisation } from './model/scene.js';
 
 const omni = (el = 90, polarisation = 'vertical') => ({ type: 'omni', gainDbi: 0, orientation: { az: 0, el }, polarisation });
@@ -19,6 +21,8 @@ function make(kind, fn) {
   fn(scene, scene.links[0]);
   if (scene.stage.heightM === undefined) scene.stage.heightM = 0;
   migrateAntennaPolarisation(scene); // every link antenna carries an explicit polarisation
+  const wallSources = wallNoiseSourcesFromReflectors(scene); // a video wall is also a noise source (item 34), as migrateScene would add it
+  if (wallSources.length) scene.noiseSources = [...(scene.noiseSources || []), ...wallSources];
   return syncScene(scene);
 }
 
@@ -657,6 +661,80 @@ export function reviewScene(id, opts = {}) {
   }
 }
 
+/**
+ * Noise-source examples (item 34 and 34a): noiseSourceScene(id, opts) builds the scenes; the figures in the notes are recomputed in
+ * tests/noise-sources.test.mjs. Catalogue figures are planning values (noise-sources.js, flags S/I/U).
+ *   'flash-at-pit':   mic Rx at FOH, a speedlight 2 m from the receive antenna (impulsive, peak and average).
+ *   'ptt-beside-bodypack': an IEM bodypack with a business UHF PTT handheld 1.5 m away (opts.kind: 'ptt-business-uhf' | 'ptt-pmr446').
+ *   'phone-buzz':     a GSM 900 phone 1 m from the mic receive antenna (pulsed TDMA, 217 Hz).
+ *   'dimmer-circuit': a triac dimmer 3 m from the receive antenna (broadband, falls steeply with frequency).
+ *   'eng-press-pit':  the ENG crew group at the barrier (opts.centre), mic receiver at FOH.
+ */
+export function noiseSourceScene(id, opts = {}) {
+  const base = (s, l, kind = 'mic') => {
+    s.stage = { width: 30, depth: 20 }; s.environment.floor = 'wood'; s.environment.model = 'free-space';
+    l.freqMHz = 606.1; l.tx.pos = { x: 3, y: 10, z: 1.5 }; l.tx.antenna = omni(); l.rx.antenna = omni();
+    l.rx.pos = { x: 22, y: 10, z: 1.2 }; l.rx.diversity.antennaB.pos = { x: 22, y: 9.4, z: 1.2 };
+    l.chain = [createChainItem('cable', { cableType: 'lmr-240', lengthM: 5 })];
+    void kind;
+  };
+  const at = (kind, pos, extra = {}) => createNoiseSource(kind, { pos, ...extra });
+  switch (id) {
+    case 'flash-at-pit': return make('mic', (s, l) => { base(s, l); l.name = 'Mic at FOH'; s.noiseSources = [at('speedlight-flash', { x: 20, y: 10, z: 1.5 }, { name: 'Photographer speedlight' })]; });
+    case 'ptt-beside-bodypack': return make('iem', (s, l) => {
+      s.stage = { width: 30, depth: 20 }; s.environment.floor = 'wood'; s.environment.model = 'free-space';
+      l.name = 'IEM bodypack'; l.freqMHz = 606.1; l.tx.pos = { x: 3, y: 10, z: 1.5 }; l.tx.powerDbm = 17; l.tx.antenna = omni();
+      l.rx.pos = { x: 12, y: 10, z: 1.2 }; l.rx.antenna = { type: 'body', gainDbi: -3, orientation: { az: 0, el: 90 }, polarisation: 'vertical' };
+      l.chain = [createChainItem('cable', { cableType: 'rg58', lengthM: 3 })];
+      s.noiseSources = [at(opts.kind || 'ptt-business-uhf', { x: 13.5, y: 10, z: 1.2 }, { name: 'Crew PTT radio' })];
+    });
+    case 'phone-buzz': return make('mic', (s, l) => { base(s, l); l.name = 'Mic at FOH'; s.noiseSources = [at('gsm-phone-900', { x: 22, y: 11, z: 1.2 }, { name: 'Phone on the FOH desk' })]; });
+    case 'dimmer-circuit': return make('mic', (s, l) => { base(s, l); l.name = 'Mic at FOH'; s.noiseSources = [at('dimmer-triac', { x: 22, y: 13, z: 1.5 }, { name: 'Dimmer rack' })]; });
+    case 'eng-press-pit': return make('mic', (s, l) => {
+      base(s, l); l.name = 'Mic at FOH'; s.stage = { width: 30, depth: 20 };
+      s.noiseSources = engCrewSources(opts.centre || { x: 12, y: 3, z: 0 });
+    });
+    default: return null;
+  }
+}
+
+/**
+ * Four-piece band with people (item 36): bandPeopleScene() -> a 16 x 10 m stage, four people (singer with a handheld, guitar and bass with bodypacks,
+ * drummer with a bodypack), each with a mic link and an IEM link. The mic receivers sit at the front of house, the IEM transmitters on a rack at the back of the stage.
+ * Frequencies are the first eight of the third-order clean IEM8 plan (illustrative). Links are named after the person ("Anna mic", "Anna IEM").
+ */
+export const BAND_PEOPLE = Object.freeze([
+  { name: 'Anna', role: 'singer', colour: 'red', pos: { x: 8, y: 7.5 }, facingDeg: 0, handheld: true, micMHz: 606.1, iemMHz: 610.9 },
+  { name: 'Ben', role: 'instrumentalist', colour: 'blue', pos: { x: 4.5, y: 6 }, facingDeg: 20, handheld: false, micMHz: 606.5, iemMHz: 614.1 },
+  { name: 'Chloe', role: 'instrumentalist', colour: 'green', pos: { x: 11.5, y: 6 }, facingDeg: -20, handheld: false, micMHz: 607.3, iemMHz: 618.1 },
+  { name: 'Dev', role: 'instrumentalist', colour: 'amber', pos: { x: 8, y: 3 }, facingDeg: 0, handheld: false, micMHz: 608.9, iemMHz: 623.7 },
+]);
+export function bandPeopleScene() {
+  return make('mic', (s, l0) => {
+    s.stage = { width: 16, depth: 10 }; s.environment.floor = 'wood';
+    s.links = []; s.people = [];
+    for (const b of BAND_PEOPLE) {
+      const person = createPerson({ name: b.name, role: b.role, colour: b.colour, pos: { ...b.pos }, facingDeg: b.facingDeg });
+      const mic = createDefaultLink('mic');
+      mic.name = personLinkName(person, 'mic'); mic.freqMHz = b.micMHz;
+      mic.rx.pos = { x: 8, y: 0.8, z: 2.0 }; mic.rx.diversity.antennaB.pos = { x: 8.6, y: 0.8, z: 2.0 };
+      mic.chain = [createChainItem('cable', { cableType: 'lmr-240', lengthM: 10 })];
+      const iem = createDefaultLink('iem');
+      iem.name = personLinkName(person, 'iem'); iem.freqMHz = b.iemMHz;
+      iem.tx.pos = { x: 8, y: 9.4, z: 2.0 }; iem.tx.powerDbm = 14;
+      // place the packs on the person: the offsets are stored for facing 0 and rotated by facingDeg
+      const mo = b.handheld ? DEFAULT_MIC_OFFSET.handheld : DEFAULT_MIC_OFFSET.bodypack, io = DEFAULT_IEM_OFFSET;
+      const a = (b.facingDeg * Math.PI) / 180, c = Math.cos(a), sn = Math.sin(a);
+      const abs = (o) => ({ x: b.pos.x + o.dx * c + o.dy * sn, y: b.pos.y - o.dx * sn + o.dy * c, z: o.dz });
+      mic.tx.pos = abs(mo); iem.rx.pos = abs(io);
+      person.micLinkId = mic.id; person.iemLinkId = iem.id;
+      person.micOffset = offsetFromPack(person, mic.tx.pos); person.iemOffset = offsetFromPack(person, iem.rx.pos);
+      s.links.push(mic, iem); s.people.push(person);
+    }
+    void l0;
+  });
+}
+
 export const EXAMPLES = [
   {
     id: 'dropout-two-ray',
@@ -933,7 +1011,7 @@ export const EXAMPLES = [
   {
     id: 'imd-iem-8-combined',
     title: 'Eight IEMs: all through one isolated 8-way combiner (A)',
-    note: 'Eight coordinated IEM transmitters (606.1 to 623.7 MHz, 25 mW each, no third-order product in any channel) feed one isolated 8-way combiner (4.5 dB through, 45 dB port isolation, assumed) and one directional antenna. Every channel loses the same 4.5 dB and reaches the bodypack at about -37.3 dBm; the worst pair of transmitters is 45.0 dB apart, so the strongest product made in an output stage (2f1-f2) is only -102.3 dBm at the bodypack, -64.9 dBc. The plan is not free: 158 fifth-order products still land in channels and lift the noise floor by 12.6 dB. Pros: one antenna, balanced levels; cons: 4.5 dB lost per channel, one point of failure; compare the 7 plus 1 and 4 plus 4 examples (figures illustrative).',
+    note: 'Eight coordinated IEM transmitters (606.1 to 623.7 MHz, 25 mW each, no third-order product in any channel) feed one isolated 8-way combiner (4.5 dB through, 45 dB port isolation, assumed) and one directional antenna. Every channel loses the same 4.5 dB and reaches the bodypack at about -37.3 dBm; the worst pair of transmitters is 45.0 dB apart, so the strongest product made in an output stage (2f1-f2) is only -102.3 dBm at the bodypack, -64.9 dBc. The plan is not free of fifth-order products: 158 still land in channels, but their summed level is only -244.0 dBm, and the 12.6 dB floor rise at the worst channel is wideband noise from the other transmitters, not intermod. Pros: one antenna, balanced levels; cons: 4.5 dB lost per channel, one point of failure; compare the 7 plus 1 and 4 plus 4 examples (figures illustrative).',
     build: () => ({ scene: iem8Scene('A') }),
   },
   {
@@ -1143,7 +1221,7 @@ export const EXAMPLES = [
   {
     id: 'p2p-delay-speaker',
     title: 'Point to point: FOH to a stage-left delay speaker',
-    note: 'A 17 dBm send at 606 MHz crosses 150 m between paddle antennas at 3 m. The received power is -50.6 dBm with 40.1 dB of margin and 70 percent of the first Fresnel zone is clear, so the 60 percent rule is met. Over a short path like this the ground reflection is left off; turn it on to see the ripple.',
+    note: 'A 17 dBm send at 606 MHz crosses 150 m between paddle antennas at 3 m. The received power is -50.6 dBm with 40.1 dB of margin and 70 percent of the first Fresnel zone is clear, so the 60 percent rule is met. Over a path this long the ground reflection is left off: switched on it only adds about 1.6 dB (see p2p-ground-reflection for a short path with a real ripple).',
     build: () => ({ scene: p2pScene('delay') }),
   },
   {
@@ -1436,6 +1514,138 @@ export const EXAMPLES = [
         Object.assign(l, applyFmPreset(l, 'sennheiser-em300g3'));
       }),
     }),
+  },
+  {
+    id: 'splitter-two-way-receiver',
+    title: 'Splitter: one antenna feeding two receivers',
+    note: 'Less ideal (a trade): a passive 2-way splitter lets two receivers share one antenna and costs 3.5 dB, so the chain loses 5.6 dB against 2.1 dB without it. The loss comes before the first gain stage, so the system noise figure rises from 10.1 dB to 13.6 dB and the margin falls from 59.5 dB to 56.0 dB. An active splitter (0 dB net gain, assumed 8 dB noise figure) gives 11.9 dB and 57.7 dB. Use active distribution for several receivers (figures illustrative).',
+    build: () => ({ scene: reviewScene('splitter-two-way-receiver', {}) }),
+  },
+  {
+    id: 'coupler-monitor-tap',
+    title: 'Coupler: a monitoring tap on the IEM feed',
+    note: 'Best practice: a 20 dB directional coupler taps the 17 dBm IEM feed for monitoring, so the tap port carries -3.0 dBm, enough for a meter or analyser, while the through path loses only 0.15 dB (margin changes by 0.1 dB). Terminate the unused port and never put bias on a line with a coupler. Figures illustrative.',
+    build: () => ({ scene: reviewScene('coupler-monitor-tap', {}) }),
+  },
+  {
+    id: 'lna-no-filter',
+    title: 'LNA with no filter beside an IEM transmitter',
+    note: 'Problem: a 20 dB LNA at the mic receive antenna with no filter sees the IEM transmitter 3.3 m away at -42.4 dBm and delivers -23.7 dBm to the receiver, which is hot (5.7 dB from the P1dB of -18 dBm) with 0.4 dB of desense. The wanted mic margin is 58.2 dB but the receiver works near compression. Put a bandpass filter ahead of the LNA (see filter-before-booster). Receiver figures illustrative.',
+    build: () => ({ scene: reviewScene('lna-no-filter', {}) }),
+  },
+  {
+    id: 'filter-before-booster',
+    title: 'Filter before the booster',
+    note: 'Best practice: the same scene with a 604 to 608 MHz bandpass (1.5 dB loss, 40 dB rejection, assumed) ahead of the LNA: the IEM carrier reaches the receiver at -65.2 dBm, 47.2 dB below the P1dB, with no desense. The filter costs the wanted mic 1.5 dB (margin 56.7 dB against 58.2 dB), a cheap price. Filter before gain.',
+    build: () => ({ scene: reviewScene('filter-before-booster', {}) }),
+  },
+  {
+    id: 'pad-on-iem-transmitter',
+    title: 'Pad on an IEM transmitter with the wrong antenna',
+    note: 'Less ideal fix: the IEM transmitter drives an antenna cut for 863 to 865 MHz at 606.1 MHz (VSWR 46.2:1), and a 6 dB pad in front of it brings the reflection at the output stage down from 19.6 dBm to 1.6 dBm (1.6:1 at the PA). The price is 6 dB of link margin (38.3 dB against 44.3 dB), which is still plenty. The real fix is the right antenna (figures illustrative, assumed band edges).',
+    build: () => ({ scene: reviewScene('pad-on-iem-transmitter', {}) }),
+  },
+  {
+    id: 'bias-tee-booster-up-the-mast',
+    title: 'Bias tee: powering a booster up the mast',
+    note: 'Best practice: a 12 dB booster at the antenna is powered up 45 m of LMR-400 by a bias tee at the rack, and the model raises no DC warning. The chain gains 6.5 dB net and the system noise figure is 5.2 dB against 10.1 dB for a bare RG58 run. Keep every DC block, analyser and passive splitter off the line between the tee and the booster.',
+    build: () => ({ scene: reviewScene('bias-tee-booster-up-the-mast', {}) }),
+  },
+  {
+    id: 'bias-tee-into-dcblock',
+    title: 'Bias tee behind a DC block',
+    note: 'Problem: the same chain with a DC block between the cable and the bias tee. The paper budget barely changes (margin 64.3 dB against 64.4 dB), but no bias reaches the booster and the model warns that it needs 12 V; a dead booster does not give its 12 dB. Take the block out or move the tee.',
+    build: () => ({ scene: reviewScene('bias-tee-booster-up-the-mast', {"block": true}) }),
+  },
+  {
+    id: 'body-contact-sweaty-bodypack',
+    title: 'Sweaty bodypack: contact and dampness',
+    note: 'Problem: a bodypack antenna against bare skin (6 dB, assumed) and wet with sweat (3 dB more) loses 9.0 dB, so the margin is 42.1 dB against 51.1 dB for the same pack free and dry. The contact option replaces the scene body-loss setting instead of adding to it. A layer of clothing costs 2.5 dB and dry skin 6 dB; keep the antenna off the skin and dry.',
+    build: () => ({ scene: reviewScene('body-contact-sweaty-bodypack', {}) }),
+  },
+  {
+    id: 'tilted-whip-vs-vertical',
+    title: 'Tilted bodypack whip against a vertical receive antenna',
+    note: 'Less ideal: a bodypack whip tilted 60 degrees from the vertical receive antenna loses 5.6 dB to polarisation mismatch (2.9 dB at 45 degrees, 14.1 dB at 85, 15.0 dB at 90 where the 15 dB cross-polar floor applies). The margin falls from 58.8 dB upright to 53.1 dB. Wear the pack upright or use a slant or circular receive antenna (see circular-polarisation-wanted-mic).',
+    build: () => ({ scene: reviewScene('tilted-whip-vs-vertical', {}) }),
+  },
+  {
+    id: 'circular-polarisation-wanted-mic',
+    title: 'Circular receive antenna for a wandering mic',
+    note: 'Best practice: the whip lies flat (90 degrees of tilt), which would cost 15.0 dB against a vertical receive antenna, but a circular helical antenna costs a constant 3.01 dB whatever the angle. You give up 3 dB when the mic is upright to avoid the deep mismatch when it is not. Match the receive antenna to the worst case (gain figures assumed).',
+    build: () => ({ scene: reviewScene('circular-polarisation-wanted-mic', {}) }),
+  },
+  {
+    id: 'ground-plane-quarterwave',
+    title: 'Quarter-wave whip: ground plane or free cable',
+    note: 'Problem: a quarter-wave whip on a free cable has no ground plane, so its gain is only -1 dBi and unpredictable (the model warns). On a rack panel it is +3 dBi, which is 4.0 dB more margin (61.8 dB against 57.8 dB); a body counts 1 dBi and a large plate 5 dBi. Mount it on a panel or a ground plate (gain figures assumed).',
+    build: () => ({ scene: reviewScene('ground-plane-quarterwave', {}) }),
+  },
+  {
+    id: 'coverage-modes-compare',
+    title: 'Coverage modes: coherent, power and best',
+    note: 'Compare: the same two IEM antennas 1.5 m apart over a front zone, combined three ways. Coherent adds the waves with phase, so the worst cell is -77.0 dBm in a null; power adds the powers (-43.1 dBm worst) and best takes the stronger antenna (-45.9 dBm). Plan with power or best and check the coherent nulls separately (see zones-coherent-nulls).',
+    build: () => ({ scene: reviewScene('coverage-modes-compare', {}) }),
+  },
+  {
+    id: 'external-noise-urban-vs-quiet',
+    title: 'External noise: urban against quiet',
+    note: 'Less ideal: a 20 dB low-noise booster at the antenna (system noise figure 2.3 dB) makes the receiver sensitive to a city: urban noise lifts the floor to -116.4 dBm against -118.7 dBm with none and costs 2.3 dB of margin (54.6 dB against 56.9 dB). Without the booster (16.6 dB noise figure) the same city costs only 0.1 dB. Gain cannot fix noise that arrives at the antenna.',
+    build: () => ({ scene: reviewScene('external-noise-urban-vs-quiet', {}) }),
+  },
+  {
+    id: 'audio-bandwidth-iem-vs-mic',
+    title: 'Audio bandwidth: narrow mic against IEM',
+    note: 'Narrow-band mic: the transmitter audio is limited to 9.0 kHz (a user value), so the baseband view puts the ceiling at 9 kHz and leaves a 23.8 kHz gap to the 32.8 kHz control tone. A default mic assumes 18 kHz (gap 14.8 kHz) and a stereo IEM 15 kHz, 4 kHz below the 19 kHz pilot. Set the figure to the real device (design values, not measured).',
+    build: () => ({ scene: reviewScene('audio-bandwidth-iem-vs-mic', {}) }),
+  },
+  {
+    id: 'imd-iem-8-with-fifth-order',
+    title: 'Fifth-order products: count against level',
+    note: 'Understand the count: five channels from the third-order clean plan still put 26 fifth-order products in channels (158 with all eight), but their summed level is only -253.5 dBm at the bodypack, far below the -111.0 dBm thermal floor. The 12.6 dB floor rise comes from the other transmitters\' wideband noise (-98.7 dBm), not from intermod. Count hits to coordinate, judge harm by level.',
+    build: () => ({ scene: reviewScene('imd-iem-8-with-fifth-order', {}) }),
+  },
+  {
+    id: 'p2p-ground-reflection',
+    title: 'Point to point: ground reflection ripple',
+    note: 'Problem: a 40 m link between paddles lying flat at 3 m, 606 MHz, with the ground reflection on: it costs 5.0 dB at 40 m, and over 20 to 80 m the reflected ray swings the level from 16.7 dB below the direct ray at 36.2 m to 5.8 dB above at 73.7 m. With vertical polarisation the dip is only 1.9 dB. At 150 m the reflection only adds 2.7 dB and the ripple is gone.',
+    build: () => ({ scene: reviewScene('p2p-ground-reflection', {}) }),
+  },
+  {
+    id: 'band-four-piece-people',
+    title: 'Four-piece band: a mic and an IEM pack per person',
+    note: 'Best practice: four people each carry a mic and an IEM bodypack, and the links are named after them (Anna mic, Anna IEM). The margins run from 27.9 dB (Dev IEM, the weakest) to 47.7 dB (Ben mic); the handheld sits at 1.3 m and the bodypacks at the belt, 1.0 m. Move a person and both of their packs move together with the offsets kept, and deleting a person leaves the links in place (frequencies illustrative).',
+    build: () => ({ scene: bandPeopleScene() }),
+  },
+  {
+    id: 'noise-flash-at-pit',
+    title: 'Noise: a speedlight at the photo pit',
+    note: 'Problem: a photographer\'s speedlight 2 m from the FOH receive antenna is a 1 ms broadband click about 3 times a second (duty 0.3 percent, assumed): -49.9 dBm at its peak but only -75.1 dBm on average. The average lifts the floor by 36.9 dB and leaves 17.4 dB of margin, and the peak is 62.1 dB above the floor, the pop on the squelch. Keep flashes away from the antenna and use a filtered, shielded run (figures assumed).',
+    build: () => ({ scene: noiseSourceScene('flash-at-pit') }),
+  },
+  {
+    id: 'noise-ptt-beside-bodypack',
+    title: 'Noise: a PTT radio beside an IEM bodypack',
+    note: 'Problem: a 2 W business UHF handheld keyed 1.5 m from the IEM bodypack puts -9.1 dBm at the antenna, 83.1 dB above what the 606 MHz channel filter passes (selectivity assumed). In the channel that is -92.3 dBm while keyed and -97.5 dBm on average (30 percent duty), a 13.7 dB floor rise and 37.5 dB of margin. A 0.5 W PMR446 radio gives 7.4 dB and 43.8 dB, so keep crew radios away from bodypacks (figures assumed).',
+    build: () => ({ scene: noiseSourceScene('ptt-beside-bodypack') }),
+  },
+  {
+    id: 'noise-phone-buzz',
+    title: 'Noise: a GSM phone near the FOH receiver',
+    note: 'Problem: a GSM 900 phone 1 m from the receive antenna bursts 2 W (33 dBm) for 0.577 ms every 4.615 ms, the 217 Hz frame: +1.9 dBm at the antenna, -87.4 dBm in the channel at the peak and -96.4 dBm on average (duty 12.5 percent). The floor rises 15.7 dB; the audible 217 Hz buzz from an audio cable or preamp that demodulates the burst is not modelled. Put phones in flight mode or away from antennas and cables (figures assumed).',
+    build: () => ({ scene: noiseSourceScene('phone-buzz') }),
+  },
+  {
+    id: 'noise-dimmer-circuit',
+    title: 'Noise: a dimmer rack near the receiver',
+    note: 'Less ideal: a triac dimmer 3 m from the receive antenna chops twice per mains cycle (120 Hz, duty 1.2 percent, assumed) and is strong at VHF but weak at 606 MHz: -90.6 dBm at the peak, -109.8 dBm on average, a 4.2 dB floor rise and 50.1 dB of margin. Through the air it is a small problem at UHF; the buzz that reaches the audio comes through cables and the mains, so use balanced audio and filtered power (figures assumed).',
+    build: () => ({ scene: noiseSourceScene('dimmer-circuit') }),
+  },
+  {
+    id: 'noise-eng-press-pit',
+    title: 'Noise: an ENG crew at the press pit',
+    note: 'Problem: an ENG crew at the barrier (camera transmitter, two PTT radios, an LED light and a van generator, about 12 m from the FOH receiver) raises the floor by 17.6 dB together and leaves 36.7 dB of margin. The LED light dominates at -97.2 dBm, then the generator at -98.6 dBm, the PTT radios at about -108 dBm average, and the 2.3 GHz camera transmitter only -115.8 dBm because it is far out of band. Agree lights off, radios and generator away from the antennas with the press (figures assumed).',
+    build: () => ({ scene: noiseSourceScene('eng-press-pit') }),
   },
 ];
 

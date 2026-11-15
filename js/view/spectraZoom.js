@@ -3,11 +3,13 @@
 // and the dialog follows the live signals: the owner calls update() on every frame.
 // DOM and canvas host are injected so the logic runs under a minimal fake DOM in the tests.
 
+let zoomSeq = 0;
 export function createZoom({ doc, hostFactory, describe, table, draw, onClose }) {
   const el = (tag, cls, text, attrs) => { const e = doc.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; if (attrs) for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); return e; };
-  const dlg = el('dialog', 'spectrum-dialog', null, { 'aria-labelledby': 'spectrum-dialog-title' });
+  const titleId = zoomSeq++ ? `spectrum-dialog-title-${zoomSeq}` : 'spectrum-dialog-title';
+  const dlg = el('dialog', 'spectrum-dialog', null, { 'aria-labelledby': titleId });
   const head = el('div', 'spectrum-dialog-head');
-  const title = el('h2', null, '', { id: 'spectrum-dialog-title' });
+  const title = el('h2', null, '', { id: titleId });
   const closeBtn = el('button', 'spectrum-dialog-close', 'Close', { type: 'button' });
   head.append(title, closeBtn);
   const slot = el('div', 'spectrum-dialog-slot');

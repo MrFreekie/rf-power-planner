@@ -30,6 +30,8 @@ import { EXTERNAL_NOISE_FIGURE_600MHZ_DB, INTERFERENCE_LEVELS, RX_PRESETS } from
 import { FM_TX_PRESET_IDS } from './fm-presets.js';
 import { CEILING_MATERIALS, CEILING_LIMITS } from './ceiling.js';
 import { WALL_NOISE_PRESETS, WALL_NOISE_LIMITS, WALL_CONSTRUCTIONS } from './ledwall.js';
+import { validatePerson, prunePeople, PEOPLE_LIMITS, linkOwners } from './people.js';
+import { validateNoiseSource, wallNoiseSourcesFromReflectors, NOISE_SOURCE_LIMITS } from './noise-sources.js';
 import { AUDIENCE_KINDS, AUDIENCE_DENSITY_LIMITS, AUDIENCE_MAX } from './audience.js';
 import { ANTENNA_BANDS } from './antenna-band.js';
 
@@ -324,7 +326,7 @@ const inRange = (v, lo, hi) => isNum(v) && v >= lo && v <= hi;
 export const SCENE_LIMITS = Object.freeze({
   maxText: 4 * 1024 * 1024, // characters of scene JSON that deserialize() will parse
   maxDepth: 24, maxNodes: 200000, maxString: 1000, // generic shape guard (the venue underlay is checked on its own)
-  maxLinks: 64, maxReflectors: 500, maxZones: 100, maxZonePoints: 500, maxImdTransmitters: 16, maxImdGroups: 8, maxChain: 32, maxBranches: 16,
+  maxLinks: 64, maxPeople: 64, maxReflectors: 500, maxZones: 100, maxZonePoints: 500, maxImdTransmitters: 16, maxImdGroups: 8, maxChain: 32, maxBranches: 16,
   coordM: 10000, zoneCoordM: 2000, zM: 1000, maxFreqMHz: 1e6, maxDb: 1000, maxIdChars: 64,
 });
 const SL = SCENE_LIMITS;
@@ -537,6 +539,30 @@ export function validateScene(scene) {
       if (!(isNum(a.densityPerM2) && a.densityPerM2 >= AUDIENCE_DENSITY_LIMITS[0] && a.densityPerM2 <= AUDIENCE_DENSITY_LIMITS[1])) errors.push(`${p}.densityPerM2 must be between ${AUDIENCE_DENSITY_LIMITS[0]} and ${AUDIENCE_DENSITY_LIMITS[1]}`);
       if (a.headM !== undefined && !(isNum(a.headM) && a.headM >= 0.3 && a.headM <= 2.5)) errors.push(`${p}.headM must be between 0.3 and 2.5`);
     });
+  }
+  if (scene.people !== undefined) {
+    if (!Array.isArray(scene.people)) errors.push('people must be an array');
+    else if (scene.people.length > PEOPLE_LIMITS.max) errors.push(`at most ${PEOPLE_LIMITS.max} people are supported`);
+    else {
+      const seenPe = new Set(), owned = new Set();
+      scene.people.forEach((pe, i) => {
+        validatePerson(pe, `people[${i}]`, errors, scene);
+        if (!isObj(pe)) return;
+        if (typeof pe.id === 'string') { if (seenPe.has(pe.id)) errors.push(`people[${i}].id is not unique`); seenPe.add(pe.id); }
+        for (const k of ['micLinkId', 'iemLinkId']) if (typeof pe[k] === 'string') { if (owned.has(pe[k])) errors.push(`people[${i}].${k} is already assigned to another person`); owned.add(pe[k]); }
+      });
+    }
+  }
+  if (scene.noiseSources !== undefined) {
+    if (!Array.isArray(scene.noiseSources)) errors.push('noiseSources must be an array');
+    else if (scene.noiseSources.length > NOISE_SOURCE_LIMITS.max) errors.push(`at most ${NOISE_SOURCE_LIMITS.max} noise sources are supported`);
+    else {
+      const seenNs = new Set();
+      scene.noiseSources.forEach((n, i) => {
+        validateNoiseSource(n, `noiseSources[${i}]`, errors);
+        if (isObj(n) && typeof n.id === 'string') { if (seenNs.has(n.id)) errors.push(`noiseSources[${i}].id is not unique`); seenNs.add(n.id); }
+      });
+    }
   }
   if (scene.platforms !== undefined) {
     if (!Array.isArray(scene.platforms)) errors.push('platforms must be an array');
@@ -782,6 +808,8 @@ export function migrateScene(raw) {
   if (Array.isArray(raw.overheadPanels) && raw.overheadPanels.length > CEILING_LIMITS.panelsMax) throw new Error(`Scene has more than ${CEILING_LIMITS.panelsMax} overhead panels`);
   if (Array.isArray(raw.audience) && raw.audience.length > AUDIENCE_MAX) throw new Error(`Scene has more than ${AUDIENCE_MAX} audience areas`);
   if (Array.isArray(raw.platforms) && raw.platforms.length > PLATFORM_LIMITS.max) throw new Error(`Scene has more than ${PLATFORM_LIMITS.max} platforms`);
+  if (Array.isArray(raw.noiseSources) && raw.noiseSources.length > NOISE_SOURCE_LIMITS.max) throw new Error(`Scene has more than ${NOISE_SOURCE_LIMITS.max} noise sources`);
+  if (Array.isArray(raw.people) && raw.people.length > PEOPLE_LIMITS.max) throw new Error(`Scene has more than ${PEOPLE_LIMITS.max} people`);
   const s = structuredClone(raw);
   if (s.version === undefined) s.version = 1; // pre-versioned files
   if (s.version > SCHEMA_VERSION) throw new Error(`Scene version ${s.version} is newer than supported ${SCHEMA_VERSION}`);
@@ -856,6 +884,13 @@ export function migrateScene(raw) {
   if (s.zones === undefined) s.zones = [];
   for (const z of s.zones) if (isObj(z) && z.passAreaFraction === undefined) z.passAreaFraction = DEFAULT_PASS_AREA_FRACTION;
   if (s.coverage === undefined) s.coverage = { mode: 'power' };
+  // Item 34: a video wall (reflector.noise) also appears as a noise source of kind video-wall, linked by reflectorId. The wall block is unchanged
+  // and stays the single source of truth (counted once in result.wallNoise); the source gives the wall its place in the Noise sources list and a mute.
+  if (Array.isArray(s.reflectors) && s.reflectors.some((r) => isObj(r) && isObj(r.noise))) {
+    const add = wallNoiseSourcesFromReflectors(s);
+    if (add.length && (!Array.isArray(s.noiseSources) || s.noiseSources.length + add.length <= NOISE_SOURCE_LIMITS.max)) s.noiseSources = [...(Array.isArray(s.noiseSources) ? s.noiseSources : []), ...add];
+  }
+  if (Array.isArray(s.people)) prunePeople(s); // item 36: no reference to a link that is gone, wrong or already owned
   syncScene(s);
   // while (s.version < SCHEMA_VERSION) { apply step; s.version++ }
   return s;

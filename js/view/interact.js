@@ -106,6 +106,8 @@ export function attachInteraction(canvas, vp, opts) {
     else if (e.key === '0') opts.fit?.();
     else if (e.key === ']' || e.key === '.') opts.cycle?.(1);
     else if (e.key === '[' || e.key === ',') opts.cycle?.(-1);
+    else if (e.key === 'PageUp' || e.key === 'PageDown') opts.tiltBy?.(e.key === 'PageUp' ? 1 : -1, e.shiftKey);
+    else if (e.key === 'End') opts.tiltReset?.();
     else if (e.key === 'Escape') opts.escape?.();
     else handled = false;
     if (handled) e.preventDefault();
@@ -115,6 +117,7 @@ export function attachInteraction(canvas, vp, opts) {
   const on = (t, ev, fn, o) => { t.addEventListener(ev, fn, o); return () => t.removeEventListener(ev, fn, o); };
   const offs = [
     on(canvas, 'pointerdown', onDown), on(canvas, 'pointermove', onMove),
+    on(canvas, 'dblclick', (e) => { const p = local(e); opts.dblclick?.(opts.hitTest(p.x, p.y, false)); }),
     on(canvas, 'pointerup', onUp), on(canvas, 'pointercancel', onUp),
     on(canvas, 'wheel', onWheel, { passive: false }),
     on(canvas, 'keydown', onKey), on(canvas, 'keyup', onKeyUp),

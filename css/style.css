@@ -844,3 +844,8 @@ body.vnalab-open { overflow: hidden; }
 @media print { .source-bar { display: none !important; } }
 
 .pane-opt { font-size: 12px; font-weight: normal; margin-left: 10px; display: inline-flex; align-items: center; gap: 4px; text-transform: none; letter-spacing: 0; }
+
+.field-limit { display: block; font-size: 12px; color: var(--warn-text, #8a5a00); margin-top: 2px; }
+.imd-zoombar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.imd-zoombar button { min-height: 32px; }
+.imd canvas[role="button"]:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }

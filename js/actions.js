@@ -7,6 +7,7 @@ import { startWalk, stopWalk } from './walk.js';
 import { effectiveAntennaB } from './model/diversity.js';
 import { createDefaultScene, createDefaultLink, createChainItem, createReflector, createBranch, createZone, createPlatform, STAGE_LIMITS, PLATFORM_LIMITS, PLATFORM_MATERIALS, createImdTransmitter, defaultImdTransmitters, newId, SCENE_LIMITS } from './model/scene.js';
 import { applyFmPreset } from './model/fm-presets.js';
+import { PEOPLE_LIMITS, PERSON_ROLES, PERSON_COLOURS, createPerson, personLinkName, personPackPositions, offsetFromPack, linkOwners, prunePeople } from './model/people.js';
 import { validateVenue } from './model/venue-underlay.js';
 import { SURFACES, ANTENNAS, GROUND_PLANE_GAIN_DBI, allowedPolarisations, defaultPolarisation, ANTENNA_CONTACT_LOSS_DB, ANTENNA_DAMPNESS_LOSS_DB } from './model/library.js';
 
@@ -741,3 +742,164 @@ export function setAudioToneHz(store, hz, o = {}) {
   const v = Math.min(TONE_HZ_LIMITS[1], Math.max(TONE_HZ_LIMITS[0], +hz));
   return store.update((d) => { d.audioToneHz = v; }, { coalesce: o.coalesce || 'audioToneHz' });
 }
+
+
+// ---- people (item 36) ----------------------------------------------------------------------------------------------
+// A person groups the mic transmitter and the IEM bodypack of their links (model/people.js). Moving or turning a person moves both packs and
+// keeps their offsets; deleting a person never deletes a link. Link names follow the person: "Anna mic", "Anna IEM".
+
+const peopleOf = (d) => { if (!Array.isArray(d.people)) d.people = []; return d.people; };
+const rotateAz = (ant, deg) => { if (ant && ant.orientation && Number.isFinite(ant.orientation.az)) ant.orientation = { ...ant.orientation, az: ((ant.orientation.az + deg + 540) % 360) - 180 }; };
+const pack = (d, person) => ({ mic: person.micLinkId ? findLink(d, person.micLinkId) : null, iem: person.iemLinkId ? findLink(d, person.iemLinkId) : null });
+
+/** Write the pack positions of a person onto the linked mic transmitter and IEM bodypack. */
+function placePacks(d, person) {
+  const at = personPackPositions(person), { mic, iem } = pack(d, person);
+  if (mic && at.mic) mic.tx.pos = { ...mic.tx.pos, ...at.mic };
+  if (iem && at.iem) iem.rx.pos = { ...iem.rx.pos, ...at.iem };
+}
+
+/** Copy the person's body coupling (contact, dampness) onto the antennas of the packs. */
+function applyCoupling(d, person) {
+  const { mic, iem } = pack(d, person);
+  for (const a of [mic && mic.tx.antenna, iem && iem.rx.antenna]) {
+    if (!a) continue;
+    for (const k of ['contact', 'dampness']) {
+      if (person[k] === undefined) continue;
+      if (person[k] === 'free' || person[k] === 'dry') delete a[k]; else a[k] = person[k];
+    }
+  }
+}
+
+/** Rename the links a person carries (only names that still equal the previous automatic name are replaced, so a typed link name is kept). */
+function renameLinks(d, person, oldName) {
+  const { mic, iem } = pack(d, person);
+  const old = { name: oldName };
+  if (mic && mic.name === personLinkName(old, 'mic')) mic.name = personLinkName(person, 'mic');
+  if (iem && iem.name === personLinkName(old, 'iem')) iem.name = personLinkName(person, 'iem');
+}
+
+/** addPerson(store, { name, role, colour, pos: {x, y}, facingDeg }) -> id, or null when the cap is reached. The colour cycles through the palette. */
+export function addPerson(store, partial = {}) {
+  let id = null;
+  store.update((d) => {
+    const list = peopleOf(d);
+    if (list.length >= PEOPLE_LIMITS.max) return;
+    const p = createPerson({ name: `Person ${list.length + 1}`, colour: PERSON_COLOURS[list.length % PERSON_COLOURS.length] });
+    if (typeof partial.name === 'string' && partial.name.length >= 1) p.name = partial.name.slice(0, PEOPLE_LIMITS.nameChars);
+    if (PERSON_ROLES.includes(partial.role)) p.role = partial.role;
+    if (PERSON_COLOURS.includes(partial.colour)) p.colour = partial.colour;
+    if (partial.pos && Number.isFinite(partial.pos.x) && Number.isFinite(partial.pos.y)) p.pos = { x: partial.pos.x, y: partial.pos.y };
+    if (Number.isFinite(partial.facingDeg)) p.facingDeg = partial.facingDeg;
+    list.push(p); id = p.id;
+  });
+  return id;
+}
+
+/**
+ * updatePerson(store, id, { name?, role?, colour?, facingDeg?, contact?, dampness? }, { coalesce }): a new facingDeg turns the person about their floor
+ * point: the pack positions rotate with them and both antenna azimuths turn by the same angle. contact / dampness are antenna contact keys
+ * (library.js) and are written onto both packs. A rename also renames the links the person carries.
+ */
+export function updatePerson(store, id, patch = {}, o = {}) {
+  return store.update((d) => {
+    const p = peopleOf(d).find((x) => x.id === id);
+    if (!p) return;
+    const oldName = p.name;
+    if (typeof patch.name === 'string' && patch.name.length >= 1) { p.name = patch.name.slice(0, PEOPLE_LIMITS.nameChars); if (p.name !== oldName) renameLinks(d, p, oldName); }
+    if (PERSON_ROLES.includes(patch.role)) p.role = patch.role;
+    if (PERSON_COLOURS.includes(patch.colour)) p.colour = patch.colour;
+    if (patch.contact !== undefined && (patch.contact === 'free' || Object.prototype.hasOwnProperty.call(ANTENNA_CONTACT_LOSS_DB, patch.contact))) p.contact = patch.contact;
+    if (patch.dampness !== undefined && (patch.dampness === 'dry' || Object.prototype.hasOwnProperty.call(ANTENNA_DAMPNESS_LOSS_DB, patch.dampness))) p.dampness = patch.dampness;
+    if (patch.contact !== undefined || patch.dampness !== undefined) applyCoupling(d, p);
+    if (Number.isFinite(patch.facingDeg) && Math.abs(patch.facingDeg) <= 360) {
+      const delta = patch.facingDeg - (p.facingDeg || 0);
+      p.facingDeg = patch.facingDeg;
+      if (delta) { const { mic, iem } = pack(d, p); if (mic) rotateAz(mic.tx.antenna, delta); if (iem) rotateAz(iem.rx.antenna, delta); placePacks(d, p); }
+    }
+  }, opts(o));
+}
+
+function assign(store, personId, linkId, which, { swap = false } = {}) {
+  let ok = false;
+  store.update((d) => {
+    const list = peopleOf(d), p = list.find((x) => x.id === personId);
+    if (!p) return;
+    const idKey = which === 'iem' ? 'iemLinkId' : 'micLinkId', offKey = which === 'iem' ? 'iemOffset' : 'micOffset';
+    if (linkId === null || linkId === undefined) { delete p[idKey]; delete p[offKey]; ok = true; return; }
+    const link = findLink(d, linkId);
+    if (!link || link.kind !== (which === 'iem' ? 'iem' : 'mic')) return;
+    const owner = list.find((x) => x.id !== personId && x[idKey] === linkId);
+    if (owner && !swap) return;
+    const posOf = (l) => (which === 'iem' ? l.rx.pos : l.tx.pos);
+    if (owner) { // swap: the other person receives this person's previous link (or none)
+      const prev = p[idKey];
+      delete owner[idKey]; delete owner[offKey];
+      if (prev) {
+        const l2 = findLink(d, prev);
+        owner[idKey] = prev;
+        if (l2 && owner.pos) owner[offKey] = offsetFromPack(owner, posOf(l2));
+        if (l2) l2.name = personLinkName(owner, which);
+      }
+    }
+    const here = posOf(link);
+    if (!p.pos) p.pos = { x: here.x, y: here.y }; // an unplaced person stands where their first pack is
+    p[idKey] = linkId;
+    p[offKey] = offsetFromPack(p, here);
+    link.name = personLinkName(p, which);
+    applyCoupling(d, p);
+    ok = true;
+  });
+  return ok;
+}
+
+/** assignMic(store, personId, linkId | null, { swap }) -> true when done. A link already owned by someone else needs { swap: true } (they receive this person's previous link). */
+export const assignMic = (store, personId, linkId, o = {}) => assign(store, personId, linkId, 'mic', o);
+/** assignIem(store, personId, linkId | null, { swap }): same for the IEM bodypack link. */
+export const assignIem = (store, personId, linkId, o = {}) => assign(store, personId, linkId, 'iem', o);
+
+/** removePerson(store, id): the links stay where they are. */
+export function removePerson(store, id) {
+  return store.update((d) => { const i = peopleOf(d).findIndex((x) => x.id === id); if (i >= 0) d.people.splice(i, 1); });
+}
+
+/** reorderPerson(store, id, toIndex): list order (the GUI drag handle). */
+export function reorderPerson(store, id, toIndex) {
+  return store.update((d) => {
+    const list = peopleOf(d), i = list.findIndex((x) => x.id === id);
+    if (i < 0 || !Number.isInteger(toIndex)) return;
+    const [p] = list.splice(i, 1);
+    list.splice(Math.max(0, Math.min(list.length, toIndex)), 0, p);
+  });
+}
+
+/** movePerson(store, id, { x, y }, { coalesce }): the person and both packs move together, offsets kept (packs keep their heights). */
+export function movePerson(store, id, pos, o = {}) {
+  return store.update((d) => {
+    const p = peopleOf(d).find((x) => x.id === id);
+    if (!p || !pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.y)) return;
+    p.pos = { x: pos.x, y: pos.y };
+    placePacks(d, p);
+  }, opts(o));
+}
+
+/** movePeople(store, ids, { dx, dy }, { coalesce }): move a group by the same step, every person keeping their own offsets and the group its shape. */
+export function movePeople(store, ids, delta, o = {}) {
+  return store.update((d) => {
+    if (!delta || !Number.isFinite(delta.dx) || !Number.isFinite(delta.dy)) return;
+    const set = new Set(ids || []);
+    for (const p of peopleOf(d)) {
+      if (!set.has(p.id) || !p.pos) continue;
+      p.pos = { x: p.pos.x + delta.dx, y: p.pos.y + delta.dy };
+      placePacks(d, p);
+    }
+  }, opts(o));
+}
+
+/** pruneScenePeople(store): after the UI deletes a link, call this to drop the references to it (people never keep a dangling link). */
+export function pruneScenePeople(store) {
+  return store.update((d) => { if (Array.isArray(d.people)) prunePeople(d); });
+}
+
+/** peopleLinkOwners(scene) -> Map linkId -> { personId, which } for the GUI dropdown (only unassigned links are offered, the rest need a swap). */
+export const peopleLinkOwners = (scene) => linkOwners(scene && scene.people);

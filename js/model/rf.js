@@ -24,6 +24,7 @@ import { p2pGeometry, suggestedFadeMarginDb, K_STANDARD } from './p2p.js';
 export { p2pGeometry, earthBulgeM, fresnelRadiusM, knifeEdgeLossDb, requiredAntennaHeightM, radioHorizonM, suggestedFadeMarginDb } from './p2p.js';
 import { rofEffective, rofChainWarnings, rofBranchDelays } from './rof.js';
 import { wallNoiseAt, wallConstruction } from './ledwall.js';
+import { noiseSourcesAt, mutedReflectorIds, floorRiseDb } from './noise-sources.js';
 export { wallNoiseAt, wallFieldDbuvm, WALL_NOISE_PRESETS, WALL_CONSTRUCTIONS, wallConstruction, meshShieldingDb } from './ledwall.js';
 export { rofEffective, rofOpticalLossDb, rofIip3FromSfdr, rofBranchDelays } from './rof.js';
 import { audiencePathLoss } from './audience.js';
@@ -968,7 +969,8 @@ export function solveLink(scene, link) {
   // Video (LED) wall noise (ledwall.js): broadband field of scene.reflectors[].noise converted to power at the receive antenna terminals, then
   // power-summed with the noise floor already in the cascade (external noise, interference, system NF). Only walls that carry a noise block count.
   const marginBeforeWallDb = rxPowerDbm - cascade.sensitivityAtAntennaDbm;
-  const wn = wallNoiseAt(scene.reflectors, absolutePos(scene, link.rx.pos), f, cascade.bandwidthKHz, (b) => antennaGainDb(link.rx.antenna, b));
+  const mutedWalls = mutedReflectorIds(scene.noiseSources);
+  const wn = wallNoiseAt(mutedWalls.size ? (scene.reflectors || []).filter((r) => !mutedWalls.has(r.id)) : scene.reflectors, absolutePos(scene, link.rx.pos), f, cascade.bandwidthKHz, (b) => antennaGainDb(link.rx.antenna, b));
   let wallNoise = null;
   if (wn.walls.length) {
     const before = cascade.noiseFloorDbm;
@@ -979,7 +981,22 @@ export function solveLink(scene, link) {
     step(`Video wall noise ${wn.dbm.toFixed(1)} dBm in ${cascade.bandwidthKHz} kHz (floor +${wallNoise.riseDb.toFixed(1)} dB, note)`, 0); wf[wf.length - 1].note = true;
   }
   cascade.wallNoise = wallNoise;
+  // Other noise sources (noise-sources.js, item 34): the AVERAGE power of every source (gated sources scaled by their duty) is power-summed into the
+  // floor after the wall; the PEAK figure (pulse or key-up) is reported beside it and does not change the margin.
+  const marginAfterWallDb = rxPowerDbm - cascade.sensitivityAtAntennaDbm;
+  let noiseSources = null;
+  const nsAt = Array.isArray(scene.noiseSources) && scene.noiseSources.length ? noiseSourcesAt(scene.noiseSources, absolutePos(scene, link.rx.pos), f, cascade.bandwidthKHz, (b) => antennaGainDb(link.rx.antenna, b)) : null;
+  if (nsAt && nsAt.sources.some((x) => x.averageDbm > -Infinity)) {
+    const before = cascade.noiseFloorDbm;
+    const after = 10 * Math.log10(Math.pow(10, before / 10) + Math.pow(10, nsAt.averageDbm / 10));
+    cascade.noiseFloorDbm = after;
+    cascade.sensitivityAtAntennaDbm = after + cascade.requiredSnrDb;
+    noiseSources = { averageDbm: nsAt.averageDbm, peakDbm: nsAt.peakDbm, floorBeforeDbm: before, floorAfterDbm: after, riseDb: after - before, peakRiseDb: floorRiseDb(before, nsAt.peakDbm), bandwidthKHz: cascade.bandwidthKHz, sources: nsAt.sources, dominant: nsAt.dominant, marginChangeDb: 0 };
+    step(`Noise sources ${nsAt.averageDbm.toFixed(1)} dBm average, ${nsAt.peakDbm.toFixed(1)} dBm peak (floor +${noiseSources.riseDb.toFixed(1)} dB, note)`, 0); wf[wf.length - 1].note = true;
+  }
+  cascade.noiseSources = noiseSources;
   cascade.marginAtAntennaDb = rxPowerDbm - cascade.sensitivityAtAntennaDbm;
+  if (noiseSources) noiseSources.marginChangeDb = cascade.marginAtAntennaDb - marginAfterWallDb;
   if (wallNoise) wallNoise.marginChangeDb = cascade.marginAtAntennaDb - marginBeforeWallDb;
   const marginDb = cascade.marginAtAntennaDb;
   const status = marginDb >= 6 ? 'pass' : marginDb >= 0 ? 'marginal' : 'fail';
@@ -1035,7 +1052,7 @@ export function solveLink(scene, link) {
     tx: txM.matched ? null : { vswr: txM.vswr, returnLossDb: txM.returnLossDb, mismatchDb: txM.mismatchDb, inBand: txM.inBand, reflectedDbm: txReflectedDbm, reflectedAtPaDbm, vswrAtPa },
     rx: rxM.matched ? null : { vswr: rxM.vswr, returnLossDb: rxM.returnLossDb, mismatchDb: rxM.mismatchDb, inBand: rxM.inBand },
   };
-  return { distanceM, paths, pathLossDb, fsplDb: fspl, rxPowerDbm, antennaMismatch, polarisation, p2p: p2pInfo, wallNoise, waterfall: wf, inputPowerDbm, marginDb, status, cascade, requiredSnrDb: cascade.requiredSnrDb, nearField, warnings };
+  return { distanceM, paths, pathLossDb, fsplDb: fspl, rxPowerDbm, antennaMismatch, polarisation, p2p: p2pInfo, wallNoise, noiseSources, waterfall: wf, inputPowerDbm, marginDb, status, cascade, requiredSnrDb: cascade.requiredSnrDb, nearField, warnings };
 }
 
 // ---------------------------------------------------------------- multi-antenna (branch) IEM zones
