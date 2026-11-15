@@ -6,7 +6,7 @@ import { createCanvasHost, setFont, haloText, inkAlpha, strokeHatchRect } from '
 import { createZoom } from './spectraZoom.js';
 import {
   axisLayout, BAND_CATALOGUE, STRIP_BANDS, tvChannelList, dabBlocks, wifi24Channels, wifi5Channels, pmr446Channels, simulatedOccupancy,
-  simulatedNoiseFloor, projectFrequencies, overlappingFrequencies, tvWidthOf, hashSeed, OCCUPANCY_SETTINGS, bandsAt, tvChannelOf,
+  simulatedNoiseFloor, applyTvNoiseRise, tvBlockLevelDbm, TV_BLOCK_DBM, projectFrequencies, overlappingFrequencies, tvWidthOf, hashSeed, OCCUPANCY_SETTINGS, bandsAt, tvChannelOf,
 } from '../model/spectrum-map.js';
 import { setTvChannelWidth } from '../actionsAreas.js';
 
@@ -83,7 +83,7 @@ const ROW = 20, HEAD = 36, AXIS_Y = 40;
  * buildMap(opts) -> the whole drawing as data. opts: { segId, cw, scene, showTv, showOcc, occSetting, env }.
  * Returns { view, width, height, bands, markers, overlaps, offAxis, tv, wifi, noise, strip, hits, y: {...} }.
  */
-export function buildMap({ segId = null, cw = 800, fit = false, scene = null, showTv = true, showOcc = true, occSetting = null, env = 'quiet' } = {}) {
+export function buildMap({ segId = null, cw = 800, fit = false, scene = null, showTv = true, showOcc = true, showRise = true, occSetting = null, env = 'quiet' } = {}) {
   const view = mapView(segId, cw, fit);
   const tvWidth = tvWidthOf(scene), regions = regionsFor(tvWidth);
   const out = { view, tvWidth, hits: [], y: {} };
@@ -144,18 +144,30 @@ export function buildMap({ segId = null, cw = 800, fit = false, scene = null, sh
   out.wifi = wifi;
   // noise floor plot
   out.y.noise = y;
-  const NH = 84;
-  const pts = [];
+  const NH = 100;
+  const occChans = tv && tv.occupancy && showRise ? tv.occupancy.channels.filter((c) => c.occupied) : [];
+  let pts = [];
   for (const s of view.segments) {
     const fs = []; const step = 6 / (s.pxPerMHz * s.k);
     for (let f = s.startMHz; f < s.endMHz; f += step) fs.push(f);
     fs.push(s.endMHz);
+    for (const c of occChans) for (const f of [c.loMHz - 1e-6, c.loMHz, c.hiMHz - 1e-6, c.hiMHz]) if (f >= s.startMHz && f <= s.endMHz) fs.push(f); // crisp block edges
+    fs.sort((a, b) => a - b);
     for (const q of simulatedNoiseFloor({ environment: env, bwKHz: 200, freqsMHz: fs, seed: 1 })) pts.push({ segId: s.id, px: s.px0 + (q.freqMHz - s.startMHz) * s.pxPerMHz * s.k, dbm: q.dbm, freqMHz: q.freqMHz });
+  }
+  pts = applyTvNoiseRise(pts, occChans, { widthMHz: tvWidth, bwKHz: 200 });
+  // one label per occupied block that is visible: the rise at the block centre
+  const rises = [];
+  for (const c of occChans) {
+    const ps = pieces(c.loMHz, c.hiMHz, view); if (!ps.length) continue;
+    const inside = pts.filter((p) => p.tvChannel === c.n); if (!inside.length) continue;
+    const riseDb = inside.reduce((a, p) => a + p.riseDb, 0) / inside.length;
+    rises.push({ n: c.n, loMHz: c.loMHz, hiMHz: c.hiMHz, widthMHz: tvWidth, blockDbm: tvBlockLevelDbm(c.n), riseDb, px0: ps[0].px0, px1: ps[ps.length - 1].px1, topDbm: Math.max(...inside.map((p) => p.dbm)) });
   }
   let lo = Infinity, hi = -Infinity; for (const p of pts) { lo = Math.min(lo, p.dbm); hi = Math.max(hi, p.dbm); }
   if (!Number.isFinite(lo)) { lo = -121; hi = -100; }
   lo = Math.floor((lo - 2) / 5) * 5; hi = Math.max(Math.ceil((hi + 2) / 5) * 5, lo + 10);
-  out.noise = { y, h: NH, pts, lo, hi, env };
+  out.noise = { y, h: NH, pts, lo, hi, env, rises, riseShown: occChans.length > 0, assumedBlockDbm: TV_BLOCK_DBM };
   y += NH + 14;
   // strip
   out.y.strip = y;
@@ -205,6 +217,7 @@ export function mapTable(map) {
     rows.push([`TV channels (${map.tvWidth} MHz)`, map.tv.chans.length ? `${map.tv.chans[0].ch.n}-${map.tv.chans[map.tv.chans.length - 1].ch.n}` : 'none in view', occ.length ? `${ILLUSTRATIVE}: occupied ${occ.join(', ')}` : 'no occupancy shown']);
   }
   for (const r of map.wifi.rows) if (r.items.length) rows.push([r.name, `${r.items.length} in view`, r.items.slice(0, 40).map((i) => i.c.n || i.c.id).join(' ')]);
+  for (const r of map.noise.rises) rows.push([`Noise floor rise, TV ch ${r.n}`, `${r.loMHz}-${r.hiMHz} MHz (${r.widthMHz} MHz block)`, `+${r.riseDb.toFixed(0)} dB in 200 kHz; assumed block level ${r.blockDbm.toFixed(0)} dBm, ${ILLUSTRATIVE.toLowerCase()}`]);
   rows.push(['Noise floor (simulated)', `${map.noise.lo} to ${map.noise.hi} dBm, 200 kHz`, `${ILLUSTRATIVE}, ${map.noise.env}`]);
   return { caption: 'Spectrum map contents in the current view', cols: ['Item', 'Frequency', 'Note'], rows };
 }
@@ -289,11 +302,24 @@ export function drawMap(ctx, w, h, th, map, { hoverPx = null, selected = null } 
   const n = map.noise, ny = (d) => n.y + n.h - ((d - n.lo) / (n.hi - n.lo)) * n.h;
   ctx.strokeStyle = th.grid; ctx.lineWidth = 1; ctx.strokeRect(0.5, n.y + 0.5, w - 1, n.h);
   ctx.fillStyle = th.inkSoft; setFont(ctx, th, 11); ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-  ctx.fillText(`Simulated noise floor, 200 kHz, ${n.env} (${ILLUSTRATIVE.toLowerCase()}): ${n.lo} to ${n.hi} dBm`, 4, n.y - 3);
+  ctx.fillText(`Simulated noise floor, 200 kHz, ${n.env} (${ILLUSTRATIVE.toLowerCase()}): ${n.lo} to ${n.hi} dBm${n.riseShown ? `. Amber blocks: a TV carrier on air raises the floor across its whole ${map.tvWidth} MHz channel (block level assumed ${n.assumedBlockDbm} dBm)` : ''}`, 4, n.y - 3);
   ctx.strokeStyle = th.ink; ctx.lineWidth = 1.5;
   let seg = null; ctx.beginPath();
   for (const p of n.pts) { if (p.segId !== seg) { ctx.moveTo(p.px, ny(p.dbm)); seg = p.segId; } else ctx.lineTo(p.px, ny(p.dbm)); }
   ctx.stroke(); ctx.lineWidth = 1;
+  // TV carrier rise: tinted block over the full channel width and a label with the rise in dB
+  if (n.rises.length) {
+    for (const r of n.rises) {
+      const bw = Math.max(MIN_PX, r.px1 - r.px0);
+      ctx.globalAlpha = 0.16; ctx.fillStyle = th.marginal; ctx.fillRect(r.px0, n.y + 1, bw, n.h - 1); ctx.globalAlpha = 1;
+      ctx.strokeStyle = th.marginal; ctx.setLineDash && ctx.setLineDash([3, 2]); ctx.beginPath(); ctx.moveTo(r.px0 + 0.5, n.y + 1); ctx.lineTo(r.px0 + 0.5, n.y + n.h); ctx.moveTo(r.px1 - 0.5, n.y + 1); ctx.lineTo(r.px1 - 0.5, n.y + n.h); ctx.stroke(); ctx.setLineDash && ctx.setLineDash([]);
+      const label = bw >= 40 ? `ch ${r.n} +${r.riseDb.toFixed(0)} dB` : bw >= 14 ? `+${r.riseDb.toFixed(0)}` : '';
+      if (label) haloText(ctx, th, label, (r.px0 + r.px1) / 2, Math.max(n.y + 10, ny(r.topDbm) - 5), { align: 'center', baseline: 'alphabetic', px: 11, color: th.warnText || th.ink });
+    }
+    ctx.strokeStyle = th.ink; ctx.lineWidth = 1.5; seg = null; ctx.beginPath();
+    for (const p of n.pts) { if (p.segId !== seg) { ctx.moveTo(p.px, ny(p.dbm)); seg = p.segId; } else ctx.lineTo(p.px, ny(p.dbm)); }
+    ctx.stroke(); ctx.lineWidth = 1;
+  }
   // strip
   const st = map.strip;
   ctx.fillStyle = th.inkSoft; setFont(ctx, th, 11); ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
@@ -322,11 +348,11 @@ export function drawMap(ctx, w, h, th, map, { hoverPx = null, selected = null } 
 // ------------------------------------------------------------------------------------------------ DOM
 export function mountSpectrumMap({ doc = document, button, store, hostFactory = (c, d) => createCanvasHost(c, d) } = {}) {
   const el = (tag, cls, text, attrs) => { const e = doc.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; if (attrs) for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); return e; };
-  const st = { segId: null, fit: true, showTv: true, showOcc: true, occ: { 6: 'us-top10', 8: 'uk-city' }, env: 'quiet', selected: null, hoverPx: null };
+  const st = { segId: null, fit: true, showTv: true, showOcc: true, showRise: true, occ: { 6: 'us-top10', 8: 'uk-city' }, env: 'quiet', selected: null, hoverPx: null };
   let map = null, scroll = null;
   const width = () => tvWidthOf(store.getScene());
   const cw = () => (scroll && scroll.clientWidth) || 800;
-  const build = () => buildMap({ segId: st.segId, cw: cw(), fit: st.fit, scene: store.getScene(), showTv: st.showTv, showOcc: st.showOcc, occSetting: st.occ[width()], env: st.env });
+  const build = () => buildMap({ segId: st.segId, cw: cw(), fit: st.fit, scene: store.getScene(), showTv: st.showTv, showOcc: st.showOcc, showRise: st.showRise, occSetting: st.occ[width()], env: st.env });
   const segLabel = (id) => { const s = axisLayout().segments.find((q) => q.id === id); return s ? `${s.id}: ${s.label}, ${s.startMHz}-${s.endMHz} MHz` : ''; };
 
   const zoom = createZoom({
@@ -348,7 +374,26 @@ export function mountSpectrumMap({ doc = document, button, store, hostFactory = 
   canvas.setAttribute('aria-label', 'Spectrum map');
   scroll = el('div', 'map-scroll', null, { tabindex: '-1' });
   const parent = canvas.parentNode;
-  if (parent && parent.insertBefore) { parent.insertBefore(scroll, canvas); scroll.append(canvas); }
+  // scroll navigation: arrow buttons, a position strip and a text cue above the map, shown only while the map is wider than the window
+  const sNav = el('div', 'map-scrollnav', null, { role: 'group', 'aria-label': 'Scroll the map sideways' }); sNav.hidden = true;
+  const sLeft = el('button', null, '◀', { type: 'button', 'aria-label': 'Scroll the map left', title: 'Scroll left' });
+  const sRight = el('button', null, '▶', { type: 'button', 'aria-label': 'Scroll the map right', title: 'Scroll right' });
+  const sPos = el('span', 'map-scrollpos', null, { 'aria-hidden': 'true' }), sThumb = el('i'); sPos.append(sThumb);
+  const sTxt = el('span', 'map-scrolltxt', 'Scroll for more');
+  sNav.append(sLeft, sPos, sRight, sTxt);
+  const nudge = (dir) => { if (scroll) scroll.scrollBy ? scroll.scrollBy({ left: dir * Math.max(80, scroll.clientWidth * 0.6), behavior: 'auto' }) : (scroll.scrollLeft += dir * scroll.clientWidth * 0.6); syncScrollNav(); };
+  sLeft.addEventListener('click', () => nudge(-1)); sRight.addEventListener('click', () => nudge(1));
+  function syncScrollNav() {
+    const over = !!scroll && scroll.scrollWidth > scroll.clientWidth + 2;
+    sNav.hidden = !over;
+    if (!over) return;
+    const sw = scroll.scrollWidth, cwid = scroll.clientWidth;
+    sThumb.style.left = `${(scroll.scrollLeft / sw) * 100}%`; sThumb.style.width = `${Math.max(4, (cwid / sw) * 100)}%`;
+    sLeft.disabled = scroll.scrollLeft <= 1; sRight.disabled = scroll.scrollLeft + cwid >= sw - 1;
+    sTxt.textContent = `Scroll for more: showing ${Math.round(scroll.scrollLeft / sw * 100)}% to ${Math.min(100, Math.round((scroll.scrollLeft + cwid) / sw * 100))}% of the map`;
+  }
+  if (parent && parent.insertBefore) { parent.insertBefore(sNav, canvas); parent.insertBefore(scroll, canvas); scroll.append(canvas); }
+  scroll.addEventListener('scroll', syncScrollNav);
 
   // ---- controls
   const bar = el('div', 'map-bar');
@@ -366,6 +411,7 @@ export function mountSpectrumMap({ doc = document, button, store, hostFactory = 
   const chk = (label, key, onch) => { const lab = el('label'); const c = el('input', null, null, { type: 'checkbox' }); c.addEventListener('change', () => { st[key] = !!c.checked; onch && onch(); refresh(); }); lab.append(c, el('span', null, ` ${label}`)); return { lab, c }; };
   const tvChk = chk('Show TV channels', 'showTv');
   const occChk = chk(`Show simulated occupancy (${ILLUSTRATIVE.toLowerCase()})`, 'showOcc');
+  const riseChk = chk('Show TV carrier rise in the noise floor', 'showRise');
   const occSel = el('select', null, null, { 'aria-label': `Simulated occupancy setting, ${ILLUSTRATIVE.toLowerCase()}` });
   occSel.addEventListener('change', () => { st.occ[width()] = occSel.value; refresh(); });
   const envSel = el('select', null, null, { 'aria-label': 'Noise environment for the simulated noise floor' });
@@ -374,7 +420,8 @@ export function mountSpectrumMap({ doc = document, button, store, hostFactory = 
   const fitChk = chk('Fit the whole axis to the window when it stays readable (untick for full size and scroll)', 'fit');
   const scrollHint = el('p', 'map-scrollhint', '', { role: 'status' });
   const illus = el('p', 'map-illus', `${ILLUSTRATIVE}: TV occupancy and the noise floor are simulated to show how the tools look, not measurements of any site.`, { role: 'note' });
-  bar.append(nav, widthBox, fitChk.lab, tvChk.lab, occChk.lab, occSel, envSel);
+  bar.append(nav, widthBox, fitChk.lab, tvChk.lab, occChk.lab, occSel, riseChk.lab, envSel);
+  const legend = el('p', 'map-legend', '', { role: 'status', 'aria-label': 'Noise floor legend' });
 
   const segList = el('details', 'map-list'); segList.append(el('summary', null, 'Zoom to a segment (keyboard list)'));
   const segWrap = el('div', 'map-btns'); segList.append(segWrap);
@@ -387,7 +434,7 @@ export function mountSpectrumMap({ doc = document, button, store, hostFactory = 
   const warn = el('p', 'map-warn', '', { role: 'status' });
   const info = el('div', 'map-info', null, { role: 'region', 'aria-label': 'Band information', 'aria-live': 'polite', tabindex: '-1' });
   const note = el('p', 'hint', 'Gaps between segments are removed and shown as // so one axis reaches 5.8 GHz. Click a segment name to zoom in, or a band for its details. Regional rules differ.');
-  zoom.slot.append(bar, scrollHint, illus, warn, note, segList, bandList, info);
+  zoom.slot.append(bar, legend, scrollHint, illus, warn, note, segList, bandList, info);
 
   function showInfo(hit) {
     info.textContent = '';
@@ -409,7 +456,8 @@ export function mountSpectrumMap({ doc = document, button, store, hostFactory = 
     for (const k of Object.keys(radios)) radios[k].checked = Number(k) === w;
     fitChk.c.checked = st.fit; fitChk.c.disabled = !!st.segId;
     scrollHint.textContent = map.width > cw() + 2 ? `Scroll sideways: the map is ${Math.round(map.width)} px wide and the window shows ${cw()} px. Use the zoom buttons below to jump to a segment.` : (!st.segId && map.view.k !== 1 ? `Whole axis fitted to the window (scale ${map.view.k.toFixed(2)}); untick Fit for full size.` : '');
-    tvChk.c.checked = st.showTv; occChk.c.checked = st.showOcc; occChk.c.disabled = !st.showTv;
+    tvChk.c.checked = st.showTv; occChk.c.checked = st.showOcc; occChk.c.disabled = !st.showTv; riseChk.c.checked = st.showRise; riseChk.c.disabled = !st.showTv || !st.showOcc;
+    legend.textContent = map.noise.riseShown ? `Noise floor legend: the black line is the simulated floor in 200 kHz. Amber blocks are TV channels on air in the simulated occupancy: a TV carrier raises the floor across its full ${map.tvWidth} MHz channel, by ${Math.min(...map.noise.rises.map((r) => r.riseDb)).toFixed(0)} to ${Math.max(...map.noise.rises.map((r) => r.riseDb)).toFixed(0)} dB here, assuming ${map.noise.assumedBlockDbm} dBm (+-3 dB) of TV power at the receiver. Assumed and illustrative, not measured.` : '';
     occSel.textContent = '';
     for (const k of occupancyChoices(w)) occSel.append(el('option', null, k, { value: k }));
     occSel.value = st.occ[w]; occSel.disabled = !st.showTv || !st.showOcc;
@@ -421,6 +469,7 @@ export function mountSpectrumMap({ doc = document, button, store, hostFactory = 
       ? `Overlap warning: ${map.overlaps.map((o) => { const a = map.markers.concat(map.offAxis).find((m) => m.id === o.a), b = map.markers.concat(map.offAxis).find((m) => m.id === o.b); return `${a ? a.name : o.a} and ${b ? b.name : o.b} are ${+o.separationKHz.toFixed(1)} kHz apart`; }).join('; ')} (under 200 kHz, a coordination hint only).`
       : '';
     if (map.offAxis.length) warn.textContent += `${warn.textContent ? ' ' : ''}Not on this view: ${map.offAxis.map((p) => `${p.name} ${+p.freqMHz.toFixed(3)} MHz`).join(', ')}.`;
+    syncScrollNav();
     zoom.update();
   }
   const sub = store.subscribe ? store.subscribe(() => refresh()) : null;

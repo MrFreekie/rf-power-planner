@@ -702,8 +702,6 @@ summary { min-height: 24px; }
 /* MPX data and the digital link panel live inside the spectra column (slot swap) */
 .spectrum-panel .slot-extra { margin-top: 2px; min-height: 0; overflow: auto; }
 .spectrum-panel .slot-extra[hidden] { display: none; }
-.slot-switch { display: inline-flex; margin-left: 8px; vertical-align: middle; }
-.slot-switch button { min-height: 24px; padding: 0 8px; font-size: 12px; }
 .slot-extra .mpx-meters, .slot-extra .mpx-caption, .slot-extra > h2, .slot-extra .mpx > h2 { display: none; }
 .spectrum-title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
 .spectrum-title-row h3 { margin: 0; }
@@ -833,6 +831,9 @@ body.vnalab-open { overflow: hidden; }
 .source-bar label { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
 .source-bar select { max-width: 11em; }
 .source-hz input { width: 6em; }
+#toolbar .source-bar { flex: none; flex-wrap: nowrap; }
+#toolbar .source-bar .source-desc { display: none; } /* the description stays as the select's aria-describedby text and tooltip */
+#toolbar .source-bar label { font-size: 13px; white-space: nowrap; }
 .source-desc { font-size: 12px; color: var(--ink-soft); flex: 1 1 0; min-width: 4em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tone-pop { position: fixed; z-index: 60; background: var(--paper); border: 1px solid var(--ink); border-radius: var(--radius); padding: 8px 12px; width: min(420px, 90vw); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25); }
 .tone-pop[hidden] { display: none; }
@@ -857,7 +858,19 @@ body.vnalab-open { overflow: hidden; }
 
 /* spectrum map pop-out */
 .map-dialog { width: min(96vw, 1400px); max-width: 96vw; }
-.map-scroll { overflow-x: auto; overflow-y: hidden; max-width: 100%; border-bottom: 1px solid var(--line); background: var(--paper); }
+.map-scroll { overflow-x: scroll; overflow-y: hidden; max-width: 100%; border-bottom: 1px solid var(--line); background: var(--paper); }
+/* Always-visible, chunky scroll bars for the pop-out maps and the horizontally scrolling toolbar: high-contrast track and thumb in both themes. */
+.map-scroll::-webkit-scrollbar, .lab-scroll::-webkit-scrollbar { height: 18px; background: var(--paper-2); }
+.map-scroll::-webkit-scrollbar-track, .lab-scroll::-webkit-scrollbar-track { background: var(--paper-2); border-top: 1px solid var(--ink-soft); }
+.map-scroll::-webkit-scrollbar-thumb, .lab-scroll::-webkit-scrollbar-thumb { background: var(--ink-soft); border: 3px solid var(--paper-2); border-radius: 9px; min-width: 48px; }
+.map-scroll::-webkit-scrollbar-thumb:hover, .lab-scroll::-webkit-scrollbar-thumb:hover { background: var(--ink); }
+@supports not selector(::-webkit-scrollbar) { .map-scroll, .lab-scroll { scrollbar-width: auto; scrollbar-color: var(--ink-soft) var(--paper-2); } }
+.map-scrollnav { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 4px 14px; }
+.map-scrollnav[hidden] { display: none; }
+.map-scrollnav button { min-height: 32px; min-width: 40px; font-weight: 700; border: 2px solid var(--ink); }
+.map-scrollnav .map-scrollpos { position: relative; flex: 1 1 8em; min-width: 6em; height: 12px; border: 1px solid var(--ink); border-radius: 6px; background: var(--paper-2); }
+.map-scrollnav .map-scrollpos i { position: absolute; top: 0; bottom: 0; background: var(--ink-soft); border-radius: 5px; }
+.map-scrollnav .map-scrolltxt { font-size: 13px; font-weight: 600; }
 .map-canvas { display: block; cursor: crosshair; touch-action: pan-x pan-y; max-width: none; }
 .map-canvas:focus-visible { outline: 3px solid var(--focus); outline-offset: -3px; box-shadow: none; }
 .map-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 4px 0; }
@@ -1067,3 +1080,6 @@ body.vnalab-open { overflow: hidden; }
 }
 @media print { body:not(.report-open) .cmp-dialog { display: none !important; } }
 .cmp-dialog .spectrum-dialog-sum { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+.map-legend { margin: 4px 14px; font-size: 13px; padding-left: 8px; border-left: 6px solid var(--marginal); }
+.map-legend:empty { display: none; }

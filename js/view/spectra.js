@@ -155,7 +155,7 @@ export const mpxSummary = (st) => (st
   ? `MPX baseband spectrum 0 to 60 kilohertz. ${modeText(st)}, pilot ${st.pilotLocked ? 'locked' : 'lost'}, carrier to noise ${sgn(st.cnrDb)} dB.`
   : 'MPX baseband spectrum');
 
-/** Which view the MPX slot shows: the user's override ('mpx' | 'digital'), else digital links get the digital panel. Pure. */
+/** Which view the MPX slot shows: automatic: digital links get the digital panel, others the MPX view. The override argument is kept for old callers (the UI always passes null). Pure. */
 export function slotMode(link, override) {
   if (override === 'mpx' || override === 'digital') return override;
   return link && link.modulation && link.modulation.type === 'digital' ? 'digital' : 'mpx';
@@ -428,7 +428,7 @@ export function mountSpectra({ container, store, now = () => performance.now() }
   const tabs = el('div', 'spectra-tabs group', null, { role: 'tablist', 'aria-label': 'Spectrum views' });
   const pauseBtn = el('button', null, reduce ? 'Play' : 'Pause', { type: 'button', 'aria-pressed': String(reduce), title: 'Freeze or run the simulated signals' });
   head.append(h2, tabs, pauseBtn);
-  const sourceBar = mountSourceBar({ host: head, store, tone: toneState });
+  const sourceBar = (() => { const tb = document.getElementById('toolbar'); return tb ? mountSourceBar({ host: tb, before: document.getElementById('btn-modlab'), store, tone: toneState }) : mountSourceBar({ host: head, store, tone: toneState }); })(); // top toolbar so it is reachable without the bottom panel
   const grid = el('div', 'spectra-grid');
   container.append(head, grid);
 
@@ -465,9 +465,8 @@ export function mountSpectra({ container, store, now = () => performance.now() }
     }
   }
 
-  // ---- MPX slot: stereo readouts under the MPX spectrum, or the digital link panel (auto by link mode, with a tab to override) ----
-  let slotOverride = null;
-  try { const v = localStorage.getItem('rf-slot.v1'); if (v === 'mpx' || v === 'digital') slotOverride = v; } catch { /* storage unavailable */ }
+  // ---- MPX slot: stereo readouts under the MPX spectrum, or the digital link panel (always automatic by link mode) ----
+  try { localStorage.removeItem('rf-slot.v1'); } catch { /* storage unavailable */ } // the old manual override is gone: the slot always follows the link mode
   const mp = panels.mpx;
   const mpxEl = document.getElementById('mpx'), digEl = document.getElementById('digital');
   const mpxWrap = el('div', 'slot-extra slot-mpx'), digWrap = el('div', 'slot-extra slot-digital');
@@ -476,21 +475,12 @@ export function mountSpectra({ container, store, now = () => performance.now() }
   if (digEl) digWrap.append(digEl);
   digWrap.append(digNote);
   mp.canvas.after(mpxWrap); mpxWrap.after(digWrap);
-  const sw = el('span', 'slot-switch', null, { role: 'group', 'aria-label': 'View in this slot' });
-  const swBtns = {};
-  for (const [id, label] of [['auto', 'Auto'], ['mpx', 'MPX'], ['digital', 'Digital']]) {
-    const b = el('button', null, label, { type: 'button' });
-    b.addEventListener('click', () => { slotOverride = id === 'auto' ? null : id; try { if (slotOverride) localStorage.setItem('rf-slot.v1', slotOverride); else localStorage.removeItem('rf-slot.v1'); } catch { /* ignore */ } invalidateAll(); });
-    sw.append(b); swBtns[id] = b;
-  }
-  mp.titleRow.append(sw);
   let slotShown = '';
   function syncSlot() {
     const { link } = ctxInfo();
-    const mode = slotMode(link, slotOverride);
+    const mode = slotMode(link, null);
     const stereo = isStereoMpx(link);
-    const key = mode + '|' + stereo + '|' + slotOverride;
-    for (const [id, b] of Object.entries(swBtns)) b.setAttribute('aria-pressed', String(id === 'auto' ? slotOverride === null : slotOverride === id));
+    const key = mode + '|' + stereo;
     if (key === slotShown) { digNote.hidden = !(digEl && digEl.hidden); return; }
     slotShown = key;
     const dig = mode === 'digital';

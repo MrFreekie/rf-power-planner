@@ -11,7 +11,7 @@ import {
 import { attachInteraction } from './interact.js';
 import { tracePaths, antennaFrame } from '../model/rf.js';
 import { tiltFromPointer, stepTilt, tiltText, tiltHandleLength, placeLabel, TILT_COARSE_STEP, TILT_FINE_STEP } from '../ui/antennaFields.js';
-import { drawTiltGauge } from './tiltGauge.js';
+import { drawTiltGauge, tiltForPointer } from './tiltGauge.js';
 import { drawPersonSide } from './peopleDraw.js';
 import { linkOwners } from '../model/people.js';
 import { setAntennaField, ensureOwnAntennaB } from '../actions.js';
@@ -227,7 +227,7 @@ export function createSideView(canvas, store) {
           setFont(ctx, th, 12, '600');
           const lab = placeLabel(g.tip, { w: Math.ceil(ctx.measureText(g.text).width) + 6, h: 16 }, [{ x: bp.x - 16, y: bp.y - 16, w: 32, h: 32 }, { x: g.tip.x - 12, y: g.tip.y - 12, w: 24, h: 24 }], { w, h: 4000 });
           haloText(ctx, th, 'B ' + g.text, lab.x + 3, lab.y + 12, { px: 12, color: th.ink, weight: '600' });
-          if (bSelected) handles.push({ kind: 'tiltB', itemId: link.rx.id, linkId: link.id, sx: g.tip.x, sy: g.tip.y, r: 22, wx: sOf(inf.B.pos), wy: -bAbs.z, flipS: dS < 0, el: o.el });
+          if (bSelected) handles.push({ kind: 'tiltB', itemId: link.rx.id, linkId: link.id, sx: g.tip.x, sy: g.tip.y, r: 22, wx: sOf(inf.B.pos), wy: -bAbs.z, flipS: dS < 0, el: o.el, ant: bAnt, u });
         }
       }
       haloText(ctx, th, 'B', bp.x + 10, bp.y - 8, { px: 12, weight: '600' });
@@ -311,7 +311,7 @@ export function createSideView(canvas, store) {
       const lab = placeLabel(g.tip, size, avoid, { w, h: 4000 });
       tiltLabels.set(e.id, lab);
       haloText(ctx, th, txt, lab.x + 3, lab.y + 12, { px: 12, color: th.ink, weight: '600' });
-      if (selected) handles.push({ kind: 'tilt', role, itemId: e.id, linkId: link.id, sx: g.tip.x, sy: g.tip.y, r: 22, wx: s, wy: -(z + fl), flipS: dirS < 0, el });
+      if (selected) handles.push({ kind: 'tilt', role, itemId: e.id, linkId: link.id, sx: g.tip.x, sy: g.tip.y, r: 22, wx: s, wy: -(z + fl), flipS: dirS < 0, el, ant: e.antenna, u });
     }
   }
 
@@ -327,9 +327,9 @@ export function createSideView(canvas, store) {
   function dragMove(hd, ptr, target, state) {
     if (hd.kind === 'tiltB') {
       tiltDrag = 'B' + hd.itemId;
-      const pitch = tiltFromPointer(ptr.x - hd.wx, -(ptr.y - hd.wy), { step: shiftDown ? TILT_FINE_STEP : TILT_COARSE_STEP });
-      if (pitch === null) return;
-      const tilt = Math.round(clamp(pitch - (hd.el || 0), -90, 90));
+      // the drawn tip follows the pointer (solved against the antenna frame); 1 degree resolution, Shift snaps to 5
+      const tilt = tiltForPointer(hd.ant, hd.u, ptr.x - hd.wx, -(ptr.y - hd.wy), shiftDown ? TILT_COARSE_STEP : TILT_FINE_STEP);
+      if (tilt === null) return;
       if (ensureOwnAntennaB(store, hd.linkId)) setAntennaField(store, hd.linkId, 'antennaB', 'tiltDeg', tilt, { coalesce: state.key });
       announce(`Antenna B tilt ${tilt} degrees`, { key: 'tilt', delay: 350 });
       host.invalidate();
@@ -338,9 +338,9 @@ export function createSideView(canvas, store) {
     if (hd.kind === 'rxB') return;
     if (hd.kind === 'tilt') {
       tiltDrag = hd.itemId;
-      const pitch = tiltFromPointer(ptr.x - hd.wx, -(ptr.y - hd.wy), { step: shiftDown ? TILT_FINE_STEP : TILT_COARSE_STEP });
-      if (pitch === null) return;
-      const tilt = Math.round(clamp(pitch - (hd.el || 0), -90, 90));
+      // the drawn tip follows the pointer (solved against the antenna frame); 1 degree resolution, Shift snaps to 5
+      const tilt = tiltForPointer(hd.ant, hd.u, ptr.x - hd.wx, -(ptr.y - hd.wy), shiftDown ? TILT_COARSE_STEP : TILT_FINE_STEP);
+      if (tilt === null) return;
       setAntennaField(store, hd.linkId, hd.role, 'tiltDeg', tilt, { coalesce: state.key });
       announce(`${hd.role === 'tx' ? 'Transmit' : 'Receive'} antenna tilt ${tilt} degrees`, { key: 'tilt', delay: 350 });
       host.invalidate();

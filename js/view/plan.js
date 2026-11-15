@@ -30,6 +30,7 @@ import { drawFresnelPlan, fresnelView } from './fresnelDraw.js';
 import { drawAreas } from './areasDraw.js';
 import { drawPeoplePlan } from './peopleDraw.js';
 import { drawNoiseSources } from './noiseDraw.js';
+import { drawNoiseWaves } from './noiseWaves.js';
 import { drawMeasurementsPlan, drawPlaceBanner } from './measureDraw.js';
 import { isPlacing, placeMessage, pickPlace, cancelPlace, subscribePlace } from './placeMode.js';
 import { moveNoiseSource } from '../actionsAreas.js';
@@ -138,6 +139,7 @@ export function createPlanView(canvas, store) {
 
     // ripples (wavefronts) under the walls and icons
     rip.drawPlan(ctx, th, vp, scene, w, h, link0);
+    drawNoiseWaves(ctx, th, vp, scene, w, h, rip);
 
     // reserve name labels so link labels can avoid them
     placer.reset(); linkLabelRects.length = 0;

@@ -142,3 +142,19 @@ test('dialog: overlap warning text appears and the 0 key returns to the overview
   assert.match(mm.zoom.dialog.find((e) => e.className === 'map-warn')[0].textContent, /Overlap warning/);
   mm.zoomTo('C'); mm.zoom.canvas.fire('keydown', { key: '0' }); assert.equal(mm.state.segId, null);
 });
+
+test('map: occupied TV channels raise the noise trace across the whole channel, with legend and table rows; off without occupancy or by toggle', () => {
+  const scene = createDefaultScene();
+  const m = buildMap({ cw: 1200, scene, showTv: true, showOcc: true });
+  assert.ok(m.noise.riseShown && m.noise.rises.length > 0);
+  const r = m.noise.rises[0];
+  assert.ok(r.riseDb > 10, `rise ${r.riseDb}`); assert.equal(r.hiMHz - r.loMHz, 8);
+  const inside = m.noise.pts.filter((p) => p.tvChannel === r.n); assert.ok(inside.length >= 3);
+  const base = m.noise.pts.find((p) => p.freqMHz < r.loMHz - 1 && !p.tvChannel);
+  assert.ok(inside.every((p) => p.dbm > base.dbm + 10));
+  assert.ok(mapTable(m).rows.some((row) => /Noise floor rise, TV ch/.test(row[0])));
+  for (const o of [{ showOcc: false }, { showTv: false }, { showRise: false }]) {
+    const q = buildMap({ cw: 1200, scene, ...o }); assert.equal(q.noise.rises.length, 0); assert.ok(!q.noise.pts.some((p) => p.riseDb));
+  }
+  const calls = fakeCtx(); drawMap(calls, m.width, m.height, th, m); assert.ok(calls.calls.some((c) => c[0] === 'fillText' && /^(ch \d+ )?\+\d+/.test(String(c[1]))));
+});

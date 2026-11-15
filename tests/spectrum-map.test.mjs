@@ -151,3 +151,19 @@ test('scene field tvChannelWidthMHz: optional 6 or 8, older files unchanged', ()
   assert.ok(validateScene(s).errors.some((e) => /tvChannelWidthMHz/.test(e)));
   assert.equal(migrateScene(createDefaultScene()).tvChannelWidthMHz, undefined);
 });
+
+import { tvNoiseRiseDb, tvInBandDbm, tvBlockLevelDbm, applyTvNoiseRise, TV_BLOCK_DBM, powerSumDb } from '../js/model/spectrum-map.js';
+test('TV noise rise: in-band power, rise in dB, whole block only, 6 and 8 MHz', () => {
+  assert.ok(Math.abs(tvInBandDbm(-75, 8, 200) - (-75 - 10 * Math.log10(7600 / 200))) < 1e-9);
+  assert.ok(Math.abs(powerSumDb(-100, -100) - (-100 + 3.0103)) < 1e-3);
+  const r8 = tvNoiseRiseDb(-120, TV_BLOCK_DBM, 8), r6 = tvNoiseRiseDb(-120, TV_BLOCK_DBM, 6);
+  assert.ok(r8 > 20 && r8 < 60, `rise ${r8}`); assert.ok(r6 > r8, 'narrower block puts more power in the same window');
+  assert.ok(tvNoiseRiseDb(-60, -120, 8) < 0.01, 'a TV block far below the floor changes nothing');
+  for (let n = 14; n < 70; n++) assert.ok(Math.abs(tvBlockLevelDbm(n) - TV_BLOCK_DBM) <= 3.01);
+  const ch = tvChannelList(8).filter((c) => c.n === 30 || c.n === 31).map((c) => ({ ...c, occupied: c.n === 30 }));
+  const c30 = ch[0], pts = [c30.loMHz - 0.01, c30.loMHz, c30.centreMHz, c30.hiMHz - 0.001, c30.hiMHz, ch[1].centreMHz].map((f) => ({ freqMHz: f, dbm: -120 }));
+  const out = applyTvNoiseRise(pts, ch, { widthMHz: 8 });
+  assert.equal(out[0].dbm, -120); assert.ok(out[1].riseDb > 20 && out[2].riseDb > 20 && out[3].riseDb > 20, 'raised across the full block');
+  assert.equal(out[4].dbm, -120, 'hi edge belongs to the next channel'); assert.equal(out[5].dbm, -120, 'unoccupied neighbour is flat');
+  assert.equal(out[2].tvChannel, 30);
+});

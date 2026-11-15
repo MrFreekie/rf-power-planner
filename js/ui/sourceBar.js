@@ -1,5 +1,5 @@
 // Global audio source selector, tone frequency field and the tone / MPX sliders (items 31, 32).
-//   mountSourceBar({ host, store, tone }) puts the controls in `host` (the Spectra bar head) and keeps them in step with the scene.
+//   mountSourceBar({ host, store, tone }) puts the controls in `host` (the top toolbar, or the Spectra bar head when there is none) and keeps them in step with the scene.
 //   buildToneSliders(doc, tone) -> element with the three sliders; the enlarged dialog uses another instance bound to the same state.
 import { AUDIO_SOURCE_IDS, AUDIO_SOURCE_LABELS, AUDIO_SOURCES, TONE_HZ_LIMITS, DEFAULT_TONE_HZ, defaultAudioSource } from '../model/audio-source.js';
 import { TONE_MPX_LIMITS } from '../model/tone-mpx.js';
@@ -35,7 +35,7 @@ export function buildToneSliders(doc, tone, idp = 'tone') {
   return { root, sync, destroy: off };
 }
 
-export function mountSourceBar({ host, store, tone, doc = document }) {
+export function mountSourceBar({ host, store, tone, doc = document, before = null }) {
   const wrap = mk(doc, 'div', 'source-bar group', null, { role: 'group', 'aria-label': 'Audio source' });
   const sel = mk(doc, 'select', null, null, { id: 'audio-source', 'aria-describedby': 'audio-source-desc' });
   const lab = mk(doc, 'label', null, 'Audio source ', { for: 'audio-source' });
@@ -51,7 +51,7 @@ export function mountSourceBar({ host, store, tone, doc = document }) {
   const sl = buildToneSliders(doc, tone, 'bar');
   pop.append(sl.root, mk(doc, 'p', 'hint', 'Shown as lines in the MPX and RF spectra while the source is a tone, two-tone or sweep. Stage levels and the nonlinearity are assumed.'));
   wrap.append(lab, desc, hzLab, btn, pop);
-  host.append(wrap);
+  if (before && before.parentNode === host) host.insertBefore(wrap, before); else host.append(wrap);
 
   let linkKind = 'mic';
   function sync(scene) {
@@ -68,7 +68,7 @@ export function mountSourceBar({ host, store, tone, doc = document }) {
   }
   sel.addEventListener('change', () => setAudioSource(store, sel.value));
   hz.addEventListener('change', () => { if (!setAudioToneHz(store, hz.value)) hz.value = String(store.getScene().audioToneHz ?? DEFAULT_TONE_HZ); });
-  btn.addEventListener('click', () => { pop.hidden = !pop.hidden; if (!pop.hidden) { const r = btn.getBoundingClientRect(); pop.style.right = `${Math.max(8, innerWidth - r.right)}px`; pop.style.bottom = `${Math.max(8, innerHeight - r.top + 4)}px`; } btn.setAttribute('aria-expanded', String(!pop.hidden)); });
+  btn.addEventListener('click', () => { pop.hidden = !pop.hidden; if (!pop.hidden) { const r = btn.getBoundingClientRect(); pop.style.left = 'auto'; pop.style.right = `${Math.max(8, innerWidth - r.right)}px`; if (r.top < innerHeight / 2) { pop.style.bottom = 'auto'; pop.style.top = `${r.bottom + 4}px`; } else { pop.style.top = 'auto'; pop.style.bottom = `${Math.max(8, innerHeight - r.top + 4)}px`; } } btn.setAttribute('aria-expanded', String(!pop.hidden)); });
   pop.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !pop.hidden) { e.stopPropagation(); pop.hidden = true; btn.setAttribute('aria-expanded', 'false'); btn.focus(); } });
   const run = () => { const s = store.getScene(), l = activeLink(s, store.getSelection()); linkKind = l ? l.kind : 'mic'; sync(s); };
   run();

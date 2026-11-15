@@ -197,6 +197,39 @@ export function simulatedNoiseFloor({ environment = 'quiet', bwKHz = 200, freqsM
   return pts.map((f) => ({ freqMHz: f, x: freqToX(f), dbm: kTB + externalNoiseFigureDb(environment, f) + (rnd() - 0.5) }));
 }
 
+// ------------------------------------------------------------------------------------------------ TV carrier raising the floor
+/**
+ * ASSUMED (flag U, illustrative): a digital TV block that is on air arrives at a venue receiver at about TV_BLOCK_DBM total power across the block
+ * (a moderate field, roughly 50 dB above kTB over the block), spread flat over the occupied bandwidth (7.6 MHz in an 8 MHz channel, 5.38 MHz in a
+ * 6 MHz one). A receiver measuring in a 200 kHz window then sees the block power minus 10 log10(occupied / 200 kHz) added, power-wise, to the floor.
+ * A small deterministic per-channel offset (+-3 dB) makes neighbouring blocks differ as they do in practice. Nothing here is measured.
+ */
+export const TV_BLOCK_DBM = -75;
+export const TV_OCCUPIED_MHZ = Object.freeze({ 6: 5.38, 8: 7.6 });
+/** tvBlockLevelDbm(n) -> assumed total in-block level (dBm) of TV channel n at the receiver: TV_BLOCK_DBM +- 3 dB, deterministic. */
+export const tvBlockLevelDbm = (n) => TV_BLOCK_DBM + (((Math.imul(Math.round(n) + 7, 2654435761) >>> 0) % 601) / 100 - 3);
+/** tvInBandDbm(blockDbm, widthMHz, bwKHz = 200) -> the part of the block that falls in the measurement window (dBm). */
+export const tvInBandDbm = (blockDbm, widthMHz = DEFAULT_TV_WIDTH_MHZ, bwKHz = 200) => blockDbm - 10 * Math.log10(((TV_OCCUPIED_MHZ[widthMHz] || TV_OCCUPIED_MHZ[8]) * 1000) / bwKHz);
+/** powerSumDb(a, b) -> 10 log10(10^(a/10) + 10^(b/10)). */
+export const powerSumDb = (a, b) => 10 * Math.log10(10 ** (a / 10) + 10 ** (b / 10));
+/**
+ * tvNoiseRiseDb(floorDbm, blockDbm, widthMHz, bwKHz = 200) -> dB the effective floor rises in-block: powerSum(floor, in-band TV) - floor. Always above 0.
+ */
+export const tvNoiseRiseDb = (floorDbm, blockDbm, widthMHz = DEFAULT_TV_WIDTH_MHZ, bwKHz = 200) => powerSumDb(floorDbm, tvInBandDbm(blockDbm, widthMHz, bwKHz)) - floorDbm;
+/**
+ * applyTvNoiseRise(points, channels, { widthMHz, bwKHz }) -> a new point list: points inside an occupied channel (lo inclusive, hi exclusive; the full
+ * 6 or 8 MHz block) get dbm raised and { tvChannel, riseDb, floorDbm }. points are { freqMHz, dbm, ... }; channels are { n, loMHz, hiMHz, occupied }.
+ */
+export function applyTvNoiseRise(points, channels, { widthMHz = DEFAULT_TV_WIDTH_MHZ, bwKHz = 200 } = {}) {
+  const occ = (channels || []).filter((c) => c && c.occupied);
+  return points.map((p) => {
+    const c = occ.find((q) => p.freqMHz >= q.loMHz && p.freqMHz < q.hiMHz);
+    if (!c) return p;
+    const rise = tvNoiseRiseDb(p.dbm, tvBlockLevelDbm(c.n), widthMHz, bwKHz);
+    return { ...p, floorDbm: p.dbm, dbm: p.dbm + rise, riseDb: rise, tvChannel: c.n };
+  });
+}
+
 // ------------------------------------------------------------------------------------------------ project frequencies
 /**
  * projectFrequencies(scene) -> [{ source: 'link' | 'imd' | 'noise', id, name, kind, freqMHz, bandwidthKHz, x, inGap, tvChannel, segment }] every frequency the project uses:

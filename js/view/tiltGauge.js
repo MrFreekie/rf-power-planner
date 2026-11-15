@@ -1,7 +1,7 @@
 // Side-view tilt gauge: arc with 15 degree ticks, half-power beam wedge, polarisation element line. Pure geometry plus one canvas drawer.
 import { antennaFrame, antennaGainDb } from '../model/rf.js';
 import { DEG } from './util.js';
-import { tiltGaugeTicks, tiltText } from '../ui/antennaFields.js';
+import { tiltGaugeTicks, tiltText, snapTilt } from '../ui/antennaFields.js';
 
 /** Bearing {az, el} (deg) of the in-slice direction at angle `theta` (deg from straight up, positive toward +s); u = slice axis in plan (x, y). */
 function sliceBearing(theta, u) {
@@ -37,6 +37,32 @@ function computeWedge(antenna, u) {
   const lo = edge(-1), hi = edge(1);
   if (lo === null && hi === null) return null;
   return { centre, lo: lo ?? 90, hi: hi ?? 90 };
+}
+
+/**
+ * Tilt (deg, snapped to `step`) whose DRAWN boresight tip (the in-slice projection of the tilted boresight, see drawTiltGauge) points at the
+ * pointer. dxPx / dyUpPx = pointer minus antenna, y up. The tilt turns the nose in the vertical plane that contains the boresight, so when the
+ * antenna is aimed out of the slice the drawn tip angle is NOT the tilt (a vertical whip tilts sideways to the slice): the angle is solved
+ * numerically instead of assumed. When the tip can only ever be on one side of the antenna the pointer is mirrored onto that side. null at the centre.
+ */
+export function tiltForPointer(antenna, u, dxPx, dyUpPx, step = 1) {
+  if (!Number.isFinite(dxPx) || !Number.isFinite(dyUpPx) || (dxPx === 0 && dyUpPx === 0)) return null;
+  const cand = [];
+  for (let t = -90; t <= 90; t += 0.5) {
+    const { b } = antennaFrame({ ...antenna, tiltDeg: t });
+    const bs = b[0] * u.x + b[1] * u.y, bz = b[2];
+    if (Math.hypot(bs, bz) >= 0.05) cand.push({ t, th: Math.atan2(bs, bz), bs });
+  }
+  if (!cand.length) return null;
+  let phi = Math.atan2(dxPx, dyUpPx); // from straight up, + toward +s
+  const eps = 1e-6;
+  if (cand.every((c) => c.bs >= -eps)) phi = Math.abs(phi); else if (cand.every((c) => c.bs <= eps)) phi = -Math.abs(phi);
+  let best = null, bd = Infinity;
+  for (const c of cand) {
+    let d = Math.abs(c.th - phi); if (d > Math.PI) d = 2 * Math.PI - d;
+    if (d < bd - 1e-9) { bd = d; best = c; }
+  }
+  return snapTilt(best.t, step);
 }
 
 /** In-slice screen direction {dx, dy} (pixels per unit, y down) of a world direction vector, or null when it points across the slice. */

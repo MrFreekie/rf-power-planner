@@ -83,7 +83,9 @@ test('setSquelchThreshold: snaps, clamps, one undo step per drag, ignored when s
   assert.equal(setSquelchThreshold(store, id, -80), false);
 });
 
-test('MPX slot: digital links get the digital panel unless overridden', () => {
+test('MPX slot: automatic (digital links get the digital panel), no Auto/MPX/Digital selector', () => {
+  const src = fs.readFileSync(new URL('../js/view/spectra.js', import.meta.url), 'utf8');
+  assert.ok(!src.includes('slot-switch') && !src.includes("['auto', 'Auto']") && !src.includes('slotOverride'));
   assert.equal(slotMode({ modulation: { type: 'digital' } }, null), 'digital');
   assert.equal(slotMode({ modulation: { type: 'analog-fm' } }, null), 'mpx');
   assert.equal(slotMode({ modulation: { type: 'digital' } }, 'mpx'), 'mpx');

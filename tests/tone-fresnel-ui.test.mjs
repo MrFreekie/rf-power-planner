@@ -98,11 +98,19 @@ test('Fresnel overlay draws the lens in the plan and the ellipse in the side vie
   const blocked = ex('foh-mic-iem-audience'); assert.ok(blocked.links.length >= 1);
 });
 
-test('wiring: source bar in the spectra head, source into the model calls, lab and meters follow the global source', () => {
+test('wiring: source bar in the toolbar (mounted by the spectra module), source into the model calls, lab and meters follow the global source', () => {
   const sp = read('js/view/spectra.js'), app = read('js/app.js'), lab = read('js/view/modLab.js'), hist = read('js/history.js'), html = read('index.html');
   assert.ok(sp.includes('mountSourceBar(') && sp.includes('resolveAudioSource(scene, link)') && sp.includes('audioSource: src && src.source') && sp.includes('programme'));
   assert.ok(lab.includes('messageKindFor(as)') && lab.includes('MESSAGE_SOURCE_KINDS'));
   assert.ok(hist.includes('normalizeAudioSource(scene.audioSource)'));
   assert.ok(app.includes('TONE_MPX_EXAMPLES') && app.includes('fresnelView.set'));
   assert.equal((html.match(/class="fresnel-toggle"/g) || []).length, 2, 'a Fresnel toggle in the plan and the side heading');
+});
+
+test('audio source selector is mounted in the top toolbar (before the Modulation lab button) and its pop-out opens below it', () => {
+  const sp = read('js/view/spectra.js'), sb = read('js/ui/sourceBar.js'), css = read('css/style.css');
+  assert.ok(sp.includes("getElementById('toolbar')") && sp.includes("getElementById('btn-modlab')"));
+  assert.ok(sb.includes('before') && sb.includes("id: 'audio-source'") && sb.includes("'aria-label': 'Audio source'") && sb.includes('r.top < innerHeight / 2'));
+  assert.ok(css.includes('#toolbar .source-bar'));
+  assert.ok(css.includes('.map-scroll::-webkit-scrollbar') && css.includes('overflow-x: scroll'));
 });
