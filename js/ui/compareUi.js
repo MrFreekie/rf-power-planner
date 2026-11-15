@@ -1,7 +1,9 @@
 // Compare dialog helpers (pure, no DOM): in-memory snapshots (max 5, the last one mirrored to sessionStorage), a memoised throttled diff,
 // delta words for the per-link table, attribution bars and item lines. The model is js/model/scene-diff.js.
 import { diffScenes, headline, MARGIN_EPS_DB } from '../model/scene-diff.js';
+import { restorable } from '../actions.js';
 
+export const NOT_SNAPSHOTTABLE = 'Nothing to snapshot: the scene has no links, and a snapshot that cannot be restored is not kept.';
 export const MAX_SNAPSHOTS = 5, SNAP_KEY = 'rf-bench.compare.last.v1', THROTTLE_MS = 300;
 const f1 = (v) => (Number.isFinite(v) ? (Math.round(v * 10) / 10).toFixed(1) : '-');
 const sgn = (v) => (!Number.isFinite(v) ? '-' : (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(Math.round(v * 10) / 10).toFixed(1));
@@ -14,8 +16,9 @@ export function createSnapshots({ storage = null, now = () => new Date() } = {})
   return {
     list: () => list.slice(),
     get: (id) => list.find((s) => s.id === id) || null,
-    /** take(scene, name?) -> the snapshot, dropping the oldest beyond MAX_SNAPSHOTS. */
+    /** take(scene, name?) -> the snapshot, dropping the oldest beyond MAX_SNAPSHOTS; null when the scene could not be restored later. */
     take(scene, name) {
+      if (!restorable(scene)) return null;
       const d = now(), p = (n) => String(n).padStart(2, '0');
       const snap = { id: `s${++seq}`, name: String(name || '').replace(/\s+/g, ' ').trim().slice(0, 60) || `Snapshot ${seq}`, time: `${p(d.getHours())}:${p(d.getMinutes())}`, links: (scene.links || []).length, scene: clone(scene) };
       list.push(snap); while (list.length > MAX_SNAPSHOTS) list.shift();

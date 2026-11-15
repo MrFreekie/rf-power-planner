@@ -16,6 +16,7 @@ import { confidenceSummary, resultAt } from './assumptions-in-use.js';
 import { planHits } from './coord-lab.js';
 import { solveLink } from './rf.js';
 import { linkOwners } from './people.js';
+import { COORDINATION_DEFAULTS } from './coordination.js';
 
 export const PLAN_COLUMNS = Object.freeze([
   { key: 'name', label: 'Name' }, { key: 'role', label: 'Role' }, { key: 'freqMHz', label: 'Frequency (MHz)' }, { key: 'tvChannel', label: 'TV channel' },
@@ -26,6 +27,20 @@ export const PLAN_COLUMNS = Object.freeze([
 const clean = (s) => String(s == null ? '' : s).replace(/[\u0000-\u001f\u007f]/g, ' ').trim();
 const sig3 = (x) => (Number.isFinite(x) ? Number(x.toPrecision(3)) : null);
 const r1 = (x) => (Number.isFinite(x) ? Math.round(x * 10) / 10 : null);
+
+/**
+ * extraImdTransmitters(scene) -> the scene.imd transmitters that are NOT a link's own transmitter. The intermod list normally includes the wanted link's
+ * transmitter (the model needs it as a source), so the same device would count twice in a frequency plan. A transmitter is the same device when its id equals
+ * the link id or the link's tx id, else when it sits within 1 kHz of a link frequency (each link absorbs at most one imd transmitter).
+ */
+export function extraImdTransmitters(scene) {
+  const links = (scene && Array.isArray(scene.links)) ? scene.links : [];
+  const txs = (scene && scene.imd && Array.isArray(scene.imd.transmitters)) ? scene.imd.transmitters : [];
+  const taken = new Set(), dupe = new Set();
+  for (const l of links) { const k = txs.findIndex((t, i) => !taken.has(i) && t && t.id !== undefined && (t.id === l.id || (l.tx && t.id === l.tx.id))); if (k >= 0) { taken.add(k); dupe.add(txs[k]); } }
+  for (const l of links) { const k = txs.findIndex((t, i) => !taken.has(i) && t && Number.isFinite(t.freqMHz) && Math.abs(t.freqMHz - l.freqMHz) <= 0.001 + 1e-9); if (k >= 0) { taken.add(k); dupe.add(txs[k]); } }
+  return txs.filter((t) => !dupe.has(t));
+}
 
 /** frequencyPlanRows(scene, results?) -> rows { source 'link'|'imd', id, name, role 'mic'|'iem'|'other', freqMHz, tvChannel, occupiedBwKHz, txPowerMw, rxLevelDbm, marginDb, status, personName, assumptionFlag, notes }. */
 export function frequencyPlanRows(scene, results) {
@@ -47,7 +62,7 @@ export function frequencyPlanRows(scene, results) {
       marginDb: r1(res && res.marginDb), status: res ? res.status : '', personName: person ? clean(person.name) : '', assumptionFlag: c ? (c.proven ? 'proven' : 'unproven') : '', notes: notes.join(' '),
     });
   });
-  for (const t of (scene && scene.imd && scene.imd.transmitters) || []) {
+  for (const t of extraImdTransmitters(scene)) {
     const ch = tvChannelOf(t.freqMHz, w);
     rows.push({
       source: 'imd', id: t.id, name: clean(t.name || t.id), role: 'other', freqMHz: t.freqMHz, tvChannel: ch ? ch.n : null, occupiedBwKHz: analogOccupiedBwKHz(),
@@ -91,7 +106,7 @@ export function planSummary(scene, { projectName, date } = {}) {
   return {
     projectName: clean(projectName !== undefined ? projectName : (scene && scene.name)), date: clean(date), tvChannelWidthMHz: tvWidthOf(scene), links: links.length,
     mics: links.filter((l) => l.kind === 'mic').length, iems: links.filter((l) => l.kind === 'iem').length, other: links.filter((l) => l.kind !== 'mic' && l.kind !== 'iem').length,
-    imdTransmitters: ((scene && scene.imd && scene.imd.transmitters) || []).length, people: ((scene && scene.people) || []).length,
+    imdTransmitters: extraImdTransmitters(scene).length, people: ((scene && scene.people) || []).length,
   };
 }
 
@@ -100,15 +115,17 @@ export function planSummary(scene, { projectName, date } = {}) {
  *   requiredSpacingKHz, spacingViolations, overlapWarnings [{a, b, separationKHz}], ok }. Links and IMD transmitters are the frequencies in use.
  */
 export function coordinationSummary(scene, opts = {}) {
-  const items = projectFrequencies(scene).filter((f) => f.source !== 'noise');
+  const extra = new Set(extraImdTransmitters(scene).map((t) => t.id));
+  const items = projectFrequencies(scene).filter((f) => f.source !== 'noise' && (f.source !== 'imd' || extra.has(f.id))); // a link's own transmitter in the imd list is one frequency, not two
   const freqs = items.map((f) => f.freqMHz);
   const sorted = [...freqs].sort((a, b) => a - b);
   let minSpacingKHz = null;
   for (let i = 1; i < sorted.length; i++) { const d = Math.round((sorted[i] - sorted[i - 1]) * 1e6) / 1e3; if (minSpacingKHz === null || d < minSpacingKHz) minSpacingKHz = d; }
+  const requiredSpacingKHz = Number.isFinite(opts.minSpacingKHz) ? opts.minSpacingKHz : COORDINATION_DEFAULTS.minSpacingKHz; // the rule asked for, NOT the measured minimum (planHits echoes the measured one)
   const overlapWarnings = overlappingFrequencies(items, opts.minSpacingKHz || 200);
-  if (freqs.length < 2) return { frequencies: freqs.length, hits2: 0, hits3: 0, hitsTotal: 0, distinctProducts: [], minSpacingKHz, requiredSpacingKHz: opts.minSpacingKHz || 300, spacingViolations: 0, overlapWarnings, ok: true };
+  if (freqs.length < 2) return { frequencies: freqs.length, hits2: 0, hits3: 0, hitsTotal: 0, distinctProducts: [], minSpacingKHz, requiredSpacingKHz, spacingViolations: 0, overlapWarnings, ok: true };
   const h = planHits(freqs, opts);
   const distinct = [...new Set(h.conflicts.map((c) => c.label))];
   const viol = Array.isArray(h.spacingViolations) ? h.spacingViolations.length : (h.spacingViolations || 0);
-  return { frequencies: freqs.length, hits2: h.hits2, hits3: h.hits3, hitsTotal: h.hitsTotal, distinctProducts: distinct, minSpacingKHz, requiredSpacingKHz: h.minSpacingKHz, spacingViolations: viol, overlapWarnings, ok: h.ok && overlapWarnings.length === 0 };
+  return { frequencies: freqs.length, hits2: h.hits2, hits3: h.hits3, hitsTotal: h.hitsTotal, distinctProducts: distinct, minSpacingKHz, requiredSpacingKHz, spacingViolations: viol, overlapWarnings, ok: h.ok && overlapWarnings.length === 0 };
 }

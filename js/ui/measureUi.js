@@ -89,18 +89,27 @@ export function chartLayout(scene, cmp, mode, w, h, pad = { l: 52, r: 16, t: 28,
 }
 
 // ---- cached comparison -------------------------------------------------------------------------------------------------------------------------------
-let cache = { scene: null, sig: null, val: null };
-/** compareMeasurements memoised by scene identity, then by a content signature (the walk replaces the scene object every frame). */
-export function cachedCompare(scene) {
+let cache = { scene: null, sig: null, val: null, at: 0 };
+/** The parts of a scene that change a comparison. The venue underlay and other big, unrelated fields are left out of the key. */
+export function measureSignature(scene) {
+  try { return JSON.stringify([scene.measurements, scene.links, scene.environment, scene.reflectors, scene.noiseSources]); } catch { return null; }
+}
+/**
+ * compareMeasurements memoised by scene identity, then by a content signature (the walk replaces the scene object every frame).
+ * opts.throttleMs: while the content keeps changing (a walk), return the previous result for that long instead of solving every frame.
+ */
+export function cachedCompare(scene, opts = {}) {
   if (!scene || !Array.isArray(scene.measurements) || !scene.measurements.length) return null;
   if (cache.scene === scene) return cache.val;
-  let sig; try { sig = JSON.stringify(scene); } catch { sig = null; }
+  const sig = measureSignature(scene);
   if (sig !== null && sig === cache.sig) { cache.scene = scene; return cache.val; }
+  const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  if (opts.throttleMs > 0 && cache.val && cache.count === scene.measurements.length && now - cache.at < opts.throttleMs) return cache.val;
   const val = compareMeasurements(scene);
-  cache = { scene, sig, val };
+  cache = { scene, sig, val, at: now, count: scene.measurements.length };
   return val;
 }
-export function resetCompareCache() { cache = { scene: null, sig: null, val: null }; }
+export function resetCompareCache() { cache = { scene: null, sig: null, val: null, at: 0 }; }
 
 /** Report block: null when there are no readings. */
 export function reportMeasurements(scene) {

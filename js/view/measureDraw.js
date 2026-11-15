@@ -4,7 +4,7 @@ import { cachedCompare, markerLabel, deltaColor, deltaView, summaryText, OK_DB }
 import { placeText, haloText, setFont } from './util.js';
 
 export function drawMeasurementsPlan(ctx, th, vp, scene, placed, w, h) {
-  const cmp = cachedCompare(scene);
+  const cmp = cachedCompare(scene, { throttleMs: 200 }); // a walk replaces the scene every frame: refit at most five times a second
   if (!cmp || !cmp.points.length) return null;
   const onScreen = (q) => q.x >= -20 && q.y >= -20 && q.x <= w + 20 && q.y <= h + 20;
   for (const p of cmp.points) { const q = vp.worldToScreen({ x: p.x, y: p.y }); if (onScreen(q)) placed.push({ x: q.x - 8, y: q.y - 8, w: 16, h: 16 }); } // labels avoid every marker

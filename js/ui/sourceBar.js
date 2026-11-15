@@ -57,14 +57,18 @@ export function mountSourceBar({ host, store, tone, doc = document, before = nul
   function sync(scene) {
     const id = scene && scene.audioSource ? scene.audioSource : '';
     if (sel.value !== id) sel.value = id;
-    desc.textContent = sourceDescription(id, linkKind);
-    desc.title = desc.textContent;
+    const text = sourceDescription(id, linkKind); // write to the DOM only what changed: this runs on every store change, including each walk frame
+    if (desc.textContent !== text) desc.textContent = text;
+    if (desc.title !== text) desc.title = text;
     const eff = id || defaultAudioSource(linkKind), tonal = TONE_SOURCE_IDS.includes(eff);
-    hzLab.hidden = !tonal; btn.hidden = !tonal;
-    if (!tonal) { pop.hidden = true; btn.setAttribute('aria-expanded', 'false'); }
+    if (hzLab.hidden !== !tonal) hzLab.hidden = !tonal;
+    if (btn.hidden !== !tonal) btn.hidden = !tonal;
+    if (!tonal && (!pop.hidden || btn.getAttribute('aria-expanded') !== 'false')) { pop.hidden = true; btn.setAttribute('aria-expanded', 'false'); }
     const f = scene && Number.isFinite(scene.audioToneHz) ? scene.audioToneHz : DEFAULT_TONE_HZ;
     if (doc.activeElement !== hz && +hz.value !== f) hz.value = String(f);
-    hz.disabled = eff === 'sweep'; hz.title = eff === 'sweep' ? 'The sweep runs 20 Hz to 20 kHz; this field is used by the tone and two-tone sources' : '';
+    const sweep = eff === 'sweep', hzTitle = sweep ? 'The sweep runs 20 Hz to 20 kHz; this field is used by the tone and two-tone sources' : '';
+    if (hz.disabled !== sweep) hz.disabled = sweep;
+    if (hz.title !== hzTitle) hz.title = hzTitle;
   }
   sel.addEventListener('change', () => setAudioSource(store, sel.value));
   hz.addEventListener('change', () => { if (!setAudioToneHz(store, hz.value)) hz.value = String(store.getScene().audioToneHz ?? DEFAULT_TONE_HZ); });

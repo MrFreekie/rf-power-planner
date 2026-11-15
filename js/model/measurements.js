@@ -20,6 +20,8 @@ import { MEASUREMENT_LIMITS, CALIBRATION_FIELDS } from './measurement-schema.js'
 export { MEASUREMENT_LIMITS, CALIBRATION_FIELDS };
 export const MIN_POINTS_FOR_FIT = 5;      // fewer points than this: a fit is shown with a caution
 export const NEEDED_RMS_DB = 1.0;         // a model already within this rms of the measurements needs no calibration
+export const MATCH_RMS_DB = 3;            // the model "matches" the readings only when the rms error is within this ...
+export const MATCH_WORST_DB = 6;          // ... and no single reading is worse than this
 export const NEEDED_IMPROVEMENT_DB = 0.5; // a fit that improves the rms by less than this is not suggested
 const AMBIGUOUS_RATIO = 1.15;             // two candidates within 15 percent of the best residual cannot be told apart
 
@@ -98,12 +100,13 @@ function minimise(f, lo, hi, grid = 11) {
  *   n, before: { rmsDb, meanDb },
  *   candidates: [{ id, label, field, current, fitted, afterRmsDb, improvementDb, applicable, reason? }] (best first; not applicable ones last),
  *   best: the best applicable candidate that improves the rms by at least NEEDED_IMPROVEMENT_DB, else null,
+ *   matches: rms <= MATCH_RMS_DB and worst error <= MATCH_WORST_DB; headline: one plain sentence for the dialog and report (use it instead of building one from needed),
  *   needed: false when the model already matches (rms under NEEDED_RMS_DB) or nothing improves it,
  *   cautions: [plain-language sentences] }
  */
 export function suggestCalibration(scene) {
   const base = compareMeasurements(scene);
-  const out = { n: base.n, before: { rmsDb: base.rmsDb, meanDb: base.meanDb }, candidates: [], best: null, needed: false, cautions: [] };
+  const out = { n: base.n, before: { rmsDb: base.rmsDb, meanDb: base.meanDb }, candidates: [], best: null, needed: false, cautions: [], matches: false, headline: '' };
   if (base.n === 0) { out.cautions.push('There are no usable measurements: add readings taken at known receiver positions.'); return out; }
   const env = scene.environment || {};
 
@@ -153,7 +156,15 @@ export function suggestCalibration(scene) {
     out.cautions.push(`${app[1].label} explains the readings almost as well as ${app[0].label} (residual ${r2(app[1].afterRmsDb)} dB against ${r2(app[0].afterRmsDb)} dB): the data cannot tell them apart.`);
   }
   if (out.needed && top.afterRmsDb > NEEDED_RMS_DB * 2) out.cautions.push(`Even the best single figure leaves ${r2(top.afterRmsDb)} dB rms: something else (a reflection, a blocked path, a wrong antenna) is not in the model.`);
-  if (!out.needed && base.rmsDb < NEEDED_RMS_DB) out.cautions.push('The model already matches the readings: no calibration is needed.');
+  const worstDb = base.worst ? Math.abs(base.worst.deltaDb) : 0;
+  out.matches = base.rmsDb <= MATCH_RMS_DB && worstDb <= MATCH_WORST_DB;
+  if (!out.needed) {
+    if (out.matches) out.cautions.push('The model already matches the readings: no calibration is needed.');
+    else out.cautions.push(`The model does not match these readings (rms ${r2(base.rmsDb)} dB, worst ${r2(worstDb)} dB) and no single calibration figure explains them: look for fades (multipath), polarisation, a wall or an obstruction, or a wrong reading position.`);
+  }
+  out.headline = out.best ? `Best fit: ${out.best.label} (${r2(out.best.current)} to ${r2(out.best.fitted)} dB).`
+    : out.matches ? 'The model already matches these readings; no calibration is needed.'
+    : 'The model does not match these readings and no single calibration value explains them: the readings need explaining (fades, polarisation, a wall).';
   return out;
 }
 

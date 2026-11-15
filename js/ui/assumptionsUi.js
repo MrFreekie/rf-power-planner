@@ -1,5 +1,5 @@
 // Assumptions in this scene: pure view model for the link-budget chip and the Report section (no DOM). Data from js/model/assumptions-in-use.js.
-import { assumptionsInUse, assumptionsForLink, marginIsProven, PROVEN_BODY_WORN_MARGIN_DB } from '../model/assumptions-in-use.js';
+import { assumptionsInUse, itemsOfLink, marginIsProven, PROVEN_BODY_WORN_MARGIN_DB } from '../model/assumptions-in-use.js';
 
 const FLAG_WORD = { U: 'U: assumed, no source behind it', I: 'I: inferred from a rule of thumb or a published range' };
 const fin = Number.isFinite;
@@ -31,7 +31,7 @@ export function chipText(v) {
 export function confidenceView(scene, link, result, items) {
   if (!scene || !link || !result) return null;
   const all = items || assumptionsInUse(scene);
-  const own = assumptionsForLink(all, link.id);
+  const own = itemsOfLink(scene, link, result); // this link's own figures, not the merged scene list (which keeps the largest sensitivity of any link)
   const m = marginIsProven(link, result, own, scene);
   const v = { ...m, items: own, all, severity: m.proven ? 'ok' : 'info' };
   v.chip = chipText(v);

@@ -6,7 +6,7 @@ import { createZoom } from './spectraZoom.js';
 import { suggestCalibration, predictAt } from '../model/measurements.js';
 import { MEASUREMENT_LIMITS } from '../model/measurement-schema.js';
 import { addMeasurement, updateMeasurement, removeMeasurement, clearMeasurements, importMeasurements, applyCalibration } from '../actionsAreas.js';
-import { cachedCompare, summaryText, tableRows, cardViews, calibrationNotes, chartLayout, deltaColor } from '../ui/measureUi.js';
+import { cachedCompare, measureSignature, summaryText, tableRows, cardViews, calibrationNotes, chartLayout, deltaColor } from '../ui/measureUi.js';
 import { startPlace } from './placeMode.js';
 
 /** Draw the measured-vs-predicted chart. Exported for tests. */
@@ -39,15 +39,27 @@ export function drawChart(ctx, w, h, th, scene, cmp, mode) {
   return L;
 }
 
+export const SUGGEST_DEBOUNCE_MS = 400;
 export function mountMeasure({ doc = document, button, store, hostFactory = (c, d) => createCanvasHost(c, d), suggest = suggestCalibration } = {}) {
   const el = (tag, cls, text, attrs) => { const e = doc.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; if (attrs) for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); return e; };
   const st = { mode: 'order', status: '', importErrors: [], focusId: null };
-  let sugKey = null, sugVal = null, rowSig = null;
+  let sugKey = null, sugVal = null, rowSig = null, linkOptSig = null;
   const rowEls = new Map(); // id -> { pred, delta, chip, inputs }
 
   const scene = () => store.getScene();
   const cmpNow = () => cachedCompare(scene());
-  const suggestion = () => { const s = scene(); if (!(s.measurements || []).length) return null; const k = JSON.stringify(s); if (k !== sugKey) { sugKey = k; try { sugVal = suggest(s); } catch (e) { sugVal = null; } } return sugVal; };
+  // calibration fit: key on the parts of the scene that matter (never the venue underlay); the first fit is immediate, later ones wait 400 ms
+  // after the last change so typing a value or a walk does not refit on every frame
+  let sugTimer = null;
+  const fit = (s, k) => { sugKey = k; try { sugVal = suggest(s); } catch (e) { sugVal = null; } };
+  const suggestion = () => {
+    const s = scene(); if (!(s.measurements || []).length) return null;
+    const k = measureSignature(s);
+    if (k === sugKey) return sugVal;
+    if (sugKey === null || !zoom.isOpen()) { fit(s, k); return sugVal; }
+    if (!sugTimer) sugTimer = setTimeout(() => { sugTimer = null; if (zoom.isOpen()) { const cur = scene(); if ((cur.measurements || []).length) fit(cur, measureSignature(cur)); buildCalib(); zoom.update(); } }, SUGGEST_DEBOUNCE_MS);
+    return sugVal; // the previous fit until the debounce fires
+  };
 
   const zoom = createZoom({
     doc, hostFactory: (canvas, d) => hostFactory(canvas, (ctx, w, h, th) => d(ctx, w, h, th)),
@@ -76,7 +88,7 @@ export function mountMeasure({ doc = document, button, store, hostFactory = (c, 
   for (const [v, t] of [['order', 'by reading number'], ['distance', 'by distance from the transmitter']]) modeSel.append(el('option', null, t, { value: v }));
   modeSel.addEventListener('change', () => { st.mode = modeSel.value; zoom.update(); });
   const modeLab = el('label'); modeLab.append(el('span', null, 'Chart '), modeSel);
-  const linkId = () => linkSel.value || (scene().links[0] || {}).id;
+  const linkId = () => linkSel.value || ((scene().links || [])[0] || {}).id;
 
   const addRow = () => {
     const s = scene(), id = linkId(), l = s.links.find((x) => x.id === id);
@@ -150,7 +162,12 @@ export function mountMeasure({ doc = document, button, store, hostFactory = (c, 
         const td = el('td'), inp = el('input', 'meas-in', null, { type: 'number', step: String(step), inputmode: 'decimal', 'aria-label': `Reading ${i + 1} ${label}` });
         inp.value = String(m[key]);
         inp.addEventListener('input', () => { const v = Number(inp.value); if (inp.value !== '' && Number.isFinite(v)) updateMeasurement(store, m.id, { [key]: v }, { coalesce: `meas-${m.id}-${key}` }); });
-        inp.addEventListener('change', () => { const v = Number(inp.value); if (inp.value === '' || !Number.isFinite(v)) inp.value = String(scene().measurements.find((x) => x.id === m.id)?.[key] ?? m[key]); });
+        inp.addEventListener('change', () => { // always show the stored (clamped) value, whatever was typed
+          const v = Number(inp.value);
+          if (inp.value !== '' && Number.isFinite(v)) updateMeasurement(store, m.id, { [key]: v }, { coalesce: `meas-${m.id}-${key}` });
+          const stored = (scene().measurements || []).find((x) => x.id === m.id);
+          inp.value = String(stored && stored[key] != null ? stored[key] : m[key]);
+        });
         r.inputs[key] = inp; td.append(inp); tr.append(td);
       };
       num('x', 'x, metres', 0.1); num('y', 'y, metres', 0.1); num('rxDbm', 'measured level, dBm', 0.1);
@@ -171,7 +188,7 @@ export function mountMeasure({ doc = document, button, store, hostFactory = (c, 
       e.pred.textContent = r.predictedDbm == null ? '-' : r.predictedDbm.toFixed(1);
       e.word.textContent = ` ${r.view.label}`;
       e.chip.className = `meas-chip meas-${r.view.sign}`;
-      for (const k of ['x', 'y', 'rxDbm']) { const inp = e.inputs[k], src = (s.measurements.find((x) => x.id === r.id) || {})[k]; if (inp && doc.activeElement !== inp && src != null && inp.value !== String(src)) inp.value = String(src); }
+      for (const k of ['x', 'y', 'rxDbm']) { const inp = e.inputs[k], src = ((s.measurements || []).find((x) => x.id === r.id) || {})[k]; if (inp && doc.activeElement !== inp && src != null && inp.value !== String(src)) inp.value = String(src); }
     }
   }
   function buildCalib() {
@@ -199,7 +216,12 @@ export function mountMeasure({ doc = document, button, store, hostFactory = (c, 
     if (!zoom.isOpen()) return;
     const s = scene(), list = s.measurements || [];
     const sig = list.map((m) => m.id).join('|') + '#' + s.links.map((l) => l.id).join('|');
-    linkSel.textContent = ''; for (const l of s.links) linkSel.append(el('option', null, l.name || l.id, { value: l.id }));
+    const linkSig = s.links.map((l) => `${l.id}${l.name || ''}`).join('');
+    if (linkSig !== linkOptSig) { // rebuild the options only when the links change, and keep the user's choice
+      const keep = linkSel.value;
+      linkOptSig = linkSig; linkSel.textContent = ''; for (const l of s.links) linkSel.append(el('option', null, l.name || l.id, { value: l.id }));
+      if (keep && s.links.some((l) => l.id === keep)) linkSel.value = keep;
+    }
     linkLab.hidden = s.links.length < 2;
     if (structural || sig !== rowSig) { rowSig = sig; buildTable(); }
     fillComputed(); buildCalib(); status.textContent = st.status;
@@ -216,5 +238,5 @@ export function mountMeasure({ doc = document, button, store, hostFactory = (c, 
   function reopen() { open(button); }
   if (button) { button.addEventListener('click', () => open(button)); button.setAttribute('aria-haspopup', 'dialog'); }
   dlg.addEventListener('close', () => { if (button && button.setAttribute) button.setAttribute('aria-expanded', 'false'); });
-  return { open, zoom, refresh, st, destroy() { unsub(); if (t) clearTimeout(t); zoom.destroy(); } };
+  return { open, zoom, refresh, st, destroy() { unsub(); if (t) clearTimeout(t); if (sugTimer) clearTimeout(sugTimer); zoom.destroy(); } };
 }

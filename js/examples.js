@@ -2065,6 +2065,20 @@ export const EXAMPLES = [
   },
 ];
 
+// Search keywords for the command palette: every entry carries `keywords` (a plain lower-case string, never shown), so 'measure', 'measurement', 'walk' and 'noise'
+// find the right examples even when the title does not say so. The palette should read `ex.keywords` (an empty string when absent) next to the category.
+const WALK_IDS = new Set(['dropout-two-ray', 'diversity-null', 'diversity-modes', 'iem-stereo-mono', 'pilot-vs-carrier-squelch', 'reflective-wall', 'telemetry-before-audio', 'digital-vs-analog', 'adaptive-modulation', 'digital-cuts-out', 'constellation-noise', 'diversity-cable-runs', 'raised-stage-null', 'band-vhf', 'band-uhf', 'band-2g4', 'wifi-busy-2g4', 'ur4d-style-link', 'diversity-correlated-antennas', 'diversity-spaced-antennas', 'band-four-piece-walk']); // the examples whose build() returns a walk
+export function exampleKeywords(ex) {
+  const k = [];
+  if (WALK_IDS.has(ex.id)) k.push('walk walking path moving');
+  if (/^measurements-/.test(ex.id)) k.push('measure measurement measurements readings walk walk-test calibrate calibration fit');
+  if (/^noise-|^video-wall|^squelch-noise|^external-noise|^tv-|radio$|^stray-carrier|^wifi-busy|^even-/.test(ex.id)) k.push('noise interference');
+  if (/^noise-/.test(ex.id)) k.push('noise source emitter timing');
+  if (/^coord-|^imd-/.test(ex.id)) k.push('coordination frequency plan intermod');
+  return k.join(' ');
+}
+for (const ex of EXAMPLES) ex.keywords = exampleKeywords(ex);
+
 export const getExample = (id) => EXAMPLES.find((e) => e.id === id) || null;
 
 /** buildExample(id) -> { id, title, note, scene, walk, selectId } or null for an unknown id. */

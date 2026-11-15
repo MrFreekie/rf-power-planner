@@ -167,7 +167,7 @@ export function buildMap({ segId = null, cw = 800, fit = false, scene = null, sh
   let lo = Infinity, hi = -Infinity; for (const p of pts) { lo = Math.min(lo, p.dbm); hi = Math.max(hi, p.dbm); }
   if (!Number.isFinite(lo)) { lo = -121; hi = -100; }
   lo = Math.floor((lo - 2) / 5) * 5; hi = Math.max(Math.ceil((hi + 2) / 5) * 5, lo + 10);
-  out.noise = { y, h: NH, pts, lo, hi, env, rises, riseShown: occChans.length > 0, assumedBlockDbm: TV_BLOCK_DBM };
+  out.noise = { y, h: NH, pts, lo, hi, env, rises, riseShown: rises.length > 0, assumedBlockDbm: TV_BLOCK_DBM };
   y += NH + 14;
   // strip
   out.y.strip = y;
@@ -472,7 +472,8 @@ export function mountSpectrumMap({ doc = document, button, store, hostFactory = 
     syncScrollNav();
     zoom.update();
   }
-  const sub = store.subscribe ? store.subscribe(() => refresh()) : null;
+  let subTimer = null; // like the other dialogs: one refresh 120 ms after the last store change
+  const subOff = store.subscribe ? store.subscribe(() => { if (subTimer) return; subTimer = setTimeout(() => { subTimer = null; refresh(); }, 120); }) : null;
 
   // ---- pointer and keyboard on the canvas
   const local = (e) => { const b = canvas.getBoundingClientRect(); return { x: e.clientX - b.left, y: e.clientY - b.top }; };
@@ -505,5 +506,5 @@ export function mountSpectrumMap({ doc = document, button, store, hostFactory = 
   }
   if (button) { button.addEventListener('click', open); button.setAttribute('aria-haspopup', 'dialog'); }
   dlg.addEventListener('close', () => { if (button && button.setAttribute) button.setAttribute('aria-expanded', 'false'); });
-  return { open, zoom, state: st, refresh, zoomTo, showInfo, get map() { return map; }, destroy() { if (sub) sub(); if (ro) ro.disconnect(); zoom.destroy(); } };
+  return { open, zoom, state: st, refresh, zoomTo, showInfo, get map() { return map; }, destroy() { if (subOff) subOff(); if (subTimer) clearTimeout(subTimer); if (ro) ro.disconnect(); zoom.destroy(); } };
 }

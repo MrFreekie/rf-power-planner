@@ -43,7 +43,7 @@ export function classifyNoiseWave(src, reflector = null) {
   if (behaviour === 'pulsed-tdma') return { mode: 'keyed', period: 0.8, life: 2.0, reachM: REACH_M, onS: 4, offS: 3 };
   // intermittent
   const duty = num(p.dutyCycle, 0.1), onS = num(p.onS, 1);
-  if (duty < 0.05 || (onS < 0.5 && duty < 0.05)) return occasional;
+  if (duty < 0.05) return occasional;
   if (onS >= 0.5) {
     const on = Math.min(8, onS);
     const off = Math.min(8, Math.max(3, onS / Math.max(duty, 1e-3) - onS));
@@ -89,7 +89,34 @@ function now() {
   const ms = typeof performance !== 'undefined' ? performance.now() : Date.now();
   return ms / 1000;
 }
-const reducedMotion = () => typeof matchMedia === 'function' && !!matchMedia('(prefers-reduced-motion: reduce)').matches;
+// prefers-reduced-motion is read once and kept current by a change listener (no matchMedia call per frame)
+let reducedMq = null, reducedNow = false;
+const reducedMotion = () => {
+  if (!reducedMq && typeof matchMedia === 'function') {
+    try {
+      reducedMq = matchMedia('(prefers-reduced-motion: reduce)'); reducedNow = !!reducedMq.matches;
+      const on = (e) => { reducedNow = !!e.matches; };
+      if (reducedMq.addEventListener) reducedMq.addEventListener('change', on); else if (reducedMq.addListener) reducedMq.addListener(on);
+    } catch { reducedMq = null; }
+  }
+  return reducedNow;
+};
+/** Test hook: forget the cached media query. */
+export function resetNoiseWaveCaches() { reducedMq = null; reducedNow = false; cfgCache = new WeakMap(); reflCache = { list: null, map: null }; }
+// classification per source object (the scene replaces objects only when they change) and the reflector map per reflectors array
+let cfgCache = new WeakMap(), reflCache = { list: null, map: null };
+function cfgFor(s, reflector) {
+  if (!s || typeof s !== 'object') return classifyNoiseWave(s, reflector);
+  const hit = cfgCache.get(s);
+  if (hit && hit.reflector === reflector && hit.noise === (reflector && reflector.noise) && hit.p1 === (reflector && reflector.p1) && hit.p2 === (reflector && reflector.p2)) return hit.cfg;
+  const cfg = classifyNoiseWave(s, reflector);
+  cfgCache.set(s, { reflector, noise: reflector && reflector.noise, p1: reflector && reflector.p1, p2: reflector && reflector.p2, cfg });
+  return cfg;
+}
+function reflectorMap(list) {
+  if (reflCache.list !== list) reflCache = { list, map: new Map((list || []).map((r) => [r.id, r])) };
+  return reflCache.map;
+}
 
 function ringAlpha(cfg, f) {
   const base = cfg.mode === 'faint' ? 0.4 : cfg.mode === 'wall' ? 0.75 : 0.85;
@@ -122,13 +149,13 @@ export function drawNoiseWaves(ctx, th, vp, scene, w, h, rip) {
   clock.last = tNow;
   clock.t = tNow - clock.held;
   const reduced = reducedMotion();
-  const refl = new Map((scene.reflectors || []).map((r) => [r.id, r]));
+  const refl = reflectorMap(scene.reflectors);
   let drawn = 0;
   ctx.save();
   ctx.lineCap = 'butt';
   for (const s of list) {
     if (drawn >= NOISE_WAVE_MAX_SOURCES) break;
-    const cfg = classifyNoiseWave(s, s && s.reflectorId ? refl.get(s.reflectorId) : null);
+    const cfg = cfgFor(s, s && s.reflectorId ? refl.get(s.reflectorId) : null);
     if (!cfg) continue;
     const wall = cfg.mode === 'wall' ? refl.get(s.reflectorId) : null;
     if (!wall && !(s.pos && Number.isFinite(s.pos.x) && Number.isFinite(s.pos.y))) continue;

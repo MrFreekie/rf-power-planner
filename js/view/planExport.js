@@ -38,10 +38,11 @@ export function planView(scene, { projectName, date, delimiter = 'comma', bom = 
   const rows = frequencyPlanRows(scene), coord = coordinationSummary(scene), summary = planSummary(scene, { projectName, date });
   const d = DELIMITERS[delimiter] || ',';
   const header = [`Frequency plan: ${summary.projectName || 'untitled'}`, summary.date ? `Date: ${summary.date}` : '', `${summary.links} link${summary.links === 1 ? '' : 's'} (${summary.mics} mic, ${summary.iems} IEM), ${summary.imdTransmitters} IMD transmitter${summary.imdTransmitters === 1 ? '' : 's'}; TV channels ${summary.tvChannelWidthMHz} MHz wide`].filter(Boolean).join('\n');
+  let csv = null, text = null; // built on first use: only Copy and Download need them
   return {
     rows, coord, summary, lines: coordLines(coord, rows),
-    csv: frequencyPlanCsv(rows, { delimiter: d, bom }),
-    text: `${header}\n\n${frequencyPlanText(rows)}\n${coordLines(coord, rows).join('\n')}\n\n${BW_NOTE}\n`,
+    get csv() { if (csv === null) csv = frequencyPlanCsv(rows, { delimiter: d, bom }); return csv; },
+    get text() { if (text === null) text = `${header}\n\n${frequencyPlanText(rows)}\n${coordLines(coord, rows).join('\n')}\n\n${BW_NOTE}\n`; return text; },
     table: { cols: PLAN_COLUMNS.map((c) => c.label), rows: rows.map((r) => PLAN_COLUMNS.map((c) => cellText(r, c.key))) },
   };
 }
@@ -49,7 +50,14 @@ export function planView(scene, { projectName, date, delimiter = 'comma', bom = 
 export function mountPlanExport({ doc = document, button, store, hostFactory = (c, d) => createCanvasHost(c, d), win = typeof window !== 'undefined' ? window : null, now = () => new Date() } = {}) {
   const el = (tag, cls, text, attrs) => { const e = doc.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; if (attrs) for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); return e; };
   const st = { delimiter: 'comma', bom: false, date: todayISO(now()), name: null };
-  const view = () => planView(store.getScene(), { projectName: st.name !== null ? st.name : store.getScene().name, date: st.date, delimiter: st.delimiter, bom: st.bom });
+  let memo = null; // planView is recomputed only when the scene object or one of its inputs changes (render, describe and the table all ask)
+  const view = () => {
+    const sc = store.getScene(), projectName = st.name !== null ? st.name : sc.name;
+    if (memo && memo.sc === sc && memo.projectName === projectName && memo.date === st.date && memo.delimiter === st.delimiter && memo.bom === st.bom) return memo.v;
+    const v = planView(sc, { projectName, date: st.date, delimiter: st.delimiter, bom: st.bom });
+    memo = { sc, projectName, date: st.date, delimiter: st.delimiter, bom: st.bom, v };
+    return v;
+  };
   const zoom = createZoom({
     doc, hostFactory: (canvas, d) => hostFactory(canvas, (ctx, w, h, th) => d(ctx, w, h, th)),
     describe: () => { const v = view(); return { title: 'Export frequency plan', summary: `${v.rows.length} row${v.rows.length === 1 ? '' : 's'}. ${v.coord.ok ? 'No coordination problem found.' : 'Coordination problems found.'}` }; },
@@ -78,7 +86,7 @@ export function mountPlanExport({ doc = document, button, store, hostFactory = (
   const say = (t) => { status.textContent = t; };
   const copyBtn = mk('Copy text', 'Copy the plan as aligned plain text', async () => {
     const t = view().text;
-    try { await win.navigator.clipboard.writeText(t); say('Plan copied as text.'); } catch { try { const ta = el('textarea'); ta.value = t; doc.body.append(ta); ta.select && ta.select(); const ok = doc.execCommand && doc.execCommand('copy'); ta.remove(); say(ok ? 'Plan copied as text.' : 'Copy was blocked by the browser. Select the table and copy it by hand.'); } catch { say('Copy was blocked by the browser. Select the table and copy it by hand.'); } }
+    try { await win.navigator.clipboard.writeText(t); say('Plan copied as text.'); } catch { try { const ta = el('textarea', null, null, { 'aria-hidden': 'true', tabindex: '-1' }); ta.value = t; dlg.append(ta); /* inside the open modal dialog: outside it the page is inert and the copy is refused */ ta.select && ta.select(); const ok = doc.execCommand && doc.execCommand('copy'); ta.remove(); if (copyBtn.focus) copyBtn.focus(); say(ok ? 'Plan copied as text.' : 'Copy was blocked by the browser. Select the table and copy it by hand.'); } catch { say('Copy was blocked by the browser. Select the table and copy it by hand.'); } }
   });
   const dlBtn = mk('Download CSV', 'Save the table as a CSV file', () => {
     const v = view(), name = downloadName(v.summary.projectName, v.summary.date);
@@ -94,7 +102,7 @@ export function mountPlanExport({ doc = document, button, store, hostFactory = (
     if (cls) cls.add('plan-print');
     const done = () => { if (cls) cls.remove('plan-print'); win.removeEventListener && win.removeEventListener('afterprint', done); };
     win.addEventListener && win.addEventListener('afterprint', done);
-    try { win.print(); say('Print dialog opened.'); } catch { say('Printing is not available here.'); }
+    try { win.print(); say('Print dialog opened.'); } catch { say('Printing is not available here.'); done(); }
     if (!win.addEventListener) done();
   });
   actions.append(copyBtn, dlBtn, printBtn);
@@ -103,8 +111,10 @@ export function mountPlanExport({ doc = document, button, store, hostFactory = (
   const printTitle = el('p', 'plan-print-title');
   body.append(fields, actions, status, sumBox, note, printTitle, tableWrap);
 
-  nameIn.addEventListener('input', () => { st.name = nameIn.value; render(); });
-  dateIn.addEventListener('input', () => { st.date = dateIn.value; render(); });
+  let typeTimer = null; // the table is rebuilt 150 ms after the last keystroke
+  const renderSoon = () => { if (typeTimer) clearTimeout(typeTimer); typeTimer = setTimeout(() => { typeTimer = null; render(); }, 150); };
+  nameIn.addEventListener('input', () => { st.name = nameIn.value; renderSoon(); });
+  dateIn.addEventListener('input', () => { st.date = dateIn.value; renderSoon(); });
   delSel.addEventListener('change', () => { st.delimiter = delSel.value; });
   bomChk.addEventListener('change', () => { st.bom = !!bomChk.checked; });
 
@@ -135,5 +145,5 @@ export function mountPlanExport({ doc = document, button, store, hostFactory = (
   }
   if (button) { button.addEventListener('click', open); button.setAttribute('aria-haspopup', 'dialog'); }
   dlg.addEventListener('close', () => { if (button && button.setAttribute) button.setAttribute('aria-expanded', 'false'); });
-  return { open, zoom, st, render, view, destroy() { unsub(); if (timer) clearTimeout(timer); zoom.destroy(); } };
+  return { open, zoom, st, render, view, destroy() { unsub(); if (timer) clearTimeout(timer); if (typeTimer) clearTimeout(typeTimer); zoom.destroy(); } };
 }

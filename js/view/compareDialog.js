@@ -3,13 +3,13 @@
 import { createCanvasHost } from './util.js';
 import { createZoom } from './spectraZoom.js';
 import { restoreScene } from '../actions.js';
-import { createSnapshots, cachedDiff, throttled, headline, linkRows, attributionView, fieldLines, itemSections, MAX_SNAPSHOTS } from '../ui/compareUi.js';
+import { createSnapshots, cachedDiff, throttled, headline, linkRows, attributionView, fieldLines, itemSections, MAX_SNAPSHOTS, NOT_SNAPSHOTTABLE } from '../ui/compareUi.js';
 import { confirmDialog } from '../ui/confirmDialog.js';
 
 export function mountCompare({ doc = document, button, store, hostFactory = (c, d) => createCanvasHost(c, d), storage = (() => { try { return typeof sessionStorage !== 'undefined' ? sessionStorage : null; } catch { return null; } })(), confirm = confirmDialog, defer = (fn) => setTimeout(fn, 0) } = {}) {
   const el = (tag, cls, text, attrs) => { const e = doc.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; if (attrs) for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); return e; };
   const snaps = createSnapshots({ storage });
-  const st = { a: null, b: 'current', diff: null, error: '' };
+  const st = { a: null, b: 'current', diff: null, error: '', same: false };
   const zoom = createZoom({
     doc, hostFactory: (canvas, d) => hostFactory(canvas, (ctx, w, h, th) => d(ctx, w, h, th)),
     describe: () => ({ title: 'Compare scenarios', summary: st.diff ? headline(st.diff)[0] || 'No differences.' : `${snaps.count()} snapshot${snaps.count() === 1 ? '' : 's'}.` }),
@@ -26,7 +26,9 @@ export function mountCompare({ doc = document, button, store, hostFactory = (c, 
   const nameIn = el('input', null, null, { type: 'text', maxlength: '60', 'aria-label': 'Snapshot name', placeholder: 'Snapshot name (optional)' });
   const mk = (text, title, fn) => { const b = el('button', null, text, { type: 'button', title }); b.addEventListener('click', fn); return b; };
   const takeBtn = mk('Take snapshot', `Save the current scene in memory (up to ${MAX_SNAPSHOTS}; the oldest is dropped)`, () => {
-    const s = snaps.take(store.getScene(), nameIn.value); nameIn.value = ''; st.a = s.id; if (st.b === st.a) st.b = 'current';
+    const s = snaps.take(store.getScene(), nameIn.value);
+    if (!s) { say(NOT_SNAPSHOTTABLE); return; }
+    nameIn.value = ''; st.a = s.id; if (st.b === st.a) st.b = 'current';
     say(`Snapshot "${s.name}" taken at ${s.time}, ${s.links} link${s.links === 1 ? '' : 's'}. ${snaps.count()} of ${MAX_SNAPSHOTS} kept.`); refresh(true);
   });
   const restoreBtn = mk('Restore snapshot to scene', 'Replace the current scene with the chosen snapshot (one undo step)', () => {
@@ -55,6 +57,7 @@ export function mountCompare({ doc = document, button, store, hostFactory = (c, 
     out.textContent = '';
     if (!snaps.count()) { out.append(el('p', 'hint', 'Take a snapshot of the scene, change something (move a receiver, add a pad), then compare. Snapshots live in memory only and are not saved in the scene file.')); return; }
     if (st.error) { out.append(el('p', 'plan-bad', st.error)); return; }
+    if (st.same) { out.append(el('p', 'hint', 'Both sides are the same snapshot, so there is nothing to compare. Choose another snapshot or the current scene.')); return; }
     const d = st.diff; if (!d) { out.append(el('p', 'hint', 'Comparing…')); return; }
     const h = el('section', null, null, { 'aria-label': 'Summary' }); h.append(el('h3', null, `What changed from ${nameOf(st.a)} to ${nameOf(st.b)}`));
     const ul = el('ul', 'cmp-head'); headline(d).forEach((t) => ul.append(el('li', null, t))); h.append(ul); out.append(h);
@@ -111,7 +114,9 @@ export function mountCompare({ doc = document, button, store, hostFactory = (c, 
   function compute() {
     if (!zoom.isOpen()) return;
     const a = sceneOf(st.a), b = sceneOf(st.b);
-    if (!a || !b) { st.diff = null; renderOut(); zoom.update(); return; }
+    if (!a || !b) { st.diff = null; st.same = false; renderOut(); zoom.update(); return; }
+    if (a === b) { st.diff = null; st.same = true; st.error = ''; renderOut(); zoom.update(); return; } // the same object: no diff to run
+    st.same = false;
     try { st.diff = cachedDiff(a, b); st.error = ''; } catch (e) { st.diff = null; st.error = 'These scenes could not be compared.'; }
     renderOut(); zoom.update();
   }
@@ -120,7 +125,7 @@ export function mountCompare({ doc = document, button, store, hostFactory = (c, 
     if (!zoom.isOpen()) return;
     if (!st.a || !snaps.get(st.a)) st.a = snaps.count() ? snaps.list()[snaps.count() - 1].id : null;
     if (st.b !== 'current' && !snaps.get(st.b)) st.b = 'current';
-    fillSelects();
+    if (structural) fillSelects(); // the option lists only change with the snapshots or the choice, not while the scene moves
     if (structural) { st.diff = null; renderOut(); defer(compute); } else schedule();
   }
   const unsub = store.subscribe(() => { if (zoom.isOpen() && st.b === 'current') refresh(false); });

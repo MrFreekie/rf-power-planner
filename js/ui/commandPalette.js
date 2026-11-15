@@ -147,8 +147,7 @@ export function mountPalette({ doc = document, button, getItems, storage = (() =
       const li = el('li', `cmd-opt${i === active ? ' active' : ''}`, null, { id: optId(i), role: 'option', 'aria-selected': String(i === active) });
       li.append(el('span', 'cmd-name', it.label), el('span', 'cmd-group', it.recent ? `Recent · ${it.group}` : it.group));
       if (it.shortcut) li.append(el('kbd', 'cmd-key', it.shortcut));
-      li.addEventListener('click', () => { active = i; run(); });
-      li.addEventListener('pointermove', () => { if (active !== i) setActive(i, false); });
+      li.dataset ? (li.dataset.i = String(i)) : li.setAttribute('data-i', String(i));
       list.append(li);
     });
     if (active >= shown.length) active = Math.max(0, shown.length - 1);
@@ -182,6 +181,15 @@ export function mountPalette({ doc = document, button, getItems, storage = (() =
     dlg.showModal(); render(); input.focus();
     if (button && button.setAttribute) button.setAttribute('aria-expanded', 'true');
   }
+  // one pair of listeners on the list instead of two per option
+  const idxOf = (e) => { let n = e.target; while (n && n !== list) { const v = n.dataset ? n.dataset.i : (n.getAttribute ? n.getAttribute('data-i') : null); if (v != null && v !== '') return +v; n = n.parentNode; } return -1; };
+  let lastPt = null;
+  list.addEventListener('click', (e) => { const i = idxOf(e); if (i >= 0) { active = i; run(); } });
+  list.addEventListener('pointermove', (e) => { // ignore the synthetic move a scroll or re-render causes: only a real pointer movement changes the highlight
+    const pt = e.clientX === undefined ? null : `${e.clientX},${e.clientY}`;
+    if (pt !== null && pt === lastPt) return; lastPt = pt;
+    const i = idxOf(e); if (i >= 0 && active !== i) setActive(i, false);
+  });
   input.addEventListener('input', () => { active = 0; render(); });
   input.addEventListener('keydown', (e) => {
     const k = e.key;

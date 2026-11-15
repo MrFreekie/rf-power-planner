@@ -230,6 +230,28 @@ function markTruncated(out, t, T) {
   return out;
 }
 
+/**
+ * waveSchedule(src) -> the real timing facts of a source, the same numbers noiseEvents uses (for drawing and captions):
+ *   { behaviour, continuous, eventsPerS (pulses, bursts or key-ups per second; 0 for continuous), periodS (null for continuous), onS (length of one event),
+ *     holdS (key-up hold included in onS, intermittent only, else 0), duty (0..1, same as dutyOf), gapS (periodS - onS, 0 for continuous), label }.
+ * impulsive: eventsPerS = repHz (a speedlight is 3 per second, 1 ms each); pulsed-tdma: repHz bursts of pulseWidth (a DECT slot 100 per second, 0.417 ms: duty 4.2 percent);
+ * intermittent: a key-up lasts onS + holdS and repeats every (onS + holdS) / dutyCycle seconds. A pulse never exceeds its period.
+ */
+export function waveSchedule(src) {
+  const p = params(src || {});
+  const b = p.behaviour;
+  if (b === 'continuous') return { behaviour: b, continuous: true, eventsPerS: 0, periodS: null, onS: Infinity, holdS: 0, gapS: 0, duty: 1, label: 'continuous' };
+  if (b === 'impulsive' || b === 'pulsed-tdma') {
+    const rate = Math.max(num(p.repHz, 1), 1e-9), period = 1 / rate, on = Math.min(num(p.pulseWidthMs, 1) * 1e-3, period);
+    const label = b === 'impulsive' ? `${fmtRate(rate)} pulses per second, ${fmtMs(on)} each` : `${fmtRate(rate)} bursts per second, ${fmtMs(on)} each, duty ${(dutyOf(src) * 100).toFixed(1)} percent`;
+    return { behaviour: b, continuous: false, eventsPerS: rate, periodS: period, onS: on, holdS: 0, gapS: Math.max(0, period - on), duty: dutyOf(src), label };
+  }
+  const hold = Math.max(num(p.holdS, 0), 0), on = Math.max(num(p.onS, 1), 1e-6) + hold, duty = Math.min(Math.max(num(p.dutyCycle, 0.1), 1e-6), 1), period = on / duty;
+  return { behaviour: b, continuous: false, eventsPerS: 1 / period, periodS: period, onS: on, holdS: hold, gapS: Math.max(0, period - on), duty: dutyOf(src), label: `keyed ${on < 1 ? `${(on * 1000).toFixed(0)} ms` : `${on.toFixed(1)} s`} on, duty ${(duty * 100).toFixed(1)} percent` };
+}
+const fmtRate = (r) => (r >= 10 ? r.toFixed(0) : String(Math.round(r * 100) / 100));
+const fmtMs = (s) => `${Math.round(s * 1e6) / 1e3} ms`;
+
 /** Fraction of durationS covered by the events (the measured duty of a timeline). */
 export function eventsDuty(events, durationS) {
   const span = events && events.truncated && Number.isFinite(events.coveredS) ? Math.min(durationS, events.coveredS) : durationS; // a capped list only covers coveredS

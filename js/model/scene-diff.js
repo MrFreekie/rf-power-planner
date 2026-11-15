@@ -154,7 +154,9 @@ const imdCount = (scene) => {
 };
 const solve = (scene, link) => { try { return solveLink(scene, link); } catch { return null; } };
 const marginOf = (r) => (r ? finite(r.marginDb) : null);
-const brief = (r) => (r ? { marginDb: finite(r.marginDb), rxLevelDbm: finite(r.rxPowerDbm), inputPowerDbm: finite(r.inputPowerDbm), noiseFloorDbm: finite(r.cascade && r.cascade.noiseFloorDbm), status: r.status || null,
+const polOf = (a) => (a && typeof a.polarisation === 'string' ? a.polarisation : 'vertical');
+const brief = (r, link) => (r ? { marginDb: finite(r.marginDb), rxLevelDbm: finite(r.rxPowerDbm), inputPowerDbm: finite(r.inputPowerDbm), noiseFloorDbm: finite(r.cascade && r.cascade.noiseFloorDbm), status: r.status || null,
+  pol: r.polarisation ? { tx: r.polarisation.txPolarisation || null, rx: link && link.rx ? polOf(link.rx.antenna) : null, lossDb: finite(r.polarisation.lossDb) } : null, // the polarisation mismatch result of this side marginDb: finite(r.marginDb), rxLevelDbm: finite(r.rxPowerDbm), inputPowerDbm: finite(r.inputPowerDbm), noiseFloorDbm: finite(r.cascade && r.cascade.noiseFloorDbm), status: r.status || null,
   compressionDb: finite(r.compression && r.compression.worst ? r.compression.worst.compressionDb : 0), warnings: Array.isArray(r.warnings) ? r.warnings.map(String) : [] } : null);
 const sub = (a, b) => (a !== null && b !== null && a !== undefined && b !== undefined ? finite(b - a) : null);
 
@@ -217,7 +219,7 @@ export function diffScenes(a, b) {
     const ra = solve(A, la), rb = identical ? ra : solve(B, lb);
     const deltas = deltasOf(ra, rb, imd);
     const fields = changes.filter((c) => ownerId(c) === lb.id).map((c) => pub.get(c));
-    links.push({ id: lb.id, name: nameOf(lb), fields, resultA: brief(ra), resultB: brief(rb), deltas, attribution: null });
+    links.push({ id: lb.id, name: nameOf(lb), fields, resultA: brief(ra, la), resultB: brief(rb, lb), deltas, attribution: null });
     solvedPairs.push({ entry: links[links.length - 1], lb });
   }
   const { venue: _v, ...Bsolve } = B; // already venue-free (prepare), kept explicit: the copy for each revert never carries it
@@ -270,6 +272,13 @@ const nameFrom = (A, B, top, id) => { const e = resolve(B, [top, { id }]) || res
 
 // ---------------------------------------------------------------- headline
 const dbText = (x) => `${(Math.round(Math.abs(x) * 10) / 10).toFixed(1)} dB`;
+/** The polarisation situation of one side, in words: 'receiver antenna vertical, transmitter horizontal: cross-polarised (15.0 dB)'. */
+function polText(p) {
+  if (!p || !p.tx || !p.rx) return null;
+  const lin = (x) => x === 'vertical' || x === 'horizontal' || x === 'slant45' || x === 'slant';
+  const verdict = p.lossDb !== null && p.lossDb < 3 ? 'matched' : (lin(p.tx) && lin(p.rx) ? 'cross-polarised' : 'mismatched');
+  return `receiver antenna ${p.rx}, transmitter ${p.tx}: ${verdict}${p.lossDb !== null ? ` (${p.lossDb.toFixed(1)} dB polarisation loss)` : ''}`;
+}
 /** headline(diff) -> array of plain sentences, most important first. */
 export function headline(diff) {
   if (!diff || !diff.summary) return [];
@@ -282,6 +291,10 @@ export function headline(diff) {
       if (at && at.contributions.length) {
         const top = at.contributions[0], others = at.contributions.length - 1;
         t += `, mainly because ${top.label} changed from ${top.fromText} to ${top.toText}`;
+        if (/(^|\.)antenna\.polarisation$/.test(top.path) || /antenna polarisation$/.test(top.label)) { // say BOTH ends, so a fix and a fault read differently
+          const a = polText(l.resultA && l.resultA.pol), b = polText(l.resultB && l.resultB.pol);
+          if (b) t += ` (before: ${a || 'not known'}; after: ${b})`;
+        }
         if (others > 0) t += ` (${others} other change${others === 1 ? '' : 's'} also counted)`;
         if (!at.exact) t += at.truncated ? '. Only some of the changes were tested, so this attribution is approximate' : '. The changes interact, so this attribution is approximate';
       } else if (at && at.truncated) t += ', but the attribution was limited (more changes than could be tested)';
