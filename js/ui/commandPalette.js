@@ -122,7 +122,7 @@ export function collectSectionItems(doc) {
 }
 /** Items for the examples: grouped by the category prefix of the note. */
 export function exampleItems(examples, apply) {
-  return (examples || []).map((ex) => { const cat = categoryOf(ex.note); return { id: `ex:${ex.id}`, label: ex.title, group: `Example · ${cat}`, keywords: `example ${cat}`, run: () => apply(ex.id) }; });
+  return (examples || []).map((ex) => { const cat = categoryOf(ex.note); return { id: `ex:${ex.id}`, label: ex.title, group: `Example · ${cat}`, keywords: `example ${cat} ${ex.keywords || ''}`, run: () => apply(ex.id) }; });
 }
 
 export function mountPalette({ doc = document, button, getItems, storage = (() => { try { return typeof localStorage !== 'undefined' ? localStorage : null; } catch { return null; } })(), win = typeof window !== 'undefined' ? window : null } = {}) {

@@ -8,12 +8,12 @@ const wall = (preset = 'led-wall') => ({ id: 'w1', p1: { x: 0, y: 0 }, p2: { x: 
 
 test('classification by kind', () => {
   assert.equal(classifyNoiseWave(src('led-light-pwm')).mode, 'steady');
-  assert.equal(classifyNoiseWave(src('speedlight-flash')).mode, 'occasional');
+  assert.equal(classifyNoiseWave(src('speedlight-flash')).mode, 'pulse');
   assert.equal(classifyNoiseWave(src('flash-trigger-radio')).mode, 'occasional');
   assert.equal(classifyNoiseWave(src('pyro-trigger')).mode, 'occasional');
   assert.equal(classifyNoiseWave(src('dimmer-triac')).mode, 'faint');
   assert.equal(classifyNoiseWave(src('motor-hoist')).mode, 'faint');
-  const ptt = classifyNoiseWave(src('ptt-pmr446')); assert.equal(ptt.mode, 'keyed'); assert.equal(ptt.onS, 5); assert.ok(ptt.offS >= 3);
+  const ptt = classifyNoiseWave(src('ptt-pmr446')); assert.equal(ptt.mode, 'keyed'); assert.equal(ptt.onS, 5.5, 'model on-time 5 s plus the 0.5 s hold'); assert.ok(ptt.offS >= 3);
   const dect = classifyNoiseWave(src('dect-comms')); assert.equal(dect.mode, 'keyed'); assert.equal(dect.onS, 4); assert.equal(dect.offS, 3);
   assert.equal(classifyNoiseWave(src('gsm-phone-900')).mode, 'keyed');
   assert.equal(classifyNoiseWave(src('lte-phone')).mode, 'keyed');
@@ -30,7 +30,7 @@ test('muted sources and walls without noise draw nothing; a live wall radiates f
 });
 
 test('steady sources always have several rings; occasional ones have at most one and sometimes none', () => {
-  const st = classifyNoiseWave(src('led-light-pwm')), oc = classifyNoiseWave(src('speedlight-flash'));
+  const st = classifyNoiseWave(src('led-light-pwm')), oc = classifyNoiseWave(src('pyro-trigger'));
   let ocWith = 0, ocWithout = 0;
   for (let t = 0; t < 60; t += 0.25) {
     assert.ok(waveRings(st, 'a', t).length >= 3);
@@ -74,4 +74,22 @@ test('drawNoiseWaves respects settings.on, field and the source cap', () => {
   { const { c, n } = fakeCtx(); assert.equal(drawNoiseWaves(c, th, vp, scene, 800, 600, { settings: { on: false } }), 0); assert.equal(n.stroke, 0); }
   { const { c } = fakeCtx(); assert.equal(drawNoiseWaves(c, th, vp, scene, 800, 600, { settings: { on: true, field: true } }), 0); }
   { const { c, n } = fakeCtx(); assert.equal(drawNoiseWaves(c, th, vp, scene, 800, 600, { settings: { on: true } }), NOISE_WAVE_MAX_SOURCES); assert.ok(n.stroke > 0); }
+});
+
+test('waves follow the model schedule: speedlight is a frequent train, rare sources keep a clamped real period', async () => {
+  const { waveSchedule } = await import('../js/model/noise-sources.js');
+  const sp = classifyNoiseWave(src('speedlight-flash')), sch = waveSchedule(src('speedlight-flash'));
+  assert.equal(sch.eventsPerS, 3);
+  assert.equal(sp.mode, 'pulse'); assert.ok(Math.abs(sp.period - 1 / 3) < 0.01, `period ${sp.period}`);
+  let min = 99, max = 0; for (let t = 0; t < 30; t += 0.05) { const n = waveRings(sp, 'a', t).length; min = Math.min(min, n); max = Math.max(max, n); }
+  assert.ok(min >= 2 && max <= 4, `rings alive ${min}..${max}`);
+  for (const kind of ['pyro-trigger', 'flash-trigger-radio']) {
+    const c = classifyNoiseWave(src(kind)); assert.equal(c.mode, 'occasional');
+    assert.ok(c.period >= 1.5 && c.period <= 8, `${kind} period ${c.period}`);
+  }
+  const ptt = classifyNoiseWave(src('ptt-business-uhf')), ps = waveSchedule(src('ptt-business-uhf'));
+  assert.equal(ptt.onS, Math.min(8, Math.max(1, ps.onS))); assert.equal(ptt.offS, Math.min(8, Math.max(3, ps.gapS)));
+  const dect = classifyNoiseWave(src('dect-comms')); assert.match(dect.label, /call cycle.*bursts per second/);
+  assert.match(sp.label, /3 pulses per second/);
+  assert.equal(classifyNoiseWave(src('led-light-pwm')).onS, Infinity);
 });

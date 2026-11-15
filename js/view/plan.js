@@ -139,7 +139,7 @@ export function createPlanView(canvas, store) {
 
     // ripples (wavefronts) under the walls and icons
     rip.drawPlan(ctx, th, vp, scene, w, h, link0);
-    drawNoiseWaves(ctx, th, vp, scene, w, h, rip);
+    drawNoiseWaves(ctx, th, vp, scene, w, h, rip, link0 ? solveCached(scene, link0) : null);
 
     // reserve name labels so link labels can avoid them
     placer.reset(); linkLabelRects.length = 0;

@@ -62,7 +62,7 @@ export function calibrationNotes(sug, n) {
   const out = { headline: '', cautions: [] };
   if (!sug || !n) { out.headline = 'Add readings to get a calibration suggestion.'; return out; }
   out.cautions = (sug.cautions || []).filter((t) => !/already matches/i.test(t)); // the headline says it
-  out.headline = sug.needed === false && !sug.best ? 'The model already matches these readings; no calibration is needed.' : sug.best ? `Best fit: ${sug.best.label} (${f1(sug.best.current)} → ${f1(sug.best.fitted)} dB).` : 'No single calibration value explains these readings.';
+  out.headline = sug.headline && /does not match|already matches/i.test(sug.headline) && !sug.best ? sug.headline : sug.best ? `Best fit: ${sug.best.label} (${f1(sug.best.current)} → ${f1(sug.best.fitted)} dB).` : 'No single calibration value explains these readings.';
   return out;
 }
 

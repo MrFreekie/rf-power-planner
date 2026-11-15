@@ -68,3 +68,22 @@ test('narrow toolbar puts the audio source group right after the first buttons',
   const m = css.match(/@media \(max-width: 800px\) \{[^@]*?#toolbar > #btn-cmd[^}]*\{ order: -2; \}\s*#toolbar > \.source-bar \{ order: -1; \}/);
   assert.ok(m, 'phone media block orders Find and Scenario first, then .source-bar');
 });
+
+import { quietSources } from '../js/view/noiseWaves.js';
+test('a source far below the floor at the receiver gets one faint static dotted ring and nothing moving', () => {
+  const s = createNoiseSource('led-light-pwm', { pos: { x: 100, y: 100, z: 1 } }), q1 = s.id;
+  const result = { noiseSources: { floorBeforeDbm: -100, sources: [{ id: q1, averageDbm: -130 }, { id: 'other', averageDbm: -105 }] } };
+  assert.deepEqual([...quietSources(result)], [q1]);
+  assert.equal(quietSources({}).size, 0); assert.equal(quietSources(null).size, 0);
+  const run = (res) => {
+    const dashes = [], arcs = [], alphas = [];
+    let cur = 1; const ctx = new Proxy({}, { get: (_, k) => (k === 'globalAlpha' ? cur : k === 'arc' ? (x, y, r) => arcs.push(r) : k === 'setLineDash' ? (d) => dashes.push(d.join()) : () => {}), set: (_, k, v) => { if (k === 'globalAlpha') { cur = v; alphas.push(v); } return true; } });
+    drawNoiseWaves(ctx, { inkSoft: '#555', paper: '#fff' }, { pxPerM: 2, worldToScreen: (x, y) => ({ x, y }) }, { noiseSources: [s] }, 800, 600, { settings: { on: true } }, res);
+    return { dashes, arcs, alphas };
+  };
+  const q = run(result);
+  assert.equal(q.arcs.length, 2, 'halo and dots of one ring'); assert.ok(q.dashes.includes(NOISE_RING_STYLE.dotted.join()) && !q.dashes.includes(NOISE_RING_STYLE.dash.join()));
+  assert.ok(q.alphas.every((a) => a <= 0.18 + 1e-9), JSON.stringify(q.alphas));
+  const live = run({ noiseSources: { floorBeforeDbm: -100, sources: [{ id: q1, averageDbm: -95 }] } });
+  assert.ok(live.arcs.length > 2 && live.dashes.includes(NOISE_RING_STYLE.dash.join()));
+});

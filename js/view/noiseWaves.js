@@ -5,7 +5,7 @@
 // a visual convention, like the link ripples (ripples.js), not a propagation model.
 //
 // Pure scheduling (no canvas): classifyNoiseWave, keyedState, waveRings. drawNoiseWaves does the drawing.
-import { NOISE_CATALOGUE } from '../model/noise-sources.js';
+import { waveSchedule } from '../model/noise-sources.js';
 
 export const NOISE_WAVE_MAX_SOURCES = 12;
 export const MIN_REACH_PX = 110, MIN_WALL_REACH_PX = 60;
@@ -20,36 +20,40 @@ export function idPhase(id) {
   return (h >>> 0) / 4294967296;
 }
 
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+export const PULSE_MIN_PERIOD_S = 0.33, PULSE_MAX_ALIVE = 4, OCCASIONAL_PERIOD_S = [1.5, 8], KEYED_ON_S = [1, 8], KEYED_OFF_S = [3, 8];
+
 /**
  * classifyNoiseWave(src, reflector?) -> null (draw nothing) or a config:
- *   { mode: 'steady' | 'faint' | 'occasional' | 'keyed' | 'wall', period (s between births), life (s a ring lives), onS, offS (keyed only), reachM }
- * steady: continuous source. faint: very dense or very busy bursts (dimmer, motor, Wi-Fi), fainter rings. occasional: a single ring every
- * 2.5 s (flash, flash trigger, pyro). keyed: rings only while on (PTT about 5 s on; DECT / GSM call 4 s on, 3 s off; other intermittent sources
- * with onS >= 0.5 s). wall: video wall, offset lines from the whole wall line.
+ *   { mode: 'steady' | 'faint' | 'pulse' | 'occasional' | 'keyed' | 'wall', period (s between births), life (s a ring lives), onS, offS (keyed only), reachM, label }
+ * The timing comes from the model (waveSchedule in noise-sources.js) and is scaled to visual time only where real time is too fast or too slow:
+ * steady: continuous source. faint: very dense or very busy bursts (dimmer, motor, Wi-Fi), fainter rings. pulse: a frequent train (a speedlight, 3 per second:
+ * a ring about every 0.33 s, at most 4 alive). occasional: a rare event (pyro or flash trigger radio) at its real period clamped to 1.5 to 8 s.
+ * keyed: rings only while on, the model on-time and gap clamped to 1 to 8 s and 3 to 8 s (PTT); DECT and GSM show the call cycle (4 s on, 3 s off, labelled,
+ * the real burst duty is not drawn). wall: video wall, offset lines from the whole wall line.
  */
 export function classifyNoiseWave(src, reflector = null) {
   if (!src || typeof src !== 'object' || src.enabled === false) return null;
-  const def = NOISE_CATALOGUE[src.kind];
-  const p = { ...(def ? def.params : {}), ...src };
-  const behaviour = def ? def.behaviour : 'continuous';
   if (src.kind === 'video-wall' || (typeof src.reflectorId === 'string' && src.reflectorId)) {
     const n = reflector && reflector.noise;
     if (!reflector || !reflector.p1 || !reflector.p2 || !n || n.preset === 'off') return null;
-    return { mode: 'wall', period: 1.1, life: 3.3, reachM: 3, onS: Infinity, offS: 0 };
+    return { mode: 'wall', period: 1.1, life: 3.3, reachM: 3, onS: Infinity, offS: 0, label: 'video wall, continuous' };
   }
-  if (behaviour === 'continuous') return { mode: 'steady', period: 0.9, life: 3.6, reachM: REACH_M, onS: Infinity, offS: 0 };
-  const occasional = { mode: 'occasional', period: 2.5, life: 2.2, reachM: REACH_M, onS: Infinity, offS: 0 };
-  if (behaviour === 'impulsive') return num(p.repHz, 1) >= 20 ? { mode: 'faint', period: 1.2, life: 3.6, reachM: REACH_M, onS: Infinity, offS: 0 } : occasional;
-  if (behaviour === 'pulsed-tdma') return { mode: 'keyed', period: 0.8, life: 2.0, reachM: REACH_M, onS: 4, offS: 3 };
+  const sch = waveSchedule(src), label = sch.label;
+  const base = { reachM: REACH_M, onS: Infinity, offS: 0, label };
+  if (sch.continuous) return { ...base, mode: 'steady', period: 0.9, life: 3.6 };
+  const eps = num(sch.eventsPerS, 1);
+  if (sch.behaviour === 'pulsed-tdma') return { ...base, mode: 'keyed', period: 0.8, life: 2.0, onS: 4, offS: 3, label: `call cycle (4 s on, 3 s off), ${label}` };
+  if (sch.behaviour === 'impulsive') {
+    if (eps >= 20) return { ...base, mode: 'faint', period: 1.2, life: 3.6 };
+    if (eps >= 1) { const period = Math.max(PULSE_MIN_PERIOD_S, 1 / eps); return { ...base, mode: 'pulse', period, life: Math.min(2.2, PULSE_MAX_ALIVE * period) }; }
+    return { ...base, mode: 'occasional', period: clamp(num(sch.periodS, 2.5), ...OCCASIONAL_PERIOD_S), life: 2.2 };
+  }
   // intermittent
-  const duty = num(p.dutyCycle, 0.1), onS = num(p.onS, 1);
-  if (duty < 0.05) return occasional;
-  if (onS >= 0.5) {
-    const on = Math.min(8, onS);
-    const off = Math.min(8, Math.max(3, onS / Math.max(duty, 1e-3) - onS));
-    return { mode: 'keyed', period: 0.8, life: 2.0, reachM: REACH_M, onS: on, offS: off };
-  }
-  return { mode: 'faint', period: 1.2, life: 3.6, reachM: REACH_M, onS: Infinity, offS: 0 }; // short, busy bursts (Wi-Fi, Bluetooth)
+  const duty = num(sch.duty, 0.1), onS = num(sch.onS, 1);
+  if (duty < 0.05) return { ...base, mode: 'occasional', period: clamp(num(sch.periodS, 2.5), ...OCCASIONAL_PERIOD_S), life: 2.2 };
+  if (onS >= 0.5) return { ...base, mode: 'keyed', period: 0.8, life: 2.0, onS: clamp(onS, ...KEYED_ON_S), offS: clamp(num(sch.gapS, 3), ...KEYED_OFF_S) };
+  return { ...base, mode: 'faint', period: 1.2, life: 3.6 }; // short, busy bursts (Wi-Fi, Bluetooth)
 }
 
 /** keyedState(cfg, id, t) -> { on, phaseS } for a keyed config: whether the source is transmitting at time t (s). Others are always on. */
@@ -138,8 +142,18 @@ function stadium(ctx, a, b, d) {
  * drawNoiseWaves(ctx, th, vp, scene, w, h, rip): call right after rip.drawPlan(...). Respects rip.settings (on, paused, field), the print
  * switch (settings.on = false) and prefers-reduced-motion (one static faint ring). At most NOISE_WAVE_MAX_SOURCES sources are drawn.
  */
-export const NOISE_RING_STYLE = Object.freeze({ width: 1.7, dash: [7, 5], haloWidth: 4, haloAlpha: 0.3 });
-export function drawNoiseWaves(ctx, th, vp, scene, w, h, rip) {
+export const NOISE_RING_STYLE = Object.freeze({ width: 1.7, dash: [7, 5], dotted: [1.5, 5], haloWidth: 4, haloAlpha: 0.3 });
+export const QUIET_BELOW_FLOOR_DB = 20;
+/** quietSources(result) -> Set of source ids whose average level at the active receiver is more than 20 dB under the floor (nothing to show moving). */
+export function quietSources(result) {
+  const ns = result && result.noiseSources, out = new Set();
+  if (!ns || !Array.isArray(ns.sources)) return out;
+  const floor = Number.isFinite(ns.floorBeforeDbm) ? ns.floorBeforeDbm : result.cascade && result.cascade.noiseFloorDbm;
+  if (!Number.isFinite(floor)) return out;
+  for (const x of ns.sources) if (x && x.id != null && Number.isFinite(x.averageDbm) && x.averageDbm < floor - QUIET_BELOW_FLOOR_DB) out.add(x.id);
+  return out;
+}
+export function drawNoiseWaves(ctx, th, vp, scene, w, h, rip, result = null) {
   const st = rip && rip.settings;
   if (!st || !st.on || st.field) return 0;
   const list = Array.isArray(scene.noiseSources) ? scene.noiseSources : [];
@@ -150,6 +164,7 @@ export function drawNoiseWaves(ctx, th, vp, scene, w, h, rip) {
   clock.t = tNow - clock.held;
   const reduced = reducedMotion();
   const refl = reflectorMap(scene.reflectors);
+  const quiet = quietSources(result);
   let drawn = 0;
   ctx.save();
   ctx.lineCap = 'butt';
@@ -160,7 +175,8 @@ export function drawNoiseWaves(ctx, th, vp, scene, w, h, rip) {
     const wall = cfg.mode === 'wall' ? refl.get(s.reflectorId) : null;
     if (!wall && !(s.pos && Number.isFinite(s.pos.x) && Number.isFinite(s.pos.y))) continue;
     const reachPx = Math.max(cfg.reachM * vp.pxPerM, cfg.mode === 'wall' ? MIN_WALL_REACH_PX : MIN_REACH_PX); // never so small on screen that the rings cannot be seen
-    const rings = reduced ? [{ f: 0.45 }] : waveRings(cfg, s.id, clock.t);
+    const isQuiet = cfg.mode !== 'wall' && quiet.has(s.id); // far below the floor: one faint static dotted ring, nothing moving
+    const rings = reduced || isQuiet ? [{ f: 0.45 }] : waveRings(cfg, s.id, clock.t);
     if (!rings.length) { drawn++; continue; }
     let a = null, b = null, c = null;
     if (wall) {
@@ -173,13 +189,13 @@ export function drawNoiseWaves(ctx, th, vp, scene, w, h, rip) {
     drawn++;
     for (const r of rings) {
       const rad = Math.max(2, r.f * reachPx);
-      ctx.globalAlpha = reduced ? 0.14 : ringAlpha(cfg, r.f);
+      ctx.globalAlpha = isQuiet ? 0.18 : reduced ? 0.14 : ringAlpha(cfg, r.f);
       if (ctx.globalAlpha <= 0.005) continue;
       const path = () => { if (wall) stadium(ctx, a, b, Math.max(3, rad)); else { ctx.beginPath(); ctx.arc(c.x, c.y, rad, 0, Math.PI * 2); } };
       // a paper-coloured halo under the dashes keeps them readable over the denser, darker link rings; the dashes stay greyscale
       const al = ctx.globalAlpha;
       ctx.setLineDash([]); ctx.strokeStyle = th.paper || '#ffffff'; ctx.lineWidth = NOISE_RING_STYLE.haloWidth; ctx.globalAlpha = al * NOISE_RING_STYLE.haloAlpha; path(); ctx.stroke();
-      ctx.setLineDash(NOISE_RING_STYLE.dash); ctx.strokeStyle = th.inkSoft || th.ink; ctx.lineWidth = NOISE_RING_STYLE.width; ctx.globalAlpha = al; path(); ctx.stroke();
+      ctx.setLineDash(isQuiet ? NOISE_RING_STYLE.dotted : NOISE_RING_STYLE.dash); ctx.strokeStyle = th.inkSoft || th.ink; ctx.lineWidth = NOISE_RING_STYLE.width; ctx.globalAlpha = al; path(); ctx.stroke();
     }
   }
   ctx.restore();
