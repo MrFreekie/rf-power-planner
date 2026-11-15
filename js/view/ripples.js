@@ -13,7 +13,7 @@
 // visual speed (the real wave is about 300 million m/s). Field mode draws the static coherent interference
 // pattern of the direct wave and its reflections (antenna pattern ignored).
 import { wavePolarisation, antennaGainDb, floorReflection, reflectorCoefficient } from '../model/rf.js';
-import { solveCached, statusColor, setFont, haloText, drawCost } from './util.js';
+import { solveCached, activeLink, statusColor, setFont, haloText, drawCost } from './util.js';
 import { gateOf } from './squelchUi.js';
 import { floorHeightAt } from '../model/floor.js';
 import { parseColor } from './coverageUi.js';
@@ -61,13 +61,14 @@ export function createRipples({ store }) {
   let phase = 0, raf = 0, lastTs = 0, observer = null;
 
   // ---- scene cache (rebuilt only when the scene object changes) ---------------------------------
-  let cacheScene = null, emitters = [], reflInfo = [];
+  let cacheScene = null, cacheLinkId = null, emitters = [], reflInfo = [];
   const makeEmitter = (id, linkId, pos, antenna, freqMHz, color) => ({
     id, linkId, x: pos.x, y: pos.y, z: pos.z || 0, antenna, freqMHz, color,
     plan: new Float32Array(N), side: new Float32Array(N), sideAz: NaN, wallIdx: [],
   });
   function build(scene) {
-    cacheScene = scene; emitters = []; reflInfo = [];
+    const act = activeLink(scene, store.getSelection && store.getSelection()); // wall reflections use the ACTIVE link's frequency and polarisation, not the first link
+    cacheScene = scene; cacheLinkId = act ? act.id : null; emitters = []; reflInfo = [];
     const env = scene.environment || {};
     for (const link of scene.links || []) {
       const br = link.kind === 'iem' && Array.isArray(link.branches) && link.branches.length > 1 ? link.branches : null;
@@ -81,9 +82,9 @@ export function createRipples({ store }) {
     const walls = (scene.reflectors || []).slice(0, 4);
     walls.forEach((w) => {
       const dx = w.p2.x - w.p1.x, dy = w.p2.y - w.p1.y, len = Math.hypot(dx, dy) || 1;
-      const f = (scene.links[0] && scene.links[0].freqMHz) || 600;
+      const f = (act && act.freqMHz) || 600;
       let g = { re: 0.5, im: 0 };
-      try { g = reflectorCoefficient(w.material, 30, wavePolarisation(scene, scene.links[0]), f); } catch { /* keep default */ }
+      try { g = reflectorCoefficient(w.material, 30, wavePolarisation(scene, act), f); } catch { /* keep default */ }
       reflInfo.push({ w, nx: -dy / len, ny: dx / len, mag: Math.hypot(g.re, g.im), ph: Math.atan2(g.im, g.re), loss: Number.isFinite(w.transmissionLossDb) ? w.transmissionLossDb : null });
     });
     const bearing = { az: 0, el: 0 };
@@ -102,7 +103,8 @@ export function createRipples({ store }) {
       });
     }
   }
-  const emittersFor = (scene) => { if (scene !== cacheScene) build(scene); return emitters; };
+  const activeId = (scene) => { const a = activeLink(scene, store.getSelection && store.getSelection()); return a ? a.id : null; };
+  const emittersFor = (scene) => { if (scene !== cacheScene || activeId(scene) !== cacheLinkId) build(scene); return emitters; };
 
   function sideTable(e, azU) {
     if (e.sideAz === azU) return e.side;

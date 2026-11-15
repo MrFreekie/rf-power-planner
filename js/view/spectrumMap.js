@@ -10,7 +10,7 @@ import {
 } from '../model/spectrum-map.js';
 import { setTvChannelWidth } from '../actionsAreas.js';
 
-export const PAD = 14, MAX_K = 40, MIN_PX = 3, FIT_MIN_K = 0.4;
+export const PAD = 14, MAX_K = 40, MIN_PX = 3, FIT_MIN_K = 0.3;
 export const FLAG_TEXT = Object.freeze({
   S: 'S, stated: a defined standard or a figure read from a source.',
   I: 'I, inferred: recalled from the regulation, not read from the primary page.',
@@ -102,7 +102,8 @@ export function buildMap({ segId = null, cw = 800, fit = false, scene = null, sh
   const mLanes = packLanes(markers);
   out.y.markers = y; out.markers = markers; out.overlaps = overlaps; out.offAxis = offAxis;
   y += Math.max(1, mLanes) * 16 + 8;
-  // bands
+  // bands (a caption row first)
+  y += 14;
   out.y.bands = y;
   const bands = [];
   for (const b of BAND_CATALOGUE) {

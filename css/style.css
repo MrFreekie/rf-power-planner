@@ -712,6 +712,8 @@ summary { min-height: 24px; }
 .slot-extra .mpx-nums > div { display: flex; gap: 4px; }
 .slot-extra .mpx-nums dt, .slot-extra .mpx-nums dd { margin: 0; font-size: 12px; }
 @media (min-width: 1100px) and (min-height: 560px) { #spectra .slot-extra { flex: 0 1 auto; max-height: 60px; } #spectra .slot-digital { flex: 1 1 0; max-height: none; } }
+/* stereo IEM: the MPX readouts (mode chip, pilot, numbers) sit under the plot and used to squeeze it to the 56 px flex minimum; the plots keep a readable minimum and the panel scrolls instead */
+@media (min-width: 1100px) and (min-height: 560px) { #spectra .spectrum-panel { overflow-y: auto; } #spectra .spectrum-panel .spectrum-canvas { min-height: 84px; } }
 @media (min-width: 1100px) { #leftpanel { overflow: hidden; } .panel-body { position: relative; } }
 @media (min-width: 1100px) and (min-height: 560px) and (max-height: 760px) { #toolbar { gap: 2px 8px; padding: 2px 10px; } #toolbar button, #toolbar select, #toolbar input { min-height: 26px; } #brandbar .brand-warn { font-size: 11px; line-height: 1.2; } }
 .spectrum-panel [hidden] { display: none !important; }
@@ -897,3 +899,15 @@ body.vnalab-open { overflow: hidden; }
 
 .map-scrollhint { margin: 4px 14px; font-size: 13px; font-weight: 600; }
 .map-scrollhint:empty { display: none; }
+
+/* printing the main page (not the report): plan, side view and the budgets only; toolbar, bottom bar, inspector and pop-outs are hidden */
+@media print {
+  body:not(.report-open) #toolbar, body:not(.report-open) #bottombar, body:not(.report-open) #sidebar, body:not(.report-open) #example-note,
+  body:not(.report-open) .panel-tab, body:not(.report-open) .pane-opt, body:not(.report-open) #welcome, body:not(.report-open) .map-dialog, body:not(.report-open) .lab-dialog { display: none !important; }
+  body:not(.report-open) #workspace { display: block !important; height: auto !important; }
+  body:not(.report-open) .pane { display: block !important; height: 95mm !important; break-inside: avoid; border: 1px solid #000; margin-bottom: 6mm; }
+  body:not(.report-open) .pane canvas { width: 100% !important; height: 85mm !important; }
+  body:not(.report-open) #leftpanel { display: block !important; position: static !important; width: auto !important; break-inside: avoid; }
+  body:not(.report-open) #leftpanel-body { display: block !important; overflow: visible !important; height: auto !important; }
+}
+@media print { body:not(.report-open) .pane h2 > *, body:not(.report-open) .pane > *:not(h2):not(canvas) { display: none !important; } }
