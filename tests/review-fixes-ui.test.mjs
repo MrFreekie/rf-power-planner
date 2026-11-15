@@ -36,3 +36,16 @@ test('personOfLink takes a prebuilt owners map and answers the same', () => {
   const owners = linkOwners(sc.people), id = sc.people[0].micLinkId;
   assert.deepEqual(personOfLink(sc, id, owners), personOfLink(sc, id));
 });
+
+import { placeText } from '../js/view/util.js';
+test('placeText moves a colliding label clear, skips optional ones that cannot fit, and records boxes', () => {
+  const ctx = new Proxy({}, { get(t, k) { if (k === 'measureText') return (s) => ({ width: s.length * 6 }); return k in t ? t[k] : () => {}; }, set(t, k, v) { t[k] = v; return true; } });
+  const th = { ink: '#000', paper: '#fff', font: 'sans-serif' };
+  const placed = [];
+  const a = placeText(ctx, th, 'first label', 50, 100, { px: 11 }, placed);
+  const b = placeText(ctx, th, 'second label', 50, 100, { px: 11 }, placed);
+  assert.ok(b.y + b.h <= a.y || b.y >= a.y + a.h, 'no overlap');
+  assert.equal(placed.length, 2);
+  const tight = { x: 0, y: 80, w: 500, h: 16 };
+  assert.equal(placeText(ctx, th, 'third label', 50, 100, { px: 11, optional: true }, placed, tight), null);
+});

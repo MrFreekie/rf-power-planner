@@ -3,7 +3,7 @@
 //   baseband lines (basebandProducts) are drawn in the MPX view; two-tone FM lines (twoToneFm) in the RF view. Both are model results, levels illustrative (assumed nonlinearity).
 import { resolveAudioSource, resolveToneHz, sweepHz } from '../model/audio-source.js';
 import { basebandProducts, twoToneFm, TONE_MPX_LIMITS } from '../model/tone-mpx.js';
-import { haloText } from './util.js';
+import { haloText, placeText, setFont } from './util.js';
 
 export const TONE_SOURCES = Object.freeze(['tone', 'two-tone', 'sweep']);
 const fin = (v) => Number.isFinite(v);
@@ -48,15 +48,20 @@ export function drawBasebandLines(ctx, th, ax, prod) {
   ctx.restore();
   // names: tone first, then the strongest others, no two labels closer than 34 px
   const order = [...lines].sort((a, b) => (b.kind === 'tone') - (a.kind === 'tone') || b.levelDb - a.levelDb);
-  const placed = [];
+  const placed = [], boxes = ax.placed || [], bounds = { x: ax.L, y: ax.T - 14, w: ax.pw, h: ax.ph + 14 };
   for (const l of order) {
     if (placed.length >= 9) break;
     const x = ax.X(l.fKhz);
     if (placed.some((p) => Math.abs(p - x) < 34)) continue;
     placed.push(x);
-    haloText(ctx, th, baseLabel(l, setup), Math.min(Math.max(x, ax.L + 22), ax.L + ax.pw - 22), ax.Y(l.levelDb) - 8, { align: 'center', px: 11, weight: '600', color: th.blue });
+    placeText(ctx, th, baseLabel(l, setup), Math.min(Math.max(x, ax.L + 22), ax.L + ax.pw - 22), ax.Y(l.levelDb) - 8, { align: 'center', px: 11, weight: '600', color: th.blue, optional: true }, boxes, bounds);
   }
-  haloText(ctx, th, `programme ${setup.source === 'sweep' ? 'sweep' : 'tone'} ${num(setup.toneKhz)} kHz at ${Math.round(setup.tonePct)}%${setup.stereo ? `, pilot ${+setup.pilotPct.toFixed(1)}%` : ''}, stage ${setup.overloadDb >= 0 ? '+' : '−'}${Math.abs(setup.overloadDb).toFixed(0)} dB: lines and products`, ax.L + 4, ax.T + ax.ph - 6, { px: 11, color: th.blue });
+  // caption: the long form when it fits the plot width, else a short one; it moves clear of the other labels
+  const long = `programme ${setup.source === 'sweep' ? 'sweep' : 'tone'} ${num(setup.toneKhz)} kHz at ${Math.round(setup.tonePct)}%${setup.stereo ? `, pilot ${+setup.pilotPct.toFixed(1)}%` : ''}, stage ${setup.overloadDb >= 0 ? '+' : '−'}${Math.abs(setup.overloadDb).toFixed(0)} dB: lines and products`;
+  const short = `tone ${num(setup.toneKhz)} kHz at ${Math.round(setup.tonePct)}%`;
+  setFont(ctx, th, 11, '');
+  const cap = ctx.measureText(long).width <= ax.pw - 10 ? long : short;
+  placeText(ctx, th, cap, ax.L + 4, ax.T + ax.ph - 6, { px: 11, color: th.blue, optional: true }, boxes, bounds); // optional: in a tiny plot the caption is dropped rather than overprinted (the enlarged view and the summary carry it)
 }
 
 /** Two-tone FM lines in the RF view as thin stems from the bottom; carrier and the +- pilot lines are named. f = the frame (X, Y, L, T, pw, ph), rxLevelDbm = unmodulated carrier. */

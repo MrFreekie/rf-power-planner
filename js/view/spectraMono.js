@@ -1,7 +1,7 @@
 // Mono baseband view for the bottom-bar MPX spectrum: microphone links and mono in-ear monitors.
 // Pure helpers (isStereoMpx, monoInputs, monoSummary) plus drawMonoMpx; the model is monoBasebandSpectrum in
 // js/model/spectrum-views.js. The stereo view (drawMpx in spectra.js) is unchanged.
-import { setFont, haloText } from './util.js';
+import { setFont, haloText, placeText } from './util.js';
 import { SPEC_DB } from './mpx.js';
 import { dataConfig } from '../telemetryTracker.js';
 import { drawBasebandLines } from './toneLines.js';
@@ -115,17 +115,18 @@ export function drawMonoMpx(ctx, w, h, th, { m, inp, hoverX, toneProducts: tp = 
   const dd = inp.distortion && inp.distortion.active ? inp.distortion : null;
   const prods = dd && Array.isArray(m.products) ? m.products : [];
   for (const pr of prods) { const x = X(pr.freqKhz); if (x >= L && x <= L + pw) drawProductMarker(ctx, th, x, Y(pr.levelDb), `IM${pr.order}`); }
-  if (tp) drawBasebandLines(ctx, th, { X, Y, L, T, pw, ph, span, floorDb: SPEC_DB.min }, tp);
+  const bnd = { x: 0, y: 0, w: 1e5, h: T + ph };
+  const placed = [];
   drawDistortionBadge(ctx, th, { L, T, pw, ph }, dd, prods.length ? '\u25B2 intermodulation products' : null);
   const ceil = m.bands && m.bands.programme ? m.bands.programme[1] : 15;
   if (m.bands && m.bands.gap) { // unused band between the audio ceiling and the control tone
     const [g0, g1] = m.bands.gap, gx0 = X(g0), gx1 = X(g1);
     if (gx1 - gx0 > 3) {
       ctx.save(); ctx.setLineDash([2, 3]); ctx.strokeStyle = th.inkSoft; ctx.lineWidth = 1; ctx.strokeRect(gx0 + 0.5, T + 0.5, gx1 - gx0 - 1, ph - 1); ctx.restore();
-      if (gx1 - gx0 > 46) haloText(ctx, th, 'gap', (gx0 + gx1) / 2, T + ph - 6, { align: 'center', px: 11, color: th.inkSoft });
+      if (gx1 - gx0 > 46) placeText(ctx, th, 'gap', (gx0 + gx1) / 2, T + ph - 6, { align: 'center', px: 11, color: th.inkSoft }, placed, bnd);
     }
   }
-  haloText(ctx, th, w < 380 ? 'AUDIO' : audioBandLabel(m.audioBandwidthHz || ceil * 1000), (X(0.03) + X(ceil)) / 2, T - 6, { align: 'center', px: 11, weight: '600', color: th.ink });
+  placeText(ctx, th, w < 380 ? 'AUDIO' : audioBandLabel(m.audioBandwidthHz || ceil * 1000), (X(0.03) + X(ceil)) / 2, T - 6, { align: 'center', px: 11, weight: '600', color: th.ink }, placed, bnd);
   // markers: present = solid, absent or assumed = dashed, always named
   for (const k of m.markers) {
     const x = X(k.freqKhz), absent = !k.present, assumed = k.status === 'assumed' || k.status === 'illustrative';
@@ -133,8 +134,9 @@ export function drawMonoMpx(ctx, w, h, th, { m, inp, hoverX, toneProducts: tp = 
     ctx.save(); ctx.strokeStyle = col; ctx.lineWidth = 2; if (absent || assumed) ctx.setLineDash([4, 3]);
     ctx.beginPath(); ctx.moveTo(x, T + 14); ctx.lineTo(x, T + ph); ctx.stroke(); ctx.restore();
     const word = k.name === 'Stereo pilot' ? (absent ? (w < 380 ? 'no pilot' : '19 kHz pilot: absent') : 'PILOT') : k.name === 'Tone key' ? (w < 380 ? 'tone key*' : 'TONE KEY (assumed)') : 'DATA';
-    haloText(ctx, th, word, Math.min(Math.max(x, L + 40), L + pw - 40), T - 6, { align: 'center', px: 11, weight: '600', color: col });
+    placeText(ctx, th, word, Math.min(Math.max(x, L + 40), L + pw - 40), T - 6, { align: 'center', px: 11, weight: '600', color: col }, placed, bnd);
   }
+  if (tp) drawBasebandLines(ctx, th, { X, Y, L, T, pw, ph, span, floorDb: SPEC_DB.min, placed }, tp); // last: its labels move clear of the ones above
   if (w >= 420 && h >= 150) { // legend: audio / control tone / data / noise
     const items = [['audio', th.ink, 0.35, false], ['noise', th.fail, 1, true], ['control tone', th.pass, 1, false]];
     if (m.markers.some((k) => k.name === 'Data subcarrier')) items.push(['data', th.warnText, 1, false]);

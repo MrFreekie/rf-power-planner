@@ -948,3 +948,16 @@ body.vnalab-open { overflow: hidden; }
   .skip-link { min-height: 44px; display: inline-flex; align-items: center; }
   .brand-support { display: inline-flex; align-items: center; min-height: 44px; }
 }
+
+/* Assumptions chip in the link budget and the report section */
+.assump-chip { margin: 6px 0; border: 1px solid var(--ink); border-radius: var(--radius); background: var(--paper); }
+.assump-chip > summary { cursor: pointer; padding: 6px 10px; font-size: 13px; font-weight: 600; min-height: 32px; }
+.assump-chip[data-proven="false"] > summary { color: var(--warn-text); }
+.assump-chip > summary:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.assump-body { padding: 4px 10px 10px; font-size: 13px; }
+.assump-body p { margin: 4px 0; }
+.assump-list { list-style: none; margin: 6px 0 0; padding: 0; }
+.assump-list li { padding: 6px 0; border-top: 1px solid var(--grid-major); }
+.assump-fix { color: var(--ink-soft); }
+.report-verdict { font-weight: 700; margin: 4px 0; }
+.report-verdict-warn { border-left: 4px solid #000; padding-left: 8px; }

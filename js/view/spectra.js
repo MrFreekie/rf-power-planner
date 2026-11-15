@@ -5,7 +5,7 @@
 // Pure helpers are exported for tests; mountSpectra() is the DOM part. The model modules are imported lazily so a missing
 // one only blanks its own panel. Animation: one low-rate loop (about 20 fps) while running; paused or prefers-reduced-motion
 // freezes the simulated time t.
-import { createCanvasHost, activeLink, solveCached, setFont, haloText } from './util.js';
+import { createCanvasHost, activeLink, solveCached, setFont, haloText, placeText } from './util.js';
 import { mpxSpectrum } from '../model/mpx.js';
 import { getFmPreset } from '../model/fm-presets.js';
 import { telemetry, dataConfig } from '../telemetryTracker.js';
@@ -350,8 +350,10 @@ export function drawMpx(ctx, w, h, th, { state, link, hoverX, dist = null, toneP
   ctx.strokeStyle = state.pilotLocked ? th.pass : th.fail; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(px, T + 2); ctx.lineTo(px, T + 12); ctx.stroke();
   // region labels
+  const bnd = { x: 0, y: 0, w: 1e5, h: T + ph };
+  const placed = []; // every label below goes through placeText, so none overprints another (the tone lines come last and move clear)
   const lab = (txt, k0, k1, color) => {
-    haloText(ctx, th, txt, (X(k0) + X(k1)) / 2, T - 6, { align: 'center', px: 11, weight: '600', color });
+    placeText(ctx, th, txt, (X(k0) + X(k1)) / 2, T - 6, { align: 'center', px: 11, weight: '600', color }, placed, bnd);
   };
   lab('L+R', 0.03, 15, th.ink);
   lab(state.pilotLocked ? 'PILOT' : 'PILOT lost', 15.5, 22.5, state.pilotLocked ? th.pass : th.fail);
@@ -359,7 +361,7 @@ export function drawMpx(ctx, w, h, th, { state, link, hoverX, dist = null, toneP
   if (s.dataBand) {
     const [a, b] = s.dataBand;
     ctx.fillStyle = th.marginal; ctx.globalAlpha = s.dataLevelDb > -100 ? 0.35 : 0.1; ctx.fillRect(X(a), T, Math.max(X(b) - X(a), 3), ph); ctx.globalAlpha = 1;
-    haloText(ctx, th, s.dataLocked ? 'DATA' : 'DATA lost', X(s.dataKHz), T + ph - 6, { align: 'center', px: 11, weight: '600', color: s.dataLocked ? th.warnText : th.fail });
+    placeText(ctx, th, s.dataLocked ? 'DATA' : 'DATA lost', X(s.dataKHz), T + ph - 6, { align: 'center', px: 11, weight: '600', color: s.dataLocked ? th.warnText : th.fail }, placed, bnd);
   }
   const sqs = link ? squelch.get(link.id) : null;
   if (link && link.interferer && link.interferer.enabled && sqs && sqs.capture && Number.isFinite(sqs.capture.cirDb)) {
@@ -371,9 +373,9 @@ export function drawMpx(ctx, w, h, th, { state, link, hoverX, dist = null, toneP
     haloText(ctx, th, `stray carrier${ifr.hasPilot ? ' + pilot' : ' (no pilot)'}  C/I ${cirDb >= 0 ? '+' : '−'}${Math.abs(cirDb).toFixed(1)} dB`, L + pw - 4, T + ph - 6, { align: 'right', px: 11, weight: '600', color: th.warnText });
   }
   for (const pr of prods) { const x = X(pr.freqKhz); if (x >= L && x <= L + pw) drawProductMarker(ctx, th, x, Y(pr.levelDb), `IM${pr.order}`); }
-  if (tp) drawBasebandLines(ctx, th, { X, Y, L, T, pw, ph, span: spanKHz, floorDb: SPEC_DB.min }, tp);
   drawDistortionBadge(ctx, th, { L, T, pw, ph }, dd, dd && prods.length ? '\u25B2 intermodulation products' : null);
-  haloText(ctx, th, 'noise', X(Math.min(57, spanKHz - 3)), Y(s.noiseDb[s.noiseDb.length - 1]) - 4, { align: 'center', px: 11, color: th.fail });
+  placeText(ctx, th, 'noise', X(Math.min(57, spanKHz - 3)), Y(s.noiseDb[s.noiseDb.length - 1]) - 4, { align: 'center', px: 11, color: th.fail }, placed, bnd);
+  if (tp) drawBasebandLines(ctx, th, { X, Y, L, T, pw, ph, span: spanKHz, floorDb: SPEC_DB.min, placed }, tp);
   if (hoverX != null && hoverX >= L && hoverX <= L + pw) {
     const k = ((hoverX - L) / pw) * spanKHz, i = nearestIndex(s.freqKHz, k);
     if (i >= 0) {

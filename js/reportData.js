@@ -7,6 +7,7 @@
 // `results` is optional; pass what the trackers already hold to avoid recomputing:
 //   { link: LinkResult, squelch: squelch.get(id), rx: rxState.get(id), digital: digital.get(id), telemetry: telemetry.get(id),
 //     coverage: coverage.get(id), imd: imd.get(), now: Date | ISO string }
+import { reportAssumptions } from './ui/assumptionsUi.js';
 import { solveLink, wavePolarisation } from './model/rf.js';
 import { dispX, dispY } from './ui/coords.js';
 import { formatPower, formatLength, formatDb } from './model/units.js';
@@ -84,6 +85,7 @@ export function buildReportData(scene, linkId, results = {}) {
     else if (res.status === 'marginal') out.warnings.push({ kind: 'margin', severity: 'warning', text: `Marginal link: only ${formatDb(res.marginDb)} of headroom (less than 6 dB).` });
   }
 
+  if (res) { try { out.assumptionsInUse = reportAssumptions(scene, link, res); } catch { out.assumptionsInUse = null; } }
   const W = out.warnings;
   if (res && Array.isArray(res.warnings)) for (const t of res.warnings) W.push({ kind: 'model', severity: 'warning', text: t });
   const sq = results.squelch;

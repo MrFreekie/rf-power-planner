@@ -151,6 +151,16 @@ function buildSheet(data) {
   checks.classList.add('report-break');
   sheet.append(checks);
 
+  if (data.assumptionsInUse) { // the assumed figures that moved this scene's results, with what would settle each
+    const a = data.assumptionsInUse, sec = section('Assumptions in this scene');
+    sec.append(el('p', `report-verdict${a.proven ? '' : ' report-verdict-warn'}`, a.verdict));
+    for (const r of a.reasons || []) sec.append(el('p', 'report-note', r));
+    if (a.rows.length) sec.append(table([{ label: 'Figure' }, { label: 'Value' }, { label: 'Flag' }, { label: 'Effect on the result' }, { label: 'What would settle it' }],
+      a.rows.map((r) => [r.label, r.value, r.flagText, `${r.effect} Size: ${r.sensitivity}. Links: ${r.links.join(', ')}.`, r.fix])));
+    else sec.append(el('p', 'report-note', 'No assumed or inferred figure changed a result in this scene.'));
+    sec.classList.add('report-break');
+    sheet.append(sec);
+  }
   const ass = section('Assumptions');
   const ul = el('ul'); (data.assumptions || []).forEach((a) => ul.append(el('li', null, a))); ass.append(ul);
   ass.append(el('p', 'report-disclaimer', data.disclaimer));

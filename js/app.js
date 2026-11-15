@@ -31,6 +31,7 @@ import { mountPanels } from './ui/panels.js';
 import { activeLink as pickActiveLink, solveCached } from './view/util.js';
 import { confirmDialog } from './ui/confirmDialog.js';
 import { budgetExtras, modeContrast } from './ui/budgetExtras.js';
+import { confidenceView, assumptionRows } from './ui/assumptionsUi.js';
 import { modeReport } from './model/digital-link.js';
 import { fresnelView, fresnelFor } from './view/fresnelDraw.js';
 import { pathRows } from './ui/fields.js';
@@ -377,6 +378,39 @@ function renderExtras(r, scene = null, link = null) {
   dl.hidden = rows.length === 0;
 }
 
+// Assumptions chip: solves every link for the scene list, so it is memoised by scene and throttled while the scene changes every frame (walk)
+let assumpKey = null, assumpAt = 0, assumpTimer = null;
+function renderAssumptions(scene, link, r) {
+  const chip = $('assump-chip'), sum = $('assump-summary'), body = $('assump-body');
+  let v = null;
+  try { v = r && link ? confidenceView(scene, link, r) : null; } catch { v = null; }
+  if (!v) { chip.hidden = true; return; }
+  const sig = JSON.stringify([v.chip, v.items.map((x) => [x.id, x.value])]);
+  if (chip.dataset.sig === sig) return;
+  chip.dataset.sig = sig;
+  chip.hidden = false; chip.dataset.proven = String(v.proven);
+  sum.textContent = v.chip;
+  body.replaceChildren();
+  for (const x of v.reasons) { const p = document.createElement('p'); p.className = 'assump-reason'; p.textContent = x; body.append(p); }
+  const rows = assumptionRows(v.items, scene);
+  if (!rows.length) { const p = document.createElement('p'); p.className = 'hint'; p.textContent = 'No assumed or inferred figure changed the result of this link.'; body.append(p); }
+  const ul = document.createElement('ul'); ul.className = 'assump-list'; ul.setAttribute('aria-label', 'Assumed figures that moved this link');
+  for (const r2 of rows) {
+    const li = document.createElement('li');
+    const h = document.createElement('strong'); h.textContent = `${r2.label} (${r2.flagText.split(':')[0]}): ${r2.value}`;
+    const e = document.createElement('p'); e.textContent = `${r2.effect} Size: ${r2.sensitivity}.`;
+    const f = document.createElement('p'); f.className = 'assump-fix'; f.textContent = `What would settle it: ${r2.fix}`;
+    li.append(h, e, f); ul.append(li);
+  }
+  body.append(ul);
+}
+function renderAssumptionsThrottled(scene, link, r) {
+  const now = Date.now();
+  if (assumpTimer) { clearTimeout(assumpTimer); assumpTimer = null; }
+  if (now - assumpAt >= 300) { assumpAt = now; renderAssumptions(scene, link, r); return; }
+  assumpTimer = setTimeout(() => { assumpTimer = null; assumpAt = Date.now(); try { renderAssumptions(store.getScene(), pickActiveLink(store.getScene(), store.getSelection()), solveLink(store.getScene(), pickActiveLink(store.getScene(), store.getSelection()))); } catch { $('assump-chip').hidden = true; } }, 320);
+}
+
 function renderMode(r, link) {
   const body = $('mode-body'), line = $('mode-line');
   let m = null;
@@ -426,6 +460,7 @@ function renderResults(scene) {
     renderWarnings(r.warnings);
     renderExtras(r, scene, link);
     renderMode(r, link);
+    renderAssumptionsThrottled(scene, link, r);
     renderPaths(r, scene);
     showError(loadError);
   } catch (err) {
@@ -434,6 +469,7 @@ function renderResults(scene) {
     renderWarnings([]);
     renderExtras(null);
     renderMode(null, null);
+    $('assump-chip').hidden = true;
     renderPaths(null, scene);
     showError(`Could not solve link: ${err.message}`);
   }

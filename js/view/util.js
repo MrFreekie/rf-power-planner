@@ -158,6 +158,28 @@ export function setFont(ctx, th, px = 12, weight = '') {
   ctx.font = `${weight} ${px}px ${th.font}`.trim();
 }
 
+/**
+ * Collision-aware label: like haloText, but measures the text, and when its box overlaps one already in `placed` (or leaves `bounds`) tries
+ * the same x at other heights (up, then down, 13 px steps). Draws and records the box. Returns the box, or null when `opts.optional` and nothing fits.
+ */
+export function placeText(ctx, th, text, x, y, opts, placed, bounds = null) {
+  const o = opts || {}, px = o.px || 12;
+  setFont(ctx, th, px, o.weight || '');
+  const w = Math.ceil(ctx.measureText(text).width), align = o.align || 'left';
+  const x0 = align === 'center' ? x - w / 2 : align === 'right' ? x - w : x;
+  const hit = (b, q) => b.x < q.x + q.w + 8 && q.x < b.x + b.w + 8 && b.y < q.y + q.h && q.y < b.y + b.h; // 8 px side margin
+  let box = null;
+  for (const dy of [0, -13, 13, -26, 26, -39, 39]) {
+    const b = { x: x0, y: y + dy - px, w, h: px + 3 };
+    if (bounds && (b.y < bounds.y || b.y + b.h > bounds.y + bounds.h)) continue;
+    if (!placed.some((q) => hit(b, q))) { box = b; break; }
+  }
+  if (!box) { if (o.optional) return null; box = { x: x0, y: y - px, w, h: px + 3 }; }
+  haloText(ctx, th, text, x, box.y + px, o);
+  placed.push(box);
+  return box;
+}
+
 /** Label with a paper-coloured halo so it stays legible over lines. */
 export function haloText(ctx, th, text, x, y, { align = 'left', baseline = 'alphabetic', color, px = 12, weight = '' } = {}) {
   setFont(ctx, th, px, weight);
