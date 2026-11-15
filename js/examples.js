@@ -778,6 +778,7 @@ export function movePersonInScene(scene, personName, pos) {
   const sc = structuredClone(scene), p = sc.people.find((x) => x.name === personName);
   p.pos = { x: pos.x, y: pos.y };
   const packs = personPackPositions(p);
+  for (const l of sc.links) if (packs.extra && packs.extra[l.id]) l.tx.pos = packs.extra[l.id];
   const mic = sc.links.find((l) => l.id === p.micLinkId), iem = sc.links.find((l) => l.id === p.iemLinkId);
   if (mic && packs.mic) mic.tx.pos = packs.mic;
   if (iem && packs.iem) iem.rx.pos = packs.iem;
@@ -791,8 +792,7 @@ export const bandWalkEndScene = () => movePersonInScene(bandPeopleScene(), 'Anna
 
 /**
  * Presenter with a backup bodypack (people model): one person, a main mic bodypack on the belt (owned by the person, follows them) and a hot-spare backup
- * bodypack on the other hip on its own frequency (a second mic link beside it; the people model gives a person one mic link, so the spare is not owned
- * and does not follow a move). FOH receivers 12 m away. Frequencies from the third-order clean IEM8 plan (illustrative).
+ * bodypack on the other hip on its own frequency (a second mic link, owned through person.extraLinkIds, so it follows every move and turn). FOH receivers 12 m away. Frequencies from the third-order clean IEM8 plan (illustrative).
  */
 export const PRESENTER_PLAN_MHZ = Object.freeze({ main: 606.1, backup: 607.3, iem: 614.1 });
 export function presenterScene() {
@@ -807,8 +807,8 @@ export function presenterScene() {
     backup.tx.pos = abs({ dx: -DEFAULT_MIC_OFFSET.bodypack.dx, dy: DEFAULT_MIC_OFFSET.bodypack.dy, dz: DEFAULT_MIC_OFFSET.bodypack.dz });
     const iem = createDefaultLink('iem'); iem.name = personLinkName(person, 'iem'); iem.freqMHz = PRESENTER_PLAN_MHZ.iem;
     iem.tx.pos = { x: 10, y: 0.8, z: 2.0 }; iem.tx.powerDbm = 14; iem.rx.pos = abs(DEFAULT_IEM_OFFSET);
-    person.micLinkId = mic.id; person.iemLinkId = iem.id;
-    person.micOffset = offsetFromPack(person, mic.tx.pos); person.iemOffset = offsetFromPack(person, iem.rx.pos);
+    person.micLinkId = mic.id; person.iemLinkId = iem.id; person.extraLinkIds = [backup.id];
+    person.micOffset = offsetFromPack(person, mic.tx.pos); person.iemOffset = offsetFromPack(person, iem.rx.pos); person.extraOffsets = { [backup.id]: offsetFromPack(person, backup.tx.pos) };
     s.links.push(mic, backup, iem); s.people.push(person);
   });
 }
@@ -1811,7 +1811,7 @@ export const EXAMPLES = [
   {
     id: 'presenter-with-backup-bodypack',
     title: 'Presenter: a main bodypack and a hot-spare backup',
-    note: 'Best practice: a presenter wears the main mic bodypack on the belt and a hot-spare backup on the other hip, 0.3 m apart, on a different frequency (607.3 against 606.1 MHz) so the two never share a channel. At 11 m the margins are 34.6 dB (main) and 34.0 dB (backup), and with the IEM at 614.1 MHz no third-order product comes closer than 1200 kHz to any channel. The person owns the main mic and the IEM, so moving them carries both; the spare is a separate link and stays put (a person has one mic link). Frequencies are illustrative.',
+    note: 'Best practice: a presenter wears the main mic bodypack on the belt and a hot-spare backup on the other hip, 0.3 m apart, on a different frequency (607.3 against 606.1 MHz) so the two never share a channel. At 11 m the margins are 34.6 dB (main) and 34.0 dB (backup), and with the IEM at 614.1 MHz no third-order product comes closer than 1200 kHz to any channel. The person owns the main mic, the backup and the IEM, so moving or turning them carries all three packs with the offsets kept. Frequencies are illustrative.',
     build: () => ({ scene: presenterScene() }),
   },
   {

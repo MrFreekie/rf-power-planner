@@ -12,8 +12,8 @@ import { NOISE_CATALOGUE, NOISE_SOURCE_LIMITS, dutyOf } from '../model/noise-sou
 import { catalogueOptions, flagText, behaviourText, FLAG_WORDS } from './noiseUi.js';
 import { addNoiseSource, addEngCrew, addWallNoiseSource, updateNoiseSource, removeNoiseSource } from '../actionsAreas.js';
 import { PERSON_ROLES, PERSON_COLOURS, PEOPLE_LIMITS } from '../model/people.js';
-import { addPerson, updatePerson, assignMic, assignIem, removePerson, reorderPerson } from '../actions.js';
-import { linkChoices, personMargins } from './peopleUi.js';
+import { addPerson, updatePerson, assignMic, assignIem, assignExtraMic, removeExtraMic, removePerson, reorderPerson } from '../actions.js';
+import { linkChoices, personMargins, extraChoices } from './peopleUi.js';
 import { cleanName, limitMessage, renameReflector } from './nameInput.js';
 import { addAudience, updateAudience, removeAudience, setCeiling, addOverheadPanel, updateOverheadPanel, removeOverheadPanel, setP2pField, setAntennaDesignBand, densityChoiceId, setWallField, setImdIntercept, setImdFilter, addImdBand, updateImdBand, removeImdBand, setImdHarmonic } from '../actionsAreas.js';
 import { IIP2_PRESETS, DEFAULT_IIP2_DBM, IIP4_OVER_IIP2_DB } from '../model/imd-even.js';
@@ -893,6 +893,36 @@ export function mountInspector({ container, store }) {
       selectField({ key: 'ppl-contact', label: 'Body contact (both packs)', options: Object.entries(ANTENNA_CONTACT_LABELS), get: (cc) => P(cc)?.contact ?? 'free', set: (cc, v) => upd({ contact: v }) }),
       selectField({ key: 'ppl-damp', label: 'Dampness (both packs)', options: Object.entries(ANTENNA_DAMPNESS_LABELS), get: (cc) => P(cc)?.dampness ?? 'dry', set: (cc, v) => upd({ dampness: v }) }),
     );
+    // backup mic packs: a list with Remove buttons and an "Add" select (same swap confirm as the main links)
+    const extraBox = el('div', 'ppl-extra'); extraBox.setAttribute('role', 'group'); extraBox.setAttribute('aria-label', 'Backup mic packs');
+    extraBox.append(el('p', 'hint', `Backup mic packs (up to ${PEOPLE_LIMITS.maxExtra}): further mic links this person carries. They move with the person and drag to set their own offset.`));
+    const exList = el('ul', 'ppl-extra-list');
+    for (const lid of p0.extraLinkIds || []) {
+      const l = c.scene.links.find((q) => q.id === lid); if (!l) continue;
+      const li = el('li', null, null); const nm = el('span', 'ppl-extra-name', l.name);
+      const rm = button('Remove', `ppl-extra-rm-${lid}`, () => { removeExtraMic(store, id, lid); announce(`${l.name} is no longer a backup pack of ${p0.name}; the link stays`, { key: 'ppl', delay: 100 }); }, { label: `Remove ${l.name} from this person (the link stays in the scene)` });
+      li.append(nm, rm); exList.append(li);
+    }
+    if (!exList.children.length) exList.append(el('li', 'hint', 'No backup packs.'));
+    const addSel = selectField({
+      key: 'ppl-extra-add', label: 'Add a backup mic pack',
+      options: (cc) => [['', (P(cc)?.extraLinkIds || []).length >= PEOPLE_LIMITS.maxExtra ? 'Limit reached' : 'Choose a mic link...'], ...extraChoices(cc.scene, P(cc) || p0).map((x) => [x.value, x.label])],
+      get: () => '',
+      set: (cc, v) => {
+        if (!v) return;
+        const ch = extraChoices(cc.scene, P(cc) || p0).find((x) => x.value === v);
+        let swap = false;
+        if (ch && ch.swap) {
+          const ok = typeof window === 'undefined' || typeof window.confirm !== 'function' || window.confirm(`${ch.label.replace(/ \(.*$/, '')} is carried by someone else. Swap links with them?`);
+          if (!ok) { sync(); return; }
+          swap = true;
+        }
+        const done = assignExtraMic(store, id, v, { swap });
+        announce(done ? `${p0.name} now carries a backup mic pack` : 'Could not add the backup pack (limit reached or not allowed)', { key: 'ppl', delay: 200 });
+        sync();
+      },
+    });
+    extraBox.append(exList, addSel);
     const marg = el('ul', 'ppl-margins'); marg.setAttribute('aria-label', 'Margins of the links this person carries');
     updaters.push((cc) => {
       const rows = personMargins(cc.scene, P(cc) || p0, (l) => solveCached(cc.scene, l));
@@ -906,7 +936,7 @@ export function mountInspector({ container, store }) {
     up.disabled = idx <= 0; dn.disabled = idx >= people.length - 1;
     const del = button('Delete person', 'ppl-del', () => { removePerson(store, id); store.select(null); announce('Person deleted; their links stay', { key: 'ppl', delay: 100 }); }, { label: 'Delete this person (the links stay in the scene)', cls: 'danger' });
     bar.append(up, dn, del);
-    body.append(form, marg, bar);
+    body.append(form, extraBox, marg, bar);
   }
 
   function buildAudience(body, c) {
@@ -1439,7 +1469,7 @@ export function mountInspector({ container, store }) {
       c.link.kind !== 'iem' && c.link.rx.diversity && c.link.rx.diversity.enabled && c.link.rx.diversity.antennaB ? (Array.isArray(c.link.rx.diversity.antennaB.chain) ? c.link.rx.diversity.antennaB.chain.map((x, i) => `${x.id || i}:${x.kind}`) : 'same') : null,
       c.scene.reflectors.map((r) => `${r.id}:${r.id === c.sel || (c.found?.type === 'noise' && c.found.item.reflectorId === r.id) ? `${r.construction || ''}/${(r.noise && r.noise.preset) || ''}` : ''}`),
       (c.scene.noiseSources || []).map((n) => `${n.id}:${n.kind}:${n.reflectorId || ''}`),
-      (c.scene.people || []).map((p) => `${p.id}:${p.micLinkId || ''}:${p.iemLinkId || ''}`), c.scene.links.map((l) => `${l.id}:${l.kind}`),
+      (c.scene.people || []).map((p) => `${p.id}:${p.micLinkId || ''}:${p.iemLinkId || ''}:${(p.extraLinkIds || []).join('+')}`), c.scene.links.map((l) => `${l.id}:${l.kind}`),
       (c.scene.platforms || []).map((p) => p.id),
       (c.scene.audience || []).map((a) => a.id), (c.scene.overheadPanels || []).map((o) => o.id), !!(c.scene.ceiling),
       c.scene.imd && c.scene.imd.enabled ? c.scene.imd.transmitters.map((t) => t.id) : null,

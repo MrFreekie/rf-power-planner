@@ -74,3 +74,38 @@ test('paths table gets one row with both margins for the carrier', async () => {
   const sc = scene(), p = sc.people[0], rows = peoplePathRows(sc, sc.links.find((l) => l.id === p.micLinkId), (l) => solveLink(sc, l));
   assert.equal(rows.length, 1); assert.equal(rows[0].kind, `Person: ${p.name}`); assert.match(rows[0].relDb, /Mic .* \| IEM /);
 });
+
+// ---- backup (extra) mic packs ----
+import { peoplePathRows, extraChoices } from '../js/ui/peopleUi.js';
+import { assignExtraMic, removeExtraMic } from '../js/actions.js';
+const backupScene = () => EXAMPLES.find((e) => e.id === 'presenter-with-backup-bodypack').build().scene;
+
+test('extra pack: owner flag, outline points, margin rows, label text', () => {
+  const sc = backupScene(), p = sc.people[0];
+  assert.ok((p.extraLinkIds || []).length >= 1);
+  const xid = p.extraLinkIds[0];
+  const o = personOfLink(sc, xid);
+  assert.equal(o.person.id, p.id); assert.equal(o.extra, true); assert.equal(o.extraIndex, 0);
+  assert.ok(groupPoints(sc, p).some((q) => q.extra && q.linkId === xid));
+  const rows = personMargins(sc, p, (l) => solveLink(sc, l));
+  const r = rows.find((q) => q.linkId === xid);
+  assert.ok(r && r.extra && /^Mic 2 /.test(r.text));
+  const lk = sc.links.find((l) => l.id === xid);
+  const pr = peopleBudgetRows(sc, lk, (l) => solveLink(sc, l));
+  assert.equal(pr.length, 1); assert.match(pr[0].value, /Mic 2 /);
+  const pp = peoplePathRows(sc, lk, (l) => solveLink(sc, l));
+  assert.match(pp[0].relDb, /Mic 2 /);
+});
+
+test('extraChoices excludes own packs and flags other people\'s links as swaps; add/remove through the store', () => {
+  const sc = backupScene(), p = sc.people[0];
+  const ch = extraChoices(sc, p);
+  assert.ok(!ch.some((x) => x.value === p.micLinkId || (p.extraLinkIds || []).includes(x.value)));
+  const store = createStore(sc);
+  const xid = p.extraLinkIds[0];
+  removeExtraMic(store, p.id, xid);
+  assert.ok(!(store.getScene().people[0].extraLinkIds || []).includes(xid));
+  assert.ok(extraChoices(store.getScene(), store.getScene().people[0]).some((x) => x.value === xid));
+  assignExtraMic(store, p.id, xid, {});
+  assert.ok(store.getScene().people[0].extraLinkIds.includes(xid));
+});

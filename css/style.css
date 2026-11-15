@@ -910,4 +910,4 @@ body.vnalab-open { overflow: hidden; }
   body:not(.report-open) #leftpanel { display: block !important; position: static !important; width: auto !important; break-inside: avoid; }
   body:not(.report-open) #leftpanel-body { display: block !important; overflow: visible !important; height: auto !important; }
 }
-@media print { body:not(.report-open) .pane h2 > *, body:not(.report-open) .pane > *:not(h2):not(canvas) { display: none !important; } }
+@media print { body:not(.report-open) .pane h2 > *, body:not(.report-open) .pane > *:not(h2):not(canvas) { display: none !important; } body:not(.report-open) .pane h2 { display: block !important; margin: 0 0 2mm; font-size: 11pt; color: #000; } }

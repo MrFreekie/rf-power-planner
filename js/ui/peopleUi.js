@@ -8,7 +8,22 @@ export function personOfLink(scene, linkId) {
   const o = linkOwners(scene && scene.people).get(linkId);
   if (!o) return null;
   const person = (scene.people || []).find((p) => p.id === o.personId);
-  return person ? { person, which: o.which } : null;
+  if (!person) return null;
+  const out = { person, which: o.which };
+  if (o.extra) { out.extra = true; out.extraIndex = (person.extraLinkIds || []).indexOf(linkId); } // a backup mic pack: "Mic 2" is extraIndex 0
+  return out;
+}
+
+/** Options for adding a backup mic pack to a person: [{ value, label, swap }] of mic links that are not already theirs (main or backup). Links carried by someone else are flagged swap:true. */
+export function extraChoices(scene, person) {
+  const owners = linkOwners(scene.people), out = [];
+  for (const l of scene.links || []) {
+    if (l.kind !== 'mic' || l.id === person.micLinkId || (person.extraLinkIds || []).includes(l.id)) continue;
+    const o = owners.get(l.id);
+    if (!o) out.push({ value: l.id, label: l.name, swap: false });
+    else { const other = (scene.people || []).find((p) => p.id === o.personId); out.push({ value: l.id, label: `${l.name} (carried by ${other ? other.name : 'someone'}, swap)`, swap: true }); }
+  }
+  return out;
 }
 
 /**
@@ -38,6 +53,10 @@ export function groupPoints(scene, person) {
     const e = which === 'mic' ? l.tx : l.rx;
     pts.push({ x: e.pos.x, y: e.pos.y, what: which, linkId: l.id, itemId: e.id });
   }
+  for (const id of person.extraLinkIds || []) { // backup mic packs stay inside the outline too
+    const l = (scene.links || []).find((q) => q.id === id);
+    if (l) pts.push({ x: l.tx.pos.x, y: l.tx.pos.y, what: 'mic', extra: true, linkId: l.id, itemId: l.tx.id });
+  }
   return pts;
 }
 
@@ -66,6 +85,12 @@ export function personMargins(scene, person, solve) {
     const m = r && fin(r.marginDb) ? r.marginDb : NaN, st = r && r.status ? String(r.status).toUpperCase() : 'UNKNOWN';
     rows.push({ which, linkId: l.id, name: l.name, marginDb: m, status: st, text: `${which === 'iem' ? 'IEM' : 'Mic'} ${marginWord(m)} ${st}` });
   }
+  (person.extraLinkIds || []).forEach((id, i) => { // each backup mic pack: its own margin
+    const l = (scene.links || []).find((q) => q.id === id); if (!l) return;
+    let r = null; try { r = solve(l); } catch { r = null; }
+    const m = r && fin(r.marginDb) ? r.marginDb : NaN, st = r && r.status ? String(r.status).toUpperCase() : 'UNKNOWN';
+    rows.push({ which: 'mic', extra: true, linkId: l.id, name: l.name, marginDb: m, status: st, text: `Mic ${i + 2} ${marginWord(m)} ${st}` });
+  });
   return rows;
 }
 
@@ -76,7 +101,7 @@ export function peopleBudgetRows(scene, link, solve) {
   const m = personMargins(scene, o.person, solve);
   if (!m.length) return [];
   const worst = m.reduce((a, b) => (fin(b.marginDb) && (!fin(a.marginDb) || b.marginDb < a.marginDb) ? b : a), m[0]);
-  return [{ label: o.person.name, value: m.map((x) => x.text).join('  |  ') + (m.length > 1 ? `. Weaker: ${worst.which === 'iem' ? 'IEM' : 'mic'}` : ''), severity: m.some((x) => x.status === 'FAIL' || x.status === 'DEAD') ? 'warning' : m.some((x) => x.status === 'MARGINAL') ? 'info' : 'ok' }];
+  return [{ label: o.person.name, value: m.map((x) => x.text).join('  |  ') + (m.length > 1 ? `. Weaker: ${worst.extra ? 'backup mic' : worst.which === 'iem' ? 'IEM' : 'mic'}` : ''), severity: m.some((x) => x.status === 'FAIL' || x.status === 'DEAD') ? 'warning' : m.some((x) => x.status === 'MARGINAL') ? 'info' : 'ok' }];
 }
 
 /** Paths-table rows for the active link's carrier: one row with both margins side by side ({ kind, length, delayNs, relDb } strings). */

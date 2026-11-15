@@ -46,6 +46,7 @@ export function createPlanView(canvas, store) {
   let dragCounter = 0;
   const heatCoarse = createHeatmap(), heatFine = createHeatmap();
   const placer = createLabelPlacer();
+  const linkLabelRects = []; // link status label boxes of the current frame
   let lastDesc = '';
 
   let shiftDown = false;
@@ -137,7 +138,7 @@ export function createPlanView(canvas, store) {
     rip.drawPlan(ctx, th, vp, scene, w, h, link0);
 
     // reserve name labels so link labels can avoid them
-    placer.reset();
+    placer.reset(); linkLabelRects.length = 0;
     setFont(ctx, th, 12);
     for (const link of scene.links) for (const role of ['tx', 'rx']) {
       const e = link[role], p = vp.worldToScreen(e.pos), tw = ctx.measureText(e.name).width;
@@ -151,7 +152,7 @@ export function createPlanView(canvas, store) {
     // links: lines first, then lobes and icons on top
     for (const link of scene.links) drawLinkLine(ctx, th, scene, link, link === link0, w);
     for (const link of scene.links) drawLinkEnds(ctx, th, scene, link, sel, w);
-    const placedLabels = [];
+    const placedLabels = [...linkLabelRects];
     for (const lk of scene.links) for (const role of ['tx', 'rx']) { const q = vp.worldToScreen(lk[role].pos); placedLabels.push({ x: q.x - 45, y: q.y + 8, w: 90, h: 30 }, { x: q.x - 16, y: q.y - 16, w: 32, h: 32 }); }
     drawPeoplePlan(ctx, th, vp, scene, sel, handles, hoverKey, w, placedLabels);
     drawNoiseSources(ctx, th, vp, scene, sel, handles, hoverKey, w, placedLabels);
@@ -247,6 +248,8 @@ export function createPlanView(canvas, store) {
     const mx = (t.x + r.x) / 2, my = (t.y + r.y) / 2;
     setFont(ctx, th, 12, isActive ? '600' : '');
     const ly = placer.place(ctx.measureText(txt).width, mx, my - 8);
+    const ltw = ctx.measureText(txt).width;
+    linkLabelRects.push({ x: mx - ltw / 2 - 2, y: ly - 13, w: ltw + 4, h: 17 }); // reserved so crew and noise labels keep clear of the link status text
     haloText(ctx, th, txt, mx, ly, { align: 'center', color: th.ink, weight: isActive ? '600' : '' });
   }
 
@@ -450,6 +453,7 @@ export function createPlanView(canvas, store) {
     const o = linkOwners(s.people).get(link.id); if (!o) return;
     const person = s.people.find((q) => q.id === o.personId); if (!person || !person.pos) return;
     const e = o.which === 'iem' ? link.rx : link.tx;
+    if (o.extra) { (person.extraOffsets || (person.extraOffsets = {}))[link.id] = offsetFromPack(person, e.pos); return; } // a dragged backup pack updates its own offset
     person[o.which === 'iem' ? 'iemOffset' : 'micOffset'] = offsetFromPack(person, e.pos);
   }
   function nudge(dx, dy, big) {

@@ -45,7 +45,7 @@ export function createImdTracker({
   let store = null, off = null, timer = null, lastSig = null;
   let memoKey = null, memoNoise = null;
 
-  const sigOf = (scene) => JSON.stringify([scene.imd, scene.links[0] && scene.links[0].rx && scene.links[0].rx.antenna]);
+  const sigOf = (scene) => JSON.stringify([scene.imd, (scene.links || []).map((l) => l && l.rx && l.rx.antenna)]);
   const emit = () => { for (const cb of [...subs]) cb(state); };
 
   function compute() {

@@ -7,7 +7,7 @@ import { startWalk, stopWalk } from './walk.js';
 import { effectiveAntennaB } from './model/diversity.js';
 import { createDefaultScene, createDefaultLink, createChainItem, createReflector, createBranch, createZone, createPlatform, STAGE_LIMITS, PLATFORM_LIMITS, PLATFORM_MATERIALS, createImdTransmitter, defaultImdTransmitters, newId, SCENE_LIMITS } from './model/scene.js';
 import { applyFmPreset } from './model/fm-presets.js';
-import { PEOPLE_LIMITS, PERSON_ROLES, PERSON_COLOURS, createPerson, personLinkName, personPackPositions, offsetFromPack, linkOwners, prunePeople } from './model/people.js';
+import { PEOPLE_LIMITS, PERSON_ROLES, PERSON_COLOURS, createPerson, personLinkName, extraLinkName, personPackPositions, offsetFromPack, linkOwners, prunePeople } from './model/people.js';
 import { validateVenue } from './model/venue-underlay.js';
 import { SURFACES, ANTENNAS, GROUND_PLANE_GAIN_DBI, allowedPolarisations, defaultPolarisation, ANTENNA_CONTACT_LOSS_DB, ANTENNA_DAMPNESS_LOSS_DB } from './model/library.js';
 
@@ -752,18 +752,21 @@ export function setAudioToneHz(store, hz, o = {}) {
 const peopleOf = (d) => { if (!Array.isArray(d.people)) d.people = []; return d.people; };
 const rotateAz = (ant, deg) => { if (ant && ant.orientation && Number.isFinite(ant.orientation.az)) ant.orientation = { ...ant.orientation, az: ((ant.orientation.az + deg + 540) % 360) - 180 }; };
 const pack = (d, person) => ({ mic: person.micLinkId ? findLink(d, person.micLinkId) : null, iem: person.iemLinkId ? findLink(d, person.iemLinkId) : null });
+/** The extra (backup) mic links of a person that still exist, in order. */
+const extras = (d, person) => (Array.isArray(person.extraLinkIds) ? person.extraLinkIds.map((id) => findLink(d, id)).filter(Boolean) : []);
 
 /** Write the pack positions of a person onto the linked mic transmitter and IEM bodypack. */
 function placePacks(d, person) {
   const at = personPackPositions(person), { mic, iem } = pack(d, person);
   if (mic && at.mic) mic.tx.pos = { ...mic.tx.pos, ...at.mic };
   if (iem && at.iem) iem.rx.pos = { ...iem.rx.pos, ...at.iem };
+  for (const l of extras(d, person)) { const pos = at.extra && at.extra[l.id]; if (pos) l.tx.pos = { ...l.tx.pos, ...pos }; }
 }
 
 /** Copy the person's body coupling (contact, dampness) onto the antennas of the packs. */
 function applyCoupling(d, person) {
   const { mic, iem } = pack(d, person);
-  for (const a of [mic && mic.tx.antenna, iem && iem.rx.antenna]) {
+  for (const a of [mic && mic.tx.antenna, iem && iem.rx.antenna, ...extras(d, person).map((l) => l.tx.antenna)]) {
     if (!a) continue;
     for (const k of ['contact', 'dampness']) {
       if (person[k] === undefined) continue;
@@ -778,6 +781,7 @@ function renameLinks(d, person, oldName) {
   const old = { name: oldName };
   if (mic && mic.name === personLinkName(old, 'mic')) mic.name = personLinkName(person, 'mic');
   if (iem && iem.name === personLinkName(old, 'iem')) iem.name = personLinkName(person, 'iem');
+  extras(d, person).forEach((l, i) => { if (l.name === extraLinkName(old, i)) l.name = extraLinkName(person, i); });
 }
 
 /** addPerson(store, { name, role, colour, pos: {x, y}, facingDeg }) -> id, or null when the cap is reached. The colour cycles through the palette. */
@@ -816,9 +820,17 @@ export function updatePerson(store, id, patch = {}, o = {}) {
     if (Number.isFinite(patch.facingDeg) && Math.abs(patch.facingDeg) <= 360) {
       const delta = patch.facingDeg - (p.facingDeg || 0);
       p.facingDeg = patch.facingDeg;
-      if (delta) { const { mic, iem } = pack(d, p); if (mic) rotateAz(mic.tx.antenna, delta); if (iem) rotateAz(iem.rx.antenna, delta); placePacks(d, p); }
+      if (delta) { const { mic, iem } = pack(d, p); if (mic) rotateAz(mic.tx.antenna, delta); if (iem) rotateAz(iem.rx.antenna, delta); extras(d, p).forEach((l) => rotateAz(l.tx.antenna, delta)); placePacks(d, p); }
     }
   }, opts(o));
+}
+
+/** Remove one extra link (and its offset) from a person; removes the empty fields. */
+function dropExtra(p, linkId) {
+  if (!Array.isArray(p.extraLinkIds)) return;
+  p.extraLinkIds = p.extraLinkIds.filter((x) => x !== linkId);
+  if (p.extraOffsets) delete p.extraOffsets[linkId];
+  if (!p.extraLinkIds.length) { delete p.extraLinkIds; delete p.extraOffsets; }
 }
 
 function assign(store, personId, linkId, which, { swap = false } = {}) {
@@ -830,6 +842,11 @@ function assign(store, personId, linkId, which, { swap = false } = {}) {
     if (linkId === null || linkId === undefined) { delete p[idKey]; delete p[offKey]; ok = true; return; }
     const link = findLink(d, linkId);
     if (!link || link.kind !== (which === 'iem' ? 'iem' : 'mic')) return;
+    if (which === 'mic') { // a link that is someone's backup pack: this person's own backup is promoted, another person's needs a swap (the backup goes to the old main owner's list)
+      const xo = list.find((x) => Array.isArray(x.extraLinkIds) && x.extraLinkIds.includes(linkId));
+      if (xo && xo.id !== personId && !swap) return;
+      if (xo) dropExtra(xo, linkId);
+    }
     const owner = list.find((x) => x.id !== personId && x[idKey] === linkId);
     if (owner && !swap) return;
     const posOf = (l) => (which === 'iem' ? l.rx.pos : l.tx.pos);
@@ -858,6 +875,37 @@ function assign(store, personId, linkId, which, { swap = false } = {}) {
 export const assignMic = (store, personId, linkId, o = {}) => assign(store, personId, linkId, 'mic', o);
 /** assignIem(store, personId, linkId | null, { swap }): same for the IEM bodypack link. */
 export const assignIem = (store, personId, linkId, o = {}) => assign(store, personId, linkId, 'iem', o);
+
+/**
+ * assignExtraMic(store, personId, linkId, { swap }) -> true when done: the mic link becomes a backup bodypack of the person (PEOPLE_LIMITS.maxExtra at most),
+ * placed where it is now (the offset is stored), named "<Name> mic 2" and so on, and given the person's contact and dampness. A link that is the person's own
+ * main or IEM link, or already a backup of the same person, is refused; one owned by another person needs { swap: true } (it is taken from them).
+ */
+export function assignExtraMic(store, personId, linkId, { swap = false } = {}) {
+  let ok = false;
+  store.update((d) => {
+    const list = peopleOf(d), p = list.find((x) => x.id === personId), link = findLink(d, linkId);
+    if (!p || !link || link.kind !== 'mic' || p.micLinkId === linkId) return;
+    if ((p.extraLinkIds || []).includes(linkId)) return;
+    if ((p.extraLinkIds || []).length >= PEOPLE_LIMITS.maxExtra) return;
+    const other = list.find((x) => x.id !== personId && (x.micLinkId === linkId || (x.extraLinkIds || []).includes(linkId)));
+    if (other && !swap) return;
+    if (other) { if (other.micLinkId === linkId) { delete other.micLinkId; delete other.micOffset; } else dropExtra(other, linkId); }
+    const here = link.tx.pos;
+    if (!p.pos) p.pos = { x: here.x, y: here.y };
+    p.extraLinkIds = [...(p.extraLinkIds || []), linkId];
+    p.extraOffsets = { ...(p.extraOffsets || {}), [linkId]: offsetFromPack(p, here) };
+    link.name = extraLinkName(p, p.extraLinkIds.length - 1);
+    applyCoupling(d, p);
+    ok = true;
+  });
+  return ok;
+}
+
+/** removeExtraMic(store, personId, linkId): the link stays in the scene where it is, no longer carried by the person. */
+export function removeExtraMic(store, personId, linkId) {
+  return store.update((d) => { const p = peopleOf(d).find((x) => x.id === personId); if (p) dropExtra(p, linkId); });
+}
 
 /** removePerson(store, id): the links stay where they are. */
 export function removePerson(store, id) {
@@ -902,7 +950,7 @@ export function pruneScenePeople(store) {
   return store.update((d) => { if (Array.isArray(d.people)) prunePeople(d); });
 }
 
-/** peopleLinkOwners(scene) -> Map linkId -> { personId, which } for the GUI dropdown (only unassigned links are offered, the rest need a swap). */
+/** peopleLinkOwners(scene) -> Map linkId -> { personId, which, extra? } (extra: true for a backup mic link) for the GUI dropdown (only unassigned links are offered, the rest need a swap). */
 export const peopleLinkOwners = (scene) => linkOwners(scene && scene.people);
 
 /** ensureOwnAntennaB(store, linkId) -> true when antenna B has its own antenna record afterwards (a copy of antenna A is made when it followed A), so per-antenna fields such as tilt can be set. */

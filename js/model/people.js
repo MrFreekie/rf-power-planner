@@ -11,9 +11,12 @@
 //   hip). Moving or turning the person moves and turns both packs together and keeps these offsets.
 //   contact / dampness (library keys, antenna contact and dampness) are the body coupling of the person: they are written onto the mic transmitter
 //   antenna and the IEM bodypack antenna, so the loss follows the person.
+//   extraLinkIds / extraOffsets (optional, backup bodypacks): extraLinkIds = [linkId, ...] of further MIC links the person carries (at most PEOPLE_LIMITS.maxExtra, never
+//   the main micLinkId, each link owned once across main and extra); extraOffsets = { [linkId]: { dx, dy, dz } } the same kind of offset as micOffset. They move,
+//   turn and take the contact / dampness with the person. Absent = unchanged older files.
 //   Deleting a person never deletes a link. prunePeople(scene) removes references to links that no longer exist.
 
-export const PEOPLE_LIMITS = Object.freeze({ max: 64, coord: [-5000, 5000], offsetM: [-10, 10], heightM: [0, 5], nameChars: 80 });
+export const PEOPLE_LIMITS = Object.freeze({ max: 64, coord: [-5000, 5000], offsetM: [-10, 10], heightM: [0, 5], nameChars: 80, maxExtra: 4 });
 export const PERSON_ROLES = Object.freeze(['singer', 'instrumentalist', 'presenter', 'crew', 'other']);
 export const PERSON_COLOURS = Object.freeze(['red', 'orange', 'amber', 'green', 'teal', 'cyan', 'blue', 'indigo', 'violet', 'pink', 'brown', 'grey']);
 /** Default pack offsets (metres, ASSUMED teaching figures): handheld in the right hand, bodypack at the belt, IEM pack at the other hip. */
@@ -33,6 +36,9 @@ export function createPerson(overrides = {}) {
 
 /** The name shared with a person's links, for example "Anna mic" or "Anna IEM". */
 export const personLinkName = (person, which) => `${person.name} ${which === 'iem' ? 'IEM' : 'mic'}`;
+
+/** The name of the i-th extra mic link of a person (0 = the first backup): "Presenter mic 2". */
+export const extraLinkName = (person, i) => `${person.name} mic ${i + 2}`;
 
 /** Rotate a pack offset (dx, dy) of a person facing facingDeg: the offsets are stored for facing 0. */
 export function rotateOffset(o, facingDeg) {
@@ -57,6 +63,14 @@ export function personPackPositions(person) {
     const r = rotateOffset(off, person.facingDeg);
     out[k] = { x: person.pos.x + r.x, y: person.pos.y + r.y, z: r.z };
   }
+  if (Array.isArray(person.extraLinkIds) && isObj(person.extraOffsets)) {
+    for (const id of person.extraLinkIds) {
+      const off = person.extraOffsets[id];
+      if (!isObj(off)) continue;
+      const r = rotateOffset(off, person.facingDeg);
+      (out.extra || (out.extra = {}))[id] = { x: person.pos.x + r.x, y: person.pos.y + r.y, z: r.z };
+    }
+  }
   return out;
 }
 
@@ -67,6 +81,7 @@ export function linkOwners(people) {
     if (!isObj(p)) continue;
     if (p.micLinkId && !m.has(p.micLinkId)) m.set(p.micLinkId, { personId: p.id, which: 'mic' });
     if (p.iemLinkId && !m.has(p.iemLinkId)) m.set(p.iemLinkId, { personId: p.id, which: 'iem' });
+    if (Array.isArray(p.extraLinkIds)) for (const id of p.extraLinkIds) if (id && !m.has(id)) m.set(id, { personId: p.id, which: 'mic', extra: true });
   }
   return m;
 }
@@ -87,6 +102,16 @@ export function prunePeople(scene) {
       if (kinds.get(id) !== kind || seen.has(id)) { delete p[idKey]; delete p[offKey]; continue; }
       seen.add(id);
     }
+    if (p.extraLinkIds !== undefined) {
+      const keep = [];
+      for (const id of Array.isArray(p.extraLinkIds) ? p.extraLinkIds : []) {
+        if (typeof id === 'string' && kinds.get(id) === 'mic' && !seen.has(id) && keep.length < PEOPLE_LIMITS.maxExtra) { keep.push(id); seen.add(id); }
+      }
+      if (keep.length) {
+        p.extraLinkIds = keep;
+        if (isObj(p.extraOffsets)) { for (const k of Object.keys(p.extraOffsets)) if (!keep.includes(k)) delete p.extraOffsets[k]; } else delete p.extraOffsets;
+      } else { delete p.extraLinkIds; delete p.extraOffsets; }
+    } else if (p.extraOffsets !== undefined) delete p.extraOffsets;
   }
   return scene;
 }
@@ -113,5 +138,28 @@ export function validatePerson(p, path, errors, scene) {
     const l = links.find((x) => x.id === p[k]);
     if (!l) errors.push(`${path}.${k} does not match an existing link`);
     else if (l.kind !== kind) errors.push(`${path}.${k} must be a ${kind} link`);
+  }
+  if (p.extraLinkIds !== undefined) {
+    if (!Array.isArray(p.extraLinkIds)) errors.push(`${path}.extraLinkIds must be an array`);
+    else if (p.extraLinkIds.length > L.maxExtra) errors.push(`${path}.extraLinkIds has at most ${L.maxExtra} entries`);
+    else {
+      p.extraLinkIds.forEach((id, i) => {
+        const l = typeof id === 'string' ? links.find((x) => x.id === id) : null;
+        if (!l) errors.push(`${path}.extraLinkIds[${i}] does not match an existing link`);
+        else if (l.kind !== 'mic') errors.push(`${path}.extraLinkIds[${i}] must be a mic link`);
+        else if (id === p.micLinkId || p.extraLinkIds.indexOf(id) !== i) errors.push(`${path}.extraLinkIds[${i}] repeats a link`);
+      });
+    }
+  }
+  if (p.extraOffsets !== undefined) {
+    const o = p.extraOffsets;
+    if (!isObj(o)) errors.push(`${path}.extraOffsets must be an object`);
+    else {
+      if (!isObj(p.pos) && Object.keys(o).length) errors.push(`${path}.extraOffsets needs ${path}.pos`);
+      for (const [id, v] of Object.entries(o)) {
+        if (!Array.isArray(p.extraLinkIds) || !p.extraLinkIds.includes(id)) errors.push(`${path}.extraOffsets has an entry for a link that is not in extraLinkIds`);
+        else if (!(isObj(v) && isNum(v.dx) && isNum(v.dy) && isNum(v.dz) && Math.abs(v.dx) <= L.offsetM[1] && Math.abs(v.dy) <= L.offsetM[1] && v.dz >= L.heightM[0] && v.dz <= L.heightM[1])) errors.push(`${path}.extraOffsets[${id}] must be { dx, dy, dz } in range`);
+      }
+    }
   }
 }

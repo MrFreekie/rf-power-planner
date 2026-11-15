@@ -18,3 +18,9 @@ test('renderResults and the ripples read the active link and not links[0]', () =
   assert.match(fn, /pickActiveLink\(scene, store\.getSelection\(\)\)/); assert.doesNotMatch(fn, /links\[0\]/);
   assert.doesNotMatch(rip, /links\[0\]/); assert.match(rip, /activeLink\(/);
 });
+test('imdTracker cache signature covers every link antenna, and plan reserves link status labels', () => {
+  const t = fs.readFileSync(new URL('../js/imdTracker.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(t, /links\[0\]/); assert.match(t, /scene\.links \|\| \[\]\)\.map/);
+  const plan = fs.readFileSync(new URL('../js/view/plan.js', import.meta.url), 'utf8');
+  assert.match(plan, /linkLabelRects\.push/); assert.match(plan, /placedLabels = \[\.\.\.linkLabelRects\]/);
+});

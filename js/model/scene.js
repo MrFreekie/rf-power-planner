@@ -570,6 +570,7 @@ export function validateScene(scene) {
         if (!isObj(pe)) return;
         if (typeof pe.id === 'string') { if (seenPe.has(pe.id)) errors.push(`people[${i}].id is not unique`); seenPe.add(pe.id); }
         for (const k of ['micLinkId', 'iemLinkId']) if (typeof pe[k] === 'string') { if (owned.has(pe[k])) errors.push(`people[${i}].${k} is already assigned to another person`); owned.add(pe[k]); }
+        if (Array.isArray(pe.extraLinkIds)) pe.extraLinkIds.forEach((id, j) => { if (typeof id === 'string') { if (owned.has(id)) errors.push(`people[${i}].extraLinkIds[${j}] is already assigned to another person`); owned.add(id); } });
       });
     }
   }

@@ -32,7 +32,7 @@ test('presenter: main pack owned by the person, backup beside it, margins and pl
   const s = presenterScene(), p = s.people[0];
   const [mic, backup, iem] = s.links;
   assert.equal(p.micLinkId, mic.id); assert.equal(p.iemLinkId, iem.id);
-  assert.ok(!s.people.some((q) => q.micLinkId === backup.id || q.iemLinkId === backup.id), 'the spare is not owned (one mic link per person)');
+  assert.deepEqual(p.extraLinkIds, [backup.id], 'the spare is owned by the presenter');
   near(Math.hypot(mic.tx.pos.x - backup.tx.pos.x, mic.tx.pos.y - backup.tx.pos.y), 0.3, 1e-6, 'packs 0.3 m apart across the belt line');
   near(mic.tx.pos.x - backup.tx.pos.x, -0.3, 1e-6);
   const mr = solveLink(s, mic), br = solveLink(s, backup), ir = solveLink(s, iem);
@@ -43,11 +43,12 @@ test('presenter: main pack owned by the person, backup beside it, margins and pl
   near(h.minProductDistanceKHz, 1200, 1e-6); // hand: 2 x 607.3 - 606.1 = 608.5 is 1200 kHz from 607.3; the other products are farther
   has('presenter-with-backup-bodypack', String(Math.round(h.minProductDistanceKHz)));
   assert.ok(Number.isFinite(ir.marginDb));
-  // moving the person carries the main mic and the IEM pack, not the spare
+  // moving the person carries the main mic, the backup and the IEM pack
   const m = movePersonInScene(s, 'Presenter', { x: 6, y: 10 });
   const pk = personPackPositions(m.people[0]);
   near(m.links[0].tx.pos.x, pk.mic.x, 1e-9); near(m.links[2].rx.pos.x, pk.iem.x, 1e-9);
-  assert.deepEqual(m.links[1].tx.pos, backup.tx.pos);
+  near(m.links[1].tx.pos.x, pk.extra[backup.id].x, 1e-9); near(m.links[1].tx.pos.y, pk.extra[backup.id].y, 1e-9);
+  near(m.links[1].tx.pos.x - m.links[0].tx.pos.x, backup.tx.pos.x - mic.tx.pos.x, 1e-9, 'the 0.3 m spacing is kept');
 });
 
 test('two mics on one weak block: same noise in both channels, products 1000 kHz clear', () => {

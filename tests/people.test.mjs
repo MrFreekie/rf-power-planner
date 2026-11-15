@@ -187,3 +187,107 @@ test('names: sanitizeName and migrate strip control characters, trim and cut; cl
   const nsLong = structuredClone(sc); nsLong.noiseSources = [createNoiseSource('led-light-pwm', { id: 'n1', name: 'y'.repeat(81) })];
   assert.equal(validateScene(nsLong).ok, false);
 });
+
+// ---- extra (backup) mic links: person.extraLinkIds / extraOffsets ------------------------------------------------
+function threeLinkStore() {
+  const sc = createDefaultScene();
+  const iem = createDefaultLink('iem'), spare = createDefaultLink('mic');
+  sc.links.push(iem, spare);
+  sc.links[0].tx.pos = { x: 10.25, y: 5.25, z: 1.3 }; iem.rx.pos = { x: 9.85, y: 4.95, z: 1.0 }; spare.tx.pos = { x: 9.85, y: 4.95, z: 1.0 };
+  return createStore(sc);
+}
+
+test('extra mic: assignExtraMic stores the offset, names the link, refuses repeats and wrong kinds, removeExtraMic keeps the link', () => {
+  const st = threeLinkStore(); const id = A.addPerson(st, { name: 'Pat', pos: { x: 10, y: 5 } });
+  const [m, i, sp] = st.getScene().links;
+  A.assignMic(st, id, m.id); A.assignIem(st, id, i.id);
+  assert.equal(A.assignExtraMic(st, id, i.id), false, 'an IEM link cannot be a backup mic');
+  assert.equal(A.assignExtraMic(st, id, m.id), false, 'the main mic is not an extra');
+  assert.equal(A.assignExtraMic(st, id, sp.id), true);
+  assert.equal(A.assignExtraMic(st, id, sp.id), false, 'not twice');
+  let s = st.getScene(), p = s.people[0];
+  assert.deepEqual(p.extraLinkIds, [sp.id]);
+  near(p.extraOffsets[sp.id].dx, -0.15); near(p.extraOffsets[sp.id].dy, -0.05); near(p.extraOffsets[sp.id].dz, 1.0); // hand: (9.85, 4.95) - (10, 5)
+  assert.equal(s.links[2].name, 'Pat mic 2');
+  assert.deepEqual(validateScene(s), { ok: true, errors: [] });
+  assert.equal(A.peopleLinkOwners(s).get(sp.id).extra, true);
+  A.removeExtraMic(st, id, sp.id);
+  s = st.getScene();
+  assert.equal(s.people[0].extraLinkIds, undefined); assert.equal(s.people[0].extraOffsets, undefined);
+  assert.equal(s.links.length, 3);
+  assert.equal(A.peopleLinkOwners(s).has(sp.id), false);
+});
+
+test('extra mic: move, group move, facing and contact apply to it', () => {
+  const st = threeLinkStore(); const id = A.addPerson(st, { name: 'Pat', pos: { x: 10, y: 5 } });
+  const [m, i, sp] = st.getScene().links;
+  A.assignMic(st, id, m.id); A.assignIem(st, id, i.id); A.assignExtraMic(st, id, sp.id);
+  A.movePerson(st, id, { x: 20, y: 8 });
+  let s = st.getScene();
+  near(s.links[2].tx.pos.x, 19.85); near(s.links[2].tx.pos.y, 7.95); near(s.links[2].tx.pos.z, 1.0);
+  A.movePeople(st, [id], { dx: -1, dy: 1 });
+  s = st.getScene(); near(s.links[2].tx.pos.x, 18.85); near(s.links[2].tx.pos.y, 8.95);
+  const az0 = s.links[2].tx.antenna.orientation.az;
+  A.updatePerson(st, id, { facingDeg: 90 });
+  s = st.getScene();
+  // offset (-0.15, -0.05) rotated by 90 degrees about (19, 9): (dy, -dx) = (-0.05, 0.15)
+  near(s.links[2].tx.pos.x, 19 - 0.05); near(s.links[2].tx.pos.y, 9 + 0.15);
+  near(((s.links[2].tx.antenna.orientation.az - az0 + 540) % 360) - 180, 90);
+  A.updatePerson(st, id, { contact: 'skin', dampness: 'wet' });
+  s = st.getScene();
+  assert.equal(s.links[2].tx.antenna.contact, 'skin'); assert.equal(s.links[2].tx.antenna.dampness, 'wet');
+  assert.equal(s.links[0].tx.antenna.contact, 'skin');
+  A.updatePerson(st, id, { name: 'Patricia' });
+  assert.equal(st.getScene().links[2].name, 'Patricia mic 2');
+});
+
+test('extra mic: second owners need swap, a main mic can be demoted by assigning it elsewhere, cap of maxExtra', () => {
+  const st = threeLinkStore();
+  const a = A.addPerson(st, { name: 'Ann', pos: { x: 1, y: 1 } }), b = A.addPerson(st, { name: 'Bob', pos: { x: 5, y: 5 } });
+  const [m, , sp] = st.getScene().links;
+  A.assignExtraMic(st, a, sp.id);
+  assert.equal(A.assignExtraMic(st, b, sp.id), false);
+  assert.equal(A.assignMic(st, b, sp.id), false, 'a backup of Ann cannot become Bob main without a swap');
+  assert.equal(A.assignExtraMic(st, b, sp.id, { swap: true }), true);
+  let s = st.getScene();
+  assert.equal(s.people[0].extraLinkIds, undefined); assert.deepEqual(s.people[1].extraLinkIds, [sp.id]);
+  assert.equal(A.assignMic(st, b, sp.id), true, 'own backup promoted to main');
+  s = st.getScene(); assert.equal(s.people[1].micLinkId, sp.id); assert.equal(s.people[1].extraLinkIds, undefined);
+  void m;
+  // cap
+  const sc = createDefaultScene(); sc.links = []; for (let k = 0; k < PEOPLE_LIMITS.maxExtra + 2; k++) sc.links.push(createDefaultLink('mic'));
+  const st2 = createStore(sc); const p = A.addPerson(st2, { name: 'Cap', pos: { x: 0, y: 0 } });
+  const res = st2.getScene().links.map((l) => A.assignExtraMic(st2, p, l.id));
+  assert.equal(res.filter(Boolean).length, PEOPLE_LIMITS.maxExtra);
+});
+
+test('extra mic: validation errors, migrate prunes dangling and duplicate entries, older files without the fields are unchanged', () => {
+  const st = threeLinkStore(); const id = A.addPerson(st, { name: 'Pat', pos: { x: 10, y: 5 } });
+  const [m, i, sp] = st.getScene().links;
+  A.assignMic(st, id, m.id); A.assignExtraMic(st, id, sp.id);
+  const good = st.getScene();
+  const bad = (fn) => { const s = structuredClone(good); fn(s); return validateScene(s).errors.join(';'); };
+  assert.match(bad((s) => { s.people[0].extraLinkIds = ['nope']; }), /extraLinkIds\[0\] does not match/);
+  assert.match(bad((s) => { s.people[0].extraLinkIds = [i.id]; }), /must be a mic link/);
+  assert.match(bad((s) => { s.people[0].extraLinkIds = [m.id]; }), /repeats a link/);
+  assert.match(bad((s) => { s.people[0].extraLinkIds = 'x'; }), /must be an array/);
+  assert.match(bad((s) => { s.people[0].extraLinkIds = new Array(PEOPLE_LIMITS.maxExtra + 1).fill(sp.id); }), /at most/);
+  assert.match(bad((s) => { s.people[0].extraOffsets[sp.id].dx = 99; }), /extraOffsets\[/);
+  assert.match(bad((s) => { s.people[0].extraOffsets = { zzz: { dx: 0, dy: 0, dz: 1 } }; }), /not in extraLinkIds/);
+  assert.match(bad((s) => { s.people.push(createPerson({ name: 'Two', extraLinkIds: [sp.id] })); }), /already assigned to another person/);
+  // migrate: dangling, wrong kind, duplicate and over-cap entries are dropped, offsets of dropped ones too
+  const dirty = structuredClone(good);
+  dirty.people[0].extraLinkIds = ['gone', i.id, sp.id, sp.id, m.id];
+  dirty.people[0].extraOffsets = { gone: { dx: 0, dy: 0, dz: 1 }, [sp.id]: dirty.people[0].extraOffsets[sp.id] };
+  const mig = migrateScene(dirty);
+  assert.deepEqual(mig.people[0].extraLinkIds, [sp.id]);
+  assert.deepEqual(Object.keys(mig.people[0].extraOffsets), [sp.id]);
+  assert.deepEqual(validateScene(mig), { ok: true, errors: [] });
+  const lone = structuredClone(good); lone.links = lone.links.filter((l) => l.id !== sp.id);
+  const m2 = migrateScene(lone);
+  assert.equal(m2.people[0].extraLinkIds, undefined); assert.equal(m2.people[0].extraOffsets, undefined);
+  // older files: people without the new fields round-trip unchanged
+  const old = bandPeopleScene();
+  assert.ok(old.people.every((p) => p.extraLinkIds === undefined && p.extraOffsets === undefined));
+  assert.deepEqual(migrateScene(structuredClone(old)).people, old.people);
+});
