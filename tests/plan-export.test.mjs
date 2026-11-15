@@ -86,3 +86,13 @@ test('coordinationSummary: a clean plan and overlap warnings', () => {
   const one = coordinationSummary(plan([606])); assert.equal(one.minSpacingKHz, null); assert.equal(one.ok, true);
   assert.equal(coordinationSummary(plan([])).frequencies, 0);
 });
+
+test('the 606 MHz three-mic plans repeat the coord-equal-spacing and coord-spread-plan lessons, so no further examples are needed', async () => {
+  const { buildExample } = await import('../js/examples.js'); const imdOnly = (s) => ({ ...s, links: [] }); // the example's link duplicates mic 1 as an IMD transmitter
+  const eq = coordinationSummary(plan([606.0, 606.4, 605.6])), eqEx = coordinationSummary(imdOnly(buildExample('coord-equal-spacing').scene));
+  assert.deepEqual([eq.hits2, eq.hits3, eq.minSpacingKHz], [2, 1, 400]); assert.deepEqual([eqEx.hits2, eqEx.hits3, eqEx.minSpacingKHz], [2, 1, 400], 'same pattern at 600 MHz');
+  // hand: 606.1/607.3/609.7: nearest product is 1200 kHz from a channel (604.9, 608.5, 612.1, 602.5, 613.3, 603.7, 610.9 against 606.1/607.3/609.7)
+  const good = coordinationSummary(plan([606.1, 607.3, 609.7]));
+  assert.deepEqual([good.hitsTotal, good.minSpacingKHz, good.ok], [0, 1200, true]);
+  const goodEx = coordinationSummary(imdOnly(buildExample('coord-spread-plan').scene)); assert.equal(goodEx.hitsTotal, 0); assert.equal(goodEx.minSpacingKHz, 1000);
+});

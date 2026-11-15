@@ -42,6 +42,8 @@ test('planView has every column, the chosen delimiter and BOM, and the bandwidth
 test('coordination lines name overlapping channels', () => {
   const lines = coordLines({ frequencies: 2, hitsTotal: 0, hits3: 0, hits2: 0, minSpacingKHz: 100, requiredSpacingKHz: 300, spacingViolations: 1, overlapWarnings: [{ a: 'x', b: 'y', separationKHz: 100 }], ok: false }, [{ id: 'x', name: 'Lead' }, { id: 'y', name: 'Bass' }]);
   assert.ok(lines.some((l) => /Lead and Bass are 100 kHz/.test(l))); assert.match(lines[lines.length - 1], /problems/);
+  const l2 = coordLines({ frequencies: 3, hitsTotal: 3, hits2: 2, hits3: 1, minSpacingKHz: 400, requiredSpacingKHz: 400, spacingViolations: 0, overlapWarnings: [], ok: false }, []);
+  assert.match(l2[0], /3 third-order products land on a channel \(2 from two transmitters, 1 from three transmitters\)/); assert.ok(!/second-order/.test(l2.join(' ')));
 });
 test('date and file name helpers', () => {
   assert.equal(todayISO(new Date(2026, 10, 5)), '2026-11-05');

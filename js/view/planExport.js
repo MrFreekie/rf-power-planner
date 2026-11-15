@@ -26,7 +26,7 @@ export function cellText(row, key) {
 export function coordLines(c, rows) {
   const name = (id) => { const r = (rows || []).find((x) => x.id === id); return r ? r.name : id; };
   const out = [];
-  out.push(`${c.frequencies} frequenc${c.frequencies === 1 ? 'y' : 'ies'} in use. Third-order products landing on a channel: ${c.hitsTotal} (${c.hits3} third-order, ${c.hits2} second-order).`);
+  out.push(`${c.frequencies} frequenc${c.frequencies === 1 ? 'y' : 'ies'} in use. ${c.hitsTotal} third-order product${c.hitsTotal === 1 ? '' : 's'} land${c.hitsTotal === 1 ? 's' : ''} on a channel (${c.hits2} from two transmitters, ${c.hits3} from three transmitters).`);
   out.push(c.minSpacingKHz === null ? 'Minimum spacing: needs at least two frequencies.' : `Minimum spacing ${c.minSpacingKHz.toFixed(0)} kHz (the plan asks for ${c.requiredSpacingKHz} kHz); ${c.spacingViolations} pair${c.spacingViolations === 1 ? '' : 's'} too close.`);
   for (const o of c.overlapWarnings || []) out.push(`Overlap warning: ${name(o.a)} and ${name(o.b)} are ${o.separationKHz.toFixed(0)} kHz apart.`);
   out.push(c.ok ? 'Verdict: no coordination problem found by this planner.' : 'Verdict: this plan has coordination problems; see the lines above.');
