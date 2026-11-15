@@ -554,6 +554,10 @@ try {
   const { mountCoordLab } = await import('./view/coordLab.js');
   mountCoordLab({ button: $('btn-lab'), store });
 } catch (err) { console.error('coordination lab', err); $('btn-lab').hidden = true; }
+try {
+  const { mountMeasure } = await import('./view/measureDialog.js');
+  mountMeasure({ button: $('btn-meas'), store });
+} catch (err) { console.error('measurements', err); $('btn-meas').hidden = true; }
 
 // venue underlay button and dialog (optional: a failure must not break the planner)
 try {

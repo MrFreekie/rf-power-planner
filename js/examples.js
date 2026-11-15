@@ -829,6 +829,29 @@ export function diversityCombiningReport(variant) {
 }
 
 /**
+ * Walk-test calibration (measurements.js): measurementsScene(variant) -> a mic link (free space, 10 m stage line) with 12 readings taken along a walk away from the
+ * transmitter (receiver at 8 to 68 m). The readings are SYNTHETIC: solved with the true body loss plus a fixed, deterministic scatter of up to +-0.4 dB.
+ * 'body-loss-high': the scene assumes 3 dB of body loss, the readings were made with 10 dB. 'clean-match': the scene assumes 6 dB and so did the readings.
+ */
+export const MEASUREMENT_WALK_X = Object.freeze([8, 13, 19, 26, 33, 40, 46, 52, 57, 62, 66, 70]);
+const measScatter = (i) => { const v = Math.sin((i + 1) * 12.9898) * 43758.5453; return 0.4 * (2 * (v - Math.floor(v)) - 1); };
+export function measurementsScene(variant = 'body-loss-high') {
+  const assumed = variant === 'clean-match' ? 6 : 3, truth = variant === 'clean-match' ? 6 : 10;
+  const sc = make('mic', (s, l) => {
+    s.stage = { width: 120, depth: 20 }; s.environment.floor = 'wood'; s.environment.model = 'free-space'; s.environment.bodyLossDb = assumed;
+    l.name = 'Bodypack walk test'; l.freqMHz = 606.1; l.tx.powerDbm = 10;
+    l.tx.pos = { x: 3, y: 10, z: 1.2 }; l.tx.antenna = omni(); l.rx.antenna = omni(); l.rx.pos = { x: 40, y: 10, z: 1.5 }; l.rx.diversity.antennaB.pos = { x: 40, y: 9.4, z: 1.5 };
+  });
+  const truthScene = { ...sc, environment: { ...sc.environment, bodyLossDb: truth } }, l = sc.links[0];
+  sc.measurements = MEASUREMENT_WALK_X.map((x, i) => {
+    const copy = JSON.parse(JSON.stringify(l)); copy.rx.pos = { x, y: 10, z: 1.5 };
+    const dbm = solveLink(truthScene, copy).inputPowerDbm + measScatter(i);
+    return { id: `meas${i + 1}`, linkId: l.id, x, y: 10, rxDbm: Math.round(dbm * 100) / 100 };
+  });
+  return sc;
+}
+
+/**
  * Four-piece band with people (item 36): bandPeopleScene() -> a 16 x 10 m stage, four people (singer with a handheld, guitar and bass with bodypacks,
  * drummer with a bodypack), each with a mic link and an IEM link. The mic receivers sit at the front of house, the IEM transmitters on a rack at the back of the stage.
  * Frequencies are the first eight of the third-order clean IEM8 plan (illustrative). Links are named after the person ("Anna mic", "Anna IEM").
@@ -1947,6 +1970,18 @@ export const EXAMPLES = [
     title: 'Diversity with antennas 0.8 wavelength apart: combining modes compared',
     note: 'Compare: antenna B is 0.4 m (0.8 wavelength) above A, so its fade falls at a different distance. At the 1 percent level switching gains 4.9 dB, selection 6.5 dB and maximal-ratio 8.8 dB over one antenna, and the worst fade shrinks from 8.8 dB to 4.3 dB with ratio combining. Switching trails selection because it waits for a 3 dB hysteresis before it moves. Compare with the 0.1 wavelength case, where none of this is available.',
     build: () => ({ scene: diversityCombiningScene('spaced'), walk: ACROSS }),
+  },
+  {
+    id: 'measurements-body-loss-high',
+    title: 'Walk test: the readings say the body loss is higher than assumed',
+    note: 'Problem: twelve synthetic readings along a 62 m walk are on average 7.0 dB weaker than the model predicts with the assumed 3 dB of body loss. The fit recovers 10.0 dB of body loss and brings the residual from 7.0 dB rms down to 0.2 dB. A wall or a cross-polar floor cannot explain a constant offset on this open path, so body loss is the one the data points to. Apply the fit, then re-check the margin.',
+    build: () => ({ scene: measurementsScene('body-loss-high') }),
+  },
+  {
+    id: 'measurements-clean-match',
+    title: 'Walk test: the readings match the model',
+    note: 'Best practice: twelve synthetic readings along the same walk agree with the model to 0.2 dB rms with the assumed 6 dB of body loss. No calibration is suggested, so the assumption stands for this transmitter, antenna and body position. Repeat the walk with a different performer or pack position before trusting it for others.',
+    build: () => ({ scene: measurementsScene('clean-match') }),
   },
   {
     id: 'presenter-with-backup-bodypack',

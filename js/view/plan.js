@@ -30,6 +30,8 @@ import { drawFresnelPlan, fresnelView } from './fresnelDraw.js';
 import { drawAreas } from './areasDraw.js';
 import { drawPeoplePlan } from './peopleDraw.js';
 import { drawNoiseSources } from './noiseDraw.js';
+import { drawMeasurementsPlan, drawPlaceBanner } from './measureDraw.js';
+import { isPlacing, placeMessage, pickPlace, cancelPlace, subscribePlace } from './placeMode.js';
 import { moveNoiseSource } from '../actionsAreas.js';
 import { movePerson } from '../actions.js';
 import { offsetFromPack, linkOwners } from '../model/people.js';
@@ -156,6 +158,7 @@ export function createPlanView(canvas, store) {
     for (const lk of scene.links) for (const role of ['tx', 'rx']) { const q = vp.worldToScreen(lk[role].pos); placedLabels.push({ x: q.x - 45, y: q.y + 8, w: 90, h: 30 }, { x: q.x - 16, y: q.y - 16, w: 32, h: 32 }); }
     drawPeoplePlan(ctx, th, vp, scene, sel, handles, hoverKey, w, placedLabels);
     drawNoiseSources(ctx, th, vp, scene, sel, handles, hoverKey, w, placedLabels);
+    drawMeasurementsPlan(ctx, th, vp, scene, placedLabels, w, h);
     for (const link of scene.links) drawAntennaB(ctx, th, link, sel);
     for (const link of scene.links) drawBranches(ctx, th, vp, link, handles);
     for (const link of scene.links) drawRxCableTags(ctx, th, vp, link, placer, scene.units.length, w);
@@ -167,6 +170,7 @@ export function createPlanView(canvas, store) {
     // legend + scale
     drawScaleBar(ctx, vp, h, th);
     drawAxesLegend(ctx, th, w, h);
+    if (isPlacing()) drawPlaceBanner(ctx, th, w, placeMessage());
     if (cursor && !isSnap) { const wp = vp.screenToWorld(cursor.x, cursor.y); haloText(ctx, th, `cursor  x ${fmtLen(dispX(scene, wp.x), scene.units)}  y ${fmtLen(dispY(scene, wp.y), scene.units)}`, w >= 520 ? w - 8 : w / 2, w >= 520 ? h - 8 : 30, { align: w >= 520 ? 'right' : 'center', color: th.ink, px: 12 }); }
 
     const rl = link0 ? solveCached(scene, link0) : null, selF = findItem(scene, sel);
@@ -527,6 +531,16 @@ export function createPlanView(canvas, store) {
     if (id) { store.select(id); announce('Audience area added', { key: 'move', delay: 100 }); }
   };
   canvas.addEventListener('dragover', onDragOver); canvas.addEventListener('drop', onDrop);
+  // "Place measurement" mode: the next click on the plan becomes a reading position; it runs before the drag/pan handlers and swallows the click
+  const onPlaceDown = (e) => {
+    if (!isPlacing()) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    const r = canvas.getBoundingClientRect(), wp = vp.screenToWorld(e.clientX - r.left, e.clientY - r.top);
+    pickPlace({ x: wp.x, y: wp.y });
+  };
+  const onPlaceKey = (e) => { if (isPlacing() && e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); cancelPlace(); } };
+  canvas.addEventListener('pointerdown', onPlaceDown, true); canvas.addEventListener('keydown', onPlaceKey, true);
+  const unsubPlace = subscribePlace((m) => { canvas.style.cursor = m ? 'crosshair' : ''; if (m) { try { canvas.focus(); } catch { /* not focusable */ } } host.invalidate(); });
   canvas.addEventListener('pointermove', onCurMove); canvas.addEventListener('pointerleave', onCurLeave); canvas.addEventListener('pointercancel', onCurLeave);
   const unsubSq = squelch.subscribe(() => host.invalidate());
   const unsubRx = rxState.subscribe(() => host.invalidate());
@@ -549,6 +563,6 @@ export function createPlanView(canvas, store) {
 
   return {
     viewport: vp, fit, invalidate: host.invalidate,
-    destroy() { unsubFresnel(); canvas.removeEventListener('dragover', onDragOver); canvas.removeEventListener('drop', onDrop); if (fitBtn) fitBtn.removeEventListener('click', onFitBtn); canvas.removeEventListener('pointermove', onCurMove); canvas.removeEventListener('pointerleave', onCurLeave); canvas.removeEventListener('pointercancel', onCurLeave); window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKey); unregSnap(); detachRip(); detach(); unsub?.(); unsubSq?.(); unsubRx?.(); unsubCov?.(); unsubImd?.(); unsubView?.(); host.destroy(); },
+    destroy() { unsubPlace(); canvas.removeEventListener('pointerdown', onPlaceDown, true); canvas.removeEventListener('keydown', onPlaceKey, true); unsubFresnel(); canvas.removeEventListener('dragover', onDragOver); canvas.removeEventListener('drop', onDrop); if (fitBtn) fitBtn.removeEventListener('click', onFitBtn); canvas.removeEventListener('pointermove', onCurMove); canvas.removeEventListener('pointerleave', onCurLeave); canvas.removeEventListener('pointercancel', onCurLeave); window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKey); unregSnap(); detachRip(); detach(); unsub?.(); unsubSq?.(); unsubRx?.(); unsubCov?.(); unsubImd?.(); unsubView?.(); host.destroy(); },
   };
 }

@@ -6,6 +6,8 @@ import { CEILING_MATERIALS, CEILING_LIMITS } from './model/ceiling.js';
 import { ANTENNA_BANDS } from './model/antenna-band.js';
 import { antennaOf } from './actions.js';
 import { WALL_CONSTRUCTIONS, WALL_NOISE_LIMITS } from './model/ledwall.js';
+import { MEASUREMENT_LIMITS, CALIBRATION_FIELDS } from './model/measurement-schema.js';
+import { importMeasurementsCsv } from './model/measurements.js';
 import { NOISE_CATALOGUE, NOISE_SOURCE_LIMITS, createNoiseSource, engCrewSources } from './model/noise-sources.js';
 
 const fin = Number.isFinite;
@@ -367,4 +369,97 @@ export function applyFrequencyPlan(store, assignments) {
     }
   });
   return n;
+}
+
+// ---- walk-test measurements (measurements.js) ---------------------------------------------------------------------------------
+
+let measSeq = 0;
+const newMeasId = () => `m${Date.now().toString(36)}${(measSeq++).toString(36)}`;
+const cleanNote = (v) => String(v).replace(/[ -]/g, '').slice(0, MEASUREMENT_LIMITS.noteChars);
+
+// A checked measurement from loose input, or null: finite x, y and level, clamped to the limits; linkId falls back to the first link.
+function makeMeasurement(d, m) {
+  const L = MEASUREMENT_LIMITS;
+  if (!m || !fin(m.x) || !fin(m.y) || !fin(m.rxDbm)) return null;
+  const links = d.links || [];
+  const linkId = typeof m.linkId === 'string' && links.some((l) => l.id === m.linkId) ? m.linkId : (links[0] && links[0].id);
+  if (!linkId) return null;
+  const out = { id: newMeasId(), linkId, x: clampTo(round2(m.x), [-L.coordM, L.coordM]), y: clampTo(round2(m.y), [-L.coordM, L.coordM]), rxDbm: clampTo(round2(m.rxDbm), L.dbm) };
+  if (fin(m.z)) out.z = clampTo(round2(m.z), L.zM);
+  if (typeof m.note === 'string' && m.note) out.note = cleanNote(m.note);
+  if (fin(m.t)) out.t = m.t;
+  return out;
+}
+
+/** addMeasurement(store, { linkId?, x, y, z?, rxDbm, note?, t? }) -> id, or null for a bad reading, an unknown link with no link to fall back on, or the 200-point cap. */
+export function addMeasurement(store, m) {
+  let id = null;
+  store.update((d) => {
+    if (!Array.isArray(d.measurements)) d.measurements = [];
+    if (d.measurements.length >= MEASUREMENT_LIMITS.max) { if (!d.measurements.length) delete d.measurements; return; }
+    const made = makeMeasurement(d, m);
+    if (!made) { if (!d.measurements.length) delete d.measurements; return; }
+    d.measurements.push(made); id = made.id;
+  });
+  return id;
+}
+
+/** updateMeasurement(store, id, patch, { coalesce }): patch keys x, y, z (null removes), rxDbm, note, linkId (an existing link); bad values are ignored. */
+export function updateMeasurement(store, id, patch = {}, o = {}) {
+  return store.update((d) => {
+    const m = (d.measurements || []).find((x) => x.id === id);
+    if (!m || !patch) return;
+    const L = MEASUREMENT_LIMITS;
+    if (fin(patch.x)) m.x = clampTo(round2(patch.x), [-L.coordM, L.coordM]);
+    if (fin(patch.y)) m.y = clampTo(round2(patch.y), [-L.coordM, L.coordM]);
+    if (patch.z === null) delete m.z; else if (fin(patch.z)) m.z = clampTo(round2(patch.z), L.zM);
+    if (fin(patch.rxDbm)) m.rxDbm = clampTo(round2(patch.rxDbm), L.dbm);
+    if (typeof patch.note === 'string') { const n = cleanNote(patch.note); if (n) m.note = n; else delete m.note; }
+    if (typeof patch.linkId === 'string' && (d.links || []).some((l) => l.id === patch.linkId)) m.linkId = patch.linkId;
+  }, opts(o));
+}
+
+/** removeMeasurement(store, id). */
+export function removeMeasurement(store, id) {
+  return store.update((d) => {
+    const i = (d.measurements || []).findIndex((x) => x.id === id);
+    if (i < 0) return;
+    d.measurements.splice(i, 1);
+    if (!d.measurements.length) delete d.measurements;
+  });
+}
+
+/** clearMeasurements(store): removes every reading. */
+export function clearMeasurements(store) { return store.update((d) => { delete d.measurements; }); }
+
+/**
+ * importMeasurements(store, csvText, { linkId, replace = false }) -> { added, errors }. Parses with importMeasurementsCsv; readings with no link of their own go to
+ * `linkId` (default the first link); `replace` clears the existing readings first. One undo step. Rows past the 200-point cap are dropped with an error.
+ */
+export function importMeasurements(store, text, { linkId, replace = false } = {}) {
+  const parsed = importMeasurementsCsv(text);
+  const errors = [...parsed.errors];
+  let added = 0;
+  store.update((d) => {
+    const list = replace ? [] : (Array.isArray(d.measurements) ? d.measurements : []);
+    for (const p of parsed.points) {
+      if (list.length >= MEASUREMENT_LIMITS.max) { errors.push(`At most ${MEASUREMENT_LIMITS.max} readings are kept; the rest were dropped.`); break; }
+      const made = makeMeasurement(d, { ...p, linkId: p.linkId || linkId });
+      if (!made) { errors.push('A reading was skipped: no link to attach it to.'); continue; }
+      list.push(made); added++;
+    }
+    if (list.length) d.measurements = list; else delete d.measurements;
+  });
+  return { added, errors };
+}
+
+/**
+ * applyCalibration(store, suggestion) -> true when a value was written. suggestion = the result of suggestCalibration (its `best` is used) or one of its candidates
+ * { field, fitted }. Writes environment.bodyLossDb, xpdDb or wallLossAdjustDb, clamped to its limits, in one undo step. Any other field is refused.
+ */
+export function applyCalibration(store, suggestion) {
+  const c = suggestion && suggestion.field ? suggestion : suggestion && suggestion.best;
+  if (!c || typeof c.field !== 'string' || !Object.prototype.hasOwnProperty.call(CALIBRATION_FIELDS, c.field) || !fin(c.fitted) || c.applicable === false) return false;
+  const lim = CALIBRATION_FIELDS[c.field], key = c.field.split('.')[1];
+  return store.update((d) => { d.environment = d.environment || {}; d.environment[key] = round2(Math.min(lim.max, Math.max(lim.min, c.fitted))); });
 }

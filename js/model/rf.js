@@ -497,6 +497,9 @@ export function pathWallLoss(scene, points, freqMHz) {
       if (sPos < 0 || sPos > fr.len || hz < w.zMin || hz > w.zMax) continue;
       if (w.riser) continue; // a riser face's through-loss is the platform obstruction (chord loss below), not counted twice
       const info = wallTransmissionInfo(w, freqMHz);
+      // optional calibration: environment.wallLossAdjustDb is added to every wall crossed (a walk-test fit), never taking one below 0 dB
+      const adj = scene.environment && Number.isFinite(scene.environment.wallLossAdjustDb) ? scene.environment.wallLossAdjustDb : 0;
+      if (adj) info.lossDb = Math.max(0, info.lossDb + adj);
       lossDb += info.lossDb;
       crossed.push(w.id);
       detail.push({ id: w.id, material: w.material, ...info });
@@ -865,7 +868,7 @@ export function solveLink(scene, link) {
     const gt = antennaGainDb(link.tx.antenna, p.departureBearing);
     const gr = antennaGainDb(link.rx.antenna, p.arrivalBearing);
     // Per-antenna polarisation, always applied (the wave's polarisation is the transmit antenna's).
-    const polLoss = usePol ? polarisationLossDb(link.tx.antenna, link.rx.antenna, p.departureBearing, p.arrivalBearing, { envPolarisation: pol, reflections: p.reflections.length, mirrors: p.reflections.map((r) => { if (r.type !== 'wall') return { z: true }; const w = allReflectors(scene).find((x) => x.id === r.via); const fr = wallFrame(w); return { nx: fr.nx, ny: fr.ny }; }) }) : 0;
+    const polLoss = usePol ? polarisationLossDb(link.tx.antenna, link.rx.antenna, p.departureBearing, p.arrivalBearing, { envPolarisation: pol, xpdDb: scene.environment && Number.isFinite(scene.environment.xpdDb) ? scene.environment.xpdDb : DEFAULT_XPD_DB, reflections: p.reflections.length, mirrors: p.reflections.map((r) => { if (r.type !== 'wall') return { z: true }; const w = allReflectors(scene).find((x) => x.id === r.via); const fr = wallFrame(w); return { nx: fr.nx, ny: fr.ny }; }) }) : 0;
     // Amplitude (relative to sqrt power): Friis lambda/(4 pi d) * sqrt(Gt Gr) * product of Gamma
     let amp = lambda / (4 * Math.PI * Math.max(p.lengthM, 1e-3)) * Math.pow(10, (gt + gr - polLoss) / 20);
     let re = 1, im = 0;

@@ -34,6 +34,7 @@ import { validatePerson, prunePeople, PEOPLE_LIMITS, linkOwners } from './people
 import { validateNoiseSource, wallNoiseSourcesFromReflectors, NOISE_SOURCE_LIMITS } from './noise-sources.js';
 import { AUDIENCE_KINDS, AUDIENCE_DENSITY_LIMITS, AUDIENCE_MAX } from './audience.js';
 import { ANTENNA_BANDS } from './antenna-band.js';
+import { MEASUREMENT_LIMITS, validateMeasurement, CALIBRATION_FIELDS } from './measurement-schema.js';
 
 // Stage and platform limits. Item pos.z everywhere stays the height above the LOCAL floor (deck or platform top).
 export const STAGE_LIMITS = Object.freeze({ size: [0.5, 500], heightM: [0, 20] });
@@ -506,6 +507,9 @@ export function validateScene(scene) {
     if (!MODELS.includes(env.model)) errors.push('environment.model invalid');
     if (!isNum(env.fadeMarginDb)) errors.push('environment.fadeMarginDb must be a number');
     if (!isNum(env.bodyLossDb)) errors.push('environment.bodyLossDb must be a number');
+    for (const [f, lim] of [['xpdDb', CALIBRATION_FIELDS['environment.xpdDb']], ['wallLossAdjustDb', CALIBRATION_FIELDS['environment.wallLossAdjustDb']]]) {
+      if (env[f] !== undefined && !(isNum(env[f]) && env[f] >= lim.min && env[f] <= lim.max)) errors.push(`environment.${f} must be between ${lim.min} and ${lim.max}`);
+    }
     const xn = env.externalNoise;
     if (xn !== undefined && !(typeof xn === 'string' && Object.prototype.hasOwnProperty.call(EXTERNAL_NOISE_FIGURE_600MHZ_DB, xn)) && !(isNum(xn) && xn >= 0)) errors.push('environment.externalNoise must be a preset name or a number >= 0');
     const itf = env.interference;
@@ -571,6 +575,17 @@ export function validateScene(scene) {
         if (typeof pe.id === 'string') { if (seenPe.has(pe.id)) errors.push(`people[${i}].id is not unique`); seenPe.add(pe.id); }
         for (const k of ['micLinkId', 'iemLinkId']) if (typeof pe[k] === 'string') { if (owned.has(pe[k])) errors.push(`people[${i}].${k} is already assigned to another person`); owned.add(pe[k]); }
         if (Array.isArray(pe.extraLinkIds)) pe.extraLinkIds.forEach((id, j) => { if (typeof id === 'string') { if (owned.has(id)) errors.push(`people[${i}].extraLinkIds[${j}] is already assigned to another person`); owned.add(id); } });
+      });
+    }
+  }
+  if (scene.measurements !== undefined) {
+    if (!Array.isArray(scene.measurements)) errors.push('measurements must be an array');
+    else if (scene.measurements.length > MEASUREMENT_LIMITS.max) errors.push(`at most ${MEASUREMENT_LIMITS.max} measurements are supported`);
+    else {
+      const seenM = new Set();
+      scene.measurements.forEach((m, i) => {
+        validateMeasurement(m, `measurements[${i}]`, errors);
+        if (m && typeof m.id === 'string') { if (seenM.has(m.id)) errors.push(`measurements[${i}].id is not unique`); seenM.add(m.id); }
       });
     }
   }
@@ -831,6 +846,7 @@ export function migrateScene(raw) {
   if (Array.isArray(raw.overheadPanels) && raw.overheadPanels.length > CEILING_LIMITS.panelsMax) throw new Error(`Scene has more than ${CEILING_LIMITS.panelsMax} overhead panels`);
   if (Array.isArray(raw.audience) && raw.audience.length > AUDIENCE_MAX) throw new Error(`Scene has more than ${AUDIENCE_MAX} audience areas`);
   if (Array.isArray(raw.platforms) && raw.platforms.length > PLATFORM_LIMITS.max) throw new Error(`Scene has more than ${PLATFORM_LIMITS.max} platforms`);
+  if (Array.isArray(raw.measurements) && raw.measurements.length > MEASUREMENT_LIMITS.max) throw new Error(`Scene has more than ${MEASUREMENT_LIMITS.max} measurements`);
   if (Array.isArray(raw.noiseSources) && raw.noiseSources.length > NOISE_SOURCE_LIMITS.max) throw new Error(`Scene has more than ${NOISE_SOURCE_LIMITS.max} noise sources`);
   if (Array.isArray(raw.people) && raw.people.length > PEOPLE_LIMITS.max) throw new Error(`Scene has more than ${PEOPLE_LIMITS.max} people`);
   const s = structuredClone(raw);

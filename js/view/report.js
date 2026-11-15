@@ -151,6 +151,14 @@ function buildSheet(data) {
   checks.classList.add('report-break');
   sheet.append(checks);
 
+  if (data.measurements) { // walk-test readings against the model (delta = measured minus predicted)
+    const m = data.measurements, sec = section('Measured vs predicted');
+    sec.append(el('p', 'report-note', m.text));
+    sec.append(table([{ label: '#' }, { label: 'x (m)', num: true }, { label: 'y (m)', num: true }, { label: 'Measured dBm', num: true }, { label: 'Predicted dBm', num: true }, { label: 'Delta' }, { label: 'Note' }],
+      m.rows.map((r) => [String(r.n), String(r.x), String(r.y), r.rxDbm.toFixed(1), r.predictedDbm == null ? '-' : r.predictedDbm.toFixed(1), r.view.label, r.note])));
+    if (m.truncated) sec.append(el('p', 'report-note', `${m.truncated} more reading${m.truncated === 1 ? '' : 's'} not listed.`));
+    sheet.append(sec);
+  }
   if (data.assumptionsInUse) { // the assumed figures that moved this scene's results, with what would settle each
     const a = data.assumptionsInUse, sec = section('Assumptions in this scene');
     sec.append(el('p', `report-verdict${a.proven ? '' : ' report-verdict-warn'}`, a.verdict));
