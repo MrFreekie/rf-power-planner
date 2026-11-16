@@ -4,9 +4,6 @@ import { legend } from './glossary.js';
 // TOOLTIPS and HELP_TOPICS are plain data (tested in Node); applyHelp() touches the DOM.
 
 export const TOOLTIPS = Object.freeze({
-  'btn-mic': 'Wireless microphone: the transmitter is on the performer, the receiver is off-stage.',
-  'btn-iem': 'In-ear monitor: the transmitter is off-stage, the receiver is a bodypack on the performer.',
-  freq: 'Carrier frequency in MHz. Higher frequencies lose more in cables and have shorter wavelengths.',
   floor: 'Floor material: sets how strongly the floor reflects the signal, which can add to or cancel the direct path.',
   'btn-two-ray': 'Two-ray model: direct path plus floor and wall reflections, added with their phases. Shows fades and nulls.',
   'btn-free-space': 'Free-space model: direct path only, as if there were no floor or walls.',
@@ -22,8 +19,6 @@ export const TOOLTIPS = Object.freeze({
   'btn-walk': 'Move the transmitter along a path automatically so you can watch the level and margin change.',
   'walk-speed': 'Walking speed in metres per second (a stroll is about 1.2).',
   'walk-to': 'Where the walk ends: back on stage, or out until the signal is lost.',
-  'mod-fm': 'Analog FM link: noise rises gradually as the signal weakens.',
-  'mod-digital': 'Digital link: clean audio until a cliff, then drop-outs.',
   'btn-batt': 'Start or pause the virtual battery drain (sped up by the Time x factor).',
   'btn-batt-reset': 'Refill the virtual battery.',
   'batt-scale': 'How many times faster than real time the battery drains.',

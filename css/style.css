@@ -294,8 +294,6 @@ button.danger { color: var(--fail); border-color: var(--fail); }
 #toolbar .group > label { margin-left: 10px; gap: 6px; }
 #toolbar label { white-space: nowrap; }
 #toolbar input[type="number"] { width: 5.5em; }
-#digital-controls { display: inline-flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
-#digital-controls[hidden] { display: none; }
 
 .chip-overload { background: var(--fail); border-color: var(--fail); color: var(--on-fail); }
 .meters-ov[data-level="hot"] { color: var(--warn-text); }

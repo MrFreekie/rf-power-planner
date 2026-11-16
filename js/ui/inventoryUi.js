@@ -2,7 +2,8 @@
 // Clicking a row selects that link's transmitter, so the plan highlights it, the side view follows it and the inspector opens its fields.
 // Pure helpers (inventoryView) are tested without a DOM; mountInventory() builds the panel.
 import { inventoryRows, inventoryTotals, linkCard, gearOptions, powerChoices } from '../model/inventory.js';
-import { setTxFmPreset, setRxFmPreset, setTxPowerOption, addLink } from '../actions.js';
+import { setTxFmPreset, setRxFmPreset, setTxPowerOption, setModulation, addLink } from '../actions.js';
+import { DIGITAL_PRESETS } from '../model/digital-params.js';
 import { activeLink, solveCached } from '../view/util.js';
 import { getLinkFocus, setLinkFocus, subscribeLinkFocus } from '../view/linkFocus.js';
 
@@ -16,7 +17,9 @@ export function inventoryView(scene, selection, results) {
   const parts = [];
   if (totals.mics) parts.push(`${totals.mics} mic${totals.mics === 1 ? '' : 's'}`);
   if (totals.iems) parts.push(`${totals.iems} IEM${totals.iems === 1 ? '' : 's'}`);
-  if (totals.other) parts.push(`${totals.other} other`);
+  const p2p = rows.filter((r) => r.kind === 'p2p').length;
+  if (p2p) parts.push(`${p2p} P2P`);
+  if (totals.other - p2p > 0) parts.push(`${totals.other - p2p} other`);
   return { rows: rows.map((r) => ({ ...r, active: r.id === activeId, statusWord: STATUS_WORD[r.status] || '-' })), totals, card, summary: parts.join(', ') || 'no links' };
 }
 
@@ -49,6 +52,18 @@ export function mountInventory({ container, store }) {
   /** Transmitter model, power and receiver model selects for one link. Each change is one undoable step through the same actions the inspector uses. */
   function gearPickers(link) {
     const opts = gearOptions(link), wrap = el('div', 'inv-gear');
+    const mod = link.modulation || { type: 'analog-fm', digital: {} };
+    const pick = (label, items, current, onPick) => {
+      const lab = el('label', 'inv-field'); lab.append(el('span', '', label));
+      const sel = el('select'); sel.setAttribute('aria-label', `${label} for ${link.name}`);
+      for (const [v, t] of items) sel.append(Object.assign(el('option', '', t), { value: v }));
+      sel.value = current; sel.addEventListener('change', () => onPick(sel.value)); lab.append(sel); return lab;
+    };
+    wrap.append(pick('Modulation', [['analog-fm', 'Analog FM'], ['digital', 'Digital']], mod.type, (v) => setModulation(store, link.id, { type: v })));
+    if (mod.type === 'digital') {
+      wrap.append(pick('Digital preset', Object.entries(DIGITAL_PRESETS).map(([id, p]) => [id, p.label || id]), (mod.digital && mod.digital.preset) || '', (v) => setModulation(store, link.id, { preset: v, fixedOrder: null })));
+      wrap.append(pick('Digital order', [['', 'Adaptive'], ['2', 'BPSK'], ['4', 'QPSK'], ['16', '16-QAM'], ['64', '64-QAM'], ['256', '256-QAM']], mod.digital && mod.digital.fixedOrder ? String(mod.digital.fixedOrder) : '', (v) => setModulation(store, link.id, { fixedOrder: v ? Number(v) : null })));
+    }
     if (!opts.tx.length && !opts.rx.length) return wrap;
     const field = (label, current, list, generic, onPick) => {
       const lab = el('label', 'inv-field'); lab.append(el('span', '', label));
@@ -86,7 +101,7 @@ export function mountInventory({ container, store }) {
     const v = inventoryView(scene, store.getSelection(), results);
     summary.textContent = `Inventory and links (${v.summary})`;
     out.textContent = '';
-    if (!v.rows.length) { out.append(el('p', 'hint', 'No links yet. Use the Mic or IEM button in the toolbar to start.')); return; }
+    if (!v.rows.length) { out.append(el('p', 'hint', 'No links yet. Use Add mic or Add IEM above.')); return; }
 
     const table = el('table', 'ob-table inv-table');
     table.append(Object.assign(el('caption', 'sr-only'), { textContent: 'Every link: name, frequency, transmitter and receiver, and margin. The row for the selected link is marked current.' }));

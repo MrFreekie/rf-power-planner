@@ -405,7 +405,7 @@ export function mountInspector({ container, store }) {
     lb.append(
       textField({ key: 'link-name', label: 'Link name', get: (cc) => cc.link.name, set: (cc, v, o) => linkSet('name')(cc, v, o) }),
       selectField({
-        key: 'link-kind', label: 'Link kind', options: [['mic', 'Microphone (Tx on stage, Rx at rack)'], ['iem', 'In-ear monitor (Tx at rack, Rx on performer)'], ['p2p', 'Point to point (fixed directional link)']],
+        key: 'link-kind', label: 'Link kind', options: [['mic', 'Microphone (Tx on stage, Rx at rack)'], ['iem', 'In-ear monitor (Tx at rack, Rx on performer)'], ['p2p', 'Point to point, P2P (fixed directional link)']],
         get: (cc) => cc.link.kind, set: (cc, v) => setLinkKind(store, cc.link.id, v),
       }),
       numberField({

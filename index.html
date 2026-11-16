@@ -24,12 +24,6 @@
 </div>
 <header id="toolbar" role="toolbar" aria-label="Scenario controls">
   <button type="button" id="btn-cmd" aria-haspopup="dialog" aria-expanded="false" title="Find a command, example or panel (Ctrl+K, or / when not typing)">Find</button>
-  <div class="group" role="group" aria-label="Scenario">
-    <button type="button" id="btn-mic" aria-pressed="true">Mic</button>
-    <button type="button" id="btn-iem" aria-pressed="false">IEM</button>
-    <button type="button" id="btn-p2p" aria-pressed="false" title="Point-to-point link: fixed directional antennas, long distance">P2P</button>
-  </div>
-  <label>Frequency <input id="freq" type="number" min="1" max="6000" step="0.025" inputmode="decimal"> MHz</label>
   <label>Floor <select id="floor"></select></label>
   <div class="group" role="group" aria-label="Propagation model">
     <button type="button" id="btn-two-ray" aria-pressed="true">2-ray</button>
@@ -54,14 +48,6 @@
     <label>Speed <input id="walk-speed" type="number" min="0.1" max="1000" step="0.1" value="1.2" inputmode="decimal"> m/s</label>
     <label>To <select id="walk-to"><option value="stage">Stage</option><option value="range">Out of range</option></select></label>
   </div>
-  <div class="group" role="group" aria-label="Modulation">
-    <button type="button" id="mod-fm" data-mod="analog-fm" aria-pressed="true">Analog FM</button>
-    <button type="button" id="mod-digital" data-mod="digital" aria-pressed="false">Digital</button>
-  </div>
-  <span id="digital-controls" hidden>
-    <label>Preset <select id="dig-preset"></select></label>
-    <label>Order <select id="dig-order"><option value="">Adaptive</option><option value="2">BPSK</option><option value="4">QPSK</option><option value="16">16-QAM</option><option value="64">64-QAM</option><option value="256">256-QAM</option></select></label>
-  </span>
   <div class="group" role="group" aria-label="Battery">
     <button type="button" id="btn-batt" aria-pressed="false" title="Start or pause the virtual battery drain">Battery: Start</button>
     <button type="button" id="btn-batt-reset" title="Refill the battery to its start level">Reset</button>

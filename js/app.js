@@ -5,7 +5,7 @@ import { createStore } from './store.js';
 import { createDefaultScene, createDefaultLink, deserialize, serialize } from './model/scene.js';
 import { solveLink } from './model/rf.js';
 import { SURFACES } from './model/library.js';
-import { setUnits, setLinkKind, setPath, loadExample, setModulation, setCoverageMode, setImdEnabled, resetScene } from './actions.js';
+import { setUnits, setPath, loadExample, setModulation, setCoverageMode, setImdEnabled, resetScene } from './actions.js';
 import { EXAMPLES } from './examples.js';
 import { rxState } from './rxTracker.js';
 import { telemetry } from './telemetryTracker.js';
@@ -14,7 +14,6 @@ import { coverage } from './coverageTracker.js';
 import { imd } from './imdTracker.js';
 import { buildShareLink, decodeScene, parseHash } from './share.js';
 import { buildReportData } from './reportData.js';
-import { DIGITAL_PRESETS } from './model/digital-params.js';
 import { startWalk, startMultiWalk, stopWalk, isWalking } from './walk.js';
 import { planWalkAll } from './ui/walkall.js';
 import { downloadScene, loadSceneFromFile } from './io.js';
@@ -84,24 +83,9 @@ for (const [id, s] of Object.entries(SURFACES)) {
   $('floor').append(opt);
 }
 
-function setKind(kind) {
-  const cur = activeLink();
-  if (!cur || cur.kind === kind) return;
-  setLinkKind(store, cur.id, kind);
-  store.select(null);
-}
-
-$('btn-mic').addEventListener('click', () => setKind('mic'));
-$('btn-iem').addEventListener('click', () => setKind('iem'));
-$('btn-p2p').addEventListener('click', () => setKind('p2p'));
 $('btn-two-ray').addEventListener('click', () => store.update((d) => { d.environment.model = 'two-ray'; }));
 $('btn-free-space').addEventListener('click', () => store.update((d) => { d.environment.model = 'free-space'; }));
 $('floor').addEventListener('change', (e) => store.update((d) => { d.environment.floor = e.target.value; }));
-$('freq').addEventListener('change', (e) => {
-  const f = parseFloat(e.target.value);
-  if (Number.isFinite(f) && f > 0) setPath(store, 'links.0.freqMHz', f);
-  else e.target.value = activeLink().freqMHz;
-});
 for (const b of document.querySelectorAll('[data-power]')) b.addEventListener('click', () => setUnits(store, { power: b.dataset.power }));
 for (const b of document.querySelectorAll('[data-length]')) b.addEventListener('click', () => setUnits(store, { length: b.dataset.length }));
 
@@ -171,15 +155,6 @@ $('examples').addEventListener('change', (e) => {
   applyExample(id);
 });
 $('example-dismiss').addEventListener('click', () => { $('example-note').hidden = true; });
-for (const [id, p] of Object.entries(DIGITAL_PRESETS)) {
-  const opt = document.createElement('option');
-  opt.value = id;
-  opt.textContent = p.label || id;
-  $('dig-preset').append(opt);
-}
-for (const b of document.querySelectorAll('[data-mod]')) b.addEventListener('click', () => setModulation(store, activeLink().id, { type: b.dataset.mod }));
-$('dig-preset').addEventListener('change', (e) => setModulation(store, activeLink().id, { preset: e.target.value, fixedOrder: null }));
-$('dig-order').addEventListener('change', (e) => setModulation(store, activeLink().id, { fixedOrder: e.target.value ? Number(e.target.value) : null }));
 $('btn-imd').addEventListener('click', () => setImdEnabled(store, !(store.getScene().imd && store.getScene().imd.enabled)));
 $('cov-mode').addEventListener('change', (e) => setCoverageMode(store, e.target.value));
 // ---- share link, shared-scene confirmation, report -----------------------------------------------------------
@@ -325,22 +300,11 @@ function renderToolbar(scene) {
   const link = pickActiveLink(scene, store.getSelection());
   const press = (id, on) => $(id).setAttribute('aria-pressed', String(on));
   const sideName = $('side-link'); if (sideName) sideName.textContent = link.name || '';
-  press('btn-mic', link.kind === 'mic');
-  press('btn-iem', link.kind === 'iem');
-  press('btn-p2p', link.kind === 'p2p');
   press('btn-two-ray', scene.environment.model === 'two-ray');
   press('btn-free-space', scene.environment.model === 'free-space');
   for (const b of document.querySelectorAll('[data-power]')) b.setAttribute('aria-pressed', String(b.dataset.power === scene.units.power));
   for (const b of document.querySelectorAll('[data-length]')) b.setAttribute('aria-pressed', String(b.dataset.length === scene.units.length));
-  if (document.activeElement !== $('freq')) $('freq').value = link.freqMHz;
   $('floor').value = scene.environment.floor;
-  const mod = link.modulation || { type: 'analog-fm', digital: {} };
-  for (const b of document.querySelectorAll('[data-mod]')) b.setAttribute('aria-pressed', String(b.dataset.mod === mod.type));
-  $('digital-controls').hidden = mod.type !== 'digital';
-  if (mod.digital) {
-    $('dig-preset').value = mod.digital.preset;
-    $('dig-order').value = mod.digital.fixedOrder ? String(mod.digital.fixedOrder) : '';
-  }
   $('btn-imd').setAttribute('aria-pressed', String(!!(scene.imd && scene.imd.enabled)));
   if (scene.coverage) $('cov-mode').value = scene.coverage.mode;
   const tl = link.telemetry;
