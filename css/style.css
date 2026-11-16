@@ -1105,3 +1105,22 @@ body.vnalab-open { overflow: hidden; }
 
 .map-legend { margin: 4px 14px; font-size: 13px; padding-left: 8px; border-left: 6px solid var(--marginal); }
 .map-legend:empty { display: none; }
+
+/* Inventory and links panel */
+.inv-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.inv-table th, .inv-table td { padding: 3px 4px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line, #ccc); }
+.inv-table th[scope="row"] { font-weight: 600; }
+.inv-table .num { text-align: right; white-space: nowrap; }
+.inv-table tr[data-active="true"] { background: var(--marginal-bg, rgba(0, 0, 0, 0.06)); }
+.inv-table td[data-status]::before { content: none; }
+.inv-pick { font: inherit; font-weight: 600; background: none; border: 0; padding: 0; text-align: left; cursor: pointer; text-decoration: underline dotted; color: inherit; }
+.inv-pick[aria-current="true"] { text-decoration: underline solid; }
+.inv-eq { color: var(--ink-soft, #555); }
+.inv-card { margin-top: 8px; padding: 6px 8px; border: 1px solid var(--line, #ccc); border-radius: 4px; }
+.inv-card h4 { margin: 0 0 4px; font-size: 13px; }
+.inv-card p { margin: 2px 0; }
+.inv-pack { margin-top: 8px; }
+.inv-pack h5 { margin: 6px 0 2px; font-size: 12px; }
+.inv-pack ul { margin: 0; padding-left: 18px; }
+.pane-sub { font-weight: 400; font-size: 12px; color: var(--ink-soft, #555); }
+.pane-sub:not(:empty)::before { content: "following "; }

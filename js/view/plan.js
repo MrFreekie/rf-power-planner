@@ -252,7 +252,7 @@ export function createPlanView(canvas, store) {
     rayTo(r, !info.B || info.active === 'A');
     if (info.B) rayTo(vp.worldToScreen(info.B.pos), info.active === 'B');
     const d = res?.distanceM ?? Math.hypot(link.tx.pos.x - link.rx.pos.x, link.tx.pos.y - link.rx.pos.y, link.tx.pos.z - link.rx.pos.z);
-    let txt = fmtLen(d, scene.units);
+    let txt = `${link.name ? link.name + '  ' : ''}${fmtLen(d, scene.units)}`;
     if (isActive && res) txt = `${res.status === 'pass' ? '✓ PASS' : res.status === 'marginal' ? '! MARGINAL' : '✗ FAIL'}  ${txt}`;
     if (isActive && res) txt += w < 520 ? `  ${fmtDb(res.marginDb)}` : `  ·  ${fmtDbm(res.inputPowerDbm ?? res.rxPowerDbm)}  ·  ${fmtDb(res.marginDb)} margin`;
     const mx = (t.x + r.x) / 2, my = (t.y + r.y) / 2;

@@ -25,6 +25,7 @@ import { mountWelcome } from './ui/onboarding.js';
 import { mountHelp } from './ui/help.js';
 import { mountScenes } from './ui/scenes.js';
 import { mountCompare } from './ui/compare.js';
+import { mountInventory } from './ui/inventoryUi.js';
 import { mountCoordination } from './ui/coordination.js';
 import { mountGlossary } from './ui/glossary.js';
 import { mountPanels } from './ui/panels.js';
@@ -323,6 +324,7 @@ document.addEventListener('keydown', (e) => {
 function renderToolbar(scene) {
   const link = pickActiveLink(scene, store.getSelection());
   const press = (id, on) => $(id).setAttribute('aria-pressed', String(on));
+  const sideName = $('side-link'); if (sideName) sideName.textContent = link.name || '';
   press('btn-mic', link.kind === 'mic');
   press('btn-iem', link.kind === 'iem');
   press('btn-p2p', link.kind === 'p2p');
@@ -533,6 +535,7 @@ for (const [path, name, id] of [
 // ---- onboarding, saved scenes, compare, help, glossary (each optional: a failure must not break the planner) ----
 for (const [name, fn] of [
   ['welcome', () => mountWelcome({ container: $('welcome'), openButton: $('btn-help') })],
+  ['inventory', () => mountInventory({ container: $('inventory'), store })],
   ['scenes', () => mountScenes({ container: $('scenes'), getScene: () => store.getScene(), onLoad: loadSavedScene })],
   ['compare', () => mountCompare({ container: $('compare'), store })],
   ['coordination', () => mountCoordination({ container: $('coordination'), store })],
