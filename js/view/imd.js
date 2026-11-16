@@ -1,5 +1,6 @@
 // Intermodulation demo panel: spectrum analyser plot with carriers and IM3/IM5 markers, noise-floor numbers,
 // distance sweep and coordination table. Reads imd.get() (js/imdTracker.js); draws only.
+import { setImdEnabled } from '../actions.js';
 import { createCanvasHost, activeLink, setFont, haloText } from './util.js';
 import { imd } from '../imdTracker.js';
 import { formatPower } from '../model/units.js';
@@ -70,8 +71,12 @@ export function mountImd({ container, store }) {
   container.classList.add('imd');
   container.textContent = '';
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
-  const h2 = el('h2', null, 'Intermodulation');
-  const msg = el('p', 'hint', 'The intermod demo is off. Switch on Intermod in the toolbar to see carriers, products and the noise floor.');
+  const h2 = el('h2', null, 'Intermodulation ');
+  const toggle = el('button', 'imd-toggle', 'Turn on'); toggle.type = 'button'; toggle.setAttribute('aria-pressed', 'false');
+  toggle.title = 'Show intermodulation: unwanted extra signals made when several transmitters mix.';
+  toggle.addEventListener('click', () => setImdEnabled(store, !(store.getScene().imd && store.getScene().imd.enabled)));
+  h2.append(toggle);
+  const msg = el('p', 'hint', 'The intermod demo is off. Turn it on above to see carriers, products and the noise floor.');
   const body = el('div');
   const legend = el('div', 'imd-legend');
   const spec = el('canvas', 'imd-spec');
@@ -317,6 +322,7 @@ export function mountImd({ container, store }) {
     state = imd.get();
     const on = !!state;
     msg.hidden = on; body.hidden = !on;
+    const enabled = !!(scene.imd && scene.imd.enabled); toggle.setAttribute('aria-pressed', String(enabled)); toggle.textContent = enabled ? 'Turn off' : 'Turn on';
     if (!on) return;
     const unit = scene.units.power, n = state.noise;
     nEls.th.textContent = fmtDbm(n.thermalDbm, unit); nEls.im.textContent = fmtDbm(n.imSumDbm, unit);

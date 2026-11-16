@@ -1128,3 +1128,4 @@ body.vnalab-open { overflow: hidden; }
 .inv-table tr[data-focus="true"] { outline: 2px dashed var(--ink, #222); outline-offset: -2px; }
 .inv-add { display: flex; gap: 6px; margin: 4px 0; }
 .inv-msg:empty { display: none; }
+.imd-toggle { font-size: 12px; font-weight: 400; margin-left: 8px; vertical-align: middle; }

@@ -5,7 +5,7 @@ import { createStore } from './store.js';
 import { createDefaultScene, createDefaultLink, deserialize, serialize } from './model/scene.js';
 import { solveLink } from './model/rf.js';
 import { SURFACES } from './model/library.js';
-import { setUnits, setPath, loadExample, setModulation, setCoverageMode, setImdEnabled, resetScene } from './actions.js';
+import { setUnits, setPath, loadExample, setModulation, setCoverageMode, resetScene } from './actions.js';
 import { EXAMPLES } from './examples.js';
 import { rxState } from './rxTracker.js';
 import { telemetry } from './telemetryTracker.js';
@@ -155,7 +155,6 @@ $('examples').addEventListener('change', (e) => {
   applyExample(id);
 });
 $('example-dismiss').addEventListener('click', () => { $('example-note').hidden = true; });
-$('btn-imd').addEventListener('click', () => setImdEnabled(store, !(store.getScene().imd && store.getScene().imd.enabled)));
 $('cov-mode').addEventListener('change', (e) => setCoverageMode(store, e.target.value));
 // ---- share link, shared-scene confirmation, report -----------------------------------------------------------
 
@@ -305,7 +304,6 @@ function renderToolbar(scene) {
   for (const b of document.querySelectorAll('[data-power]')) b.setAttribute('aria-pressed', String(b.dataset.power === scene.units.power));
   for (const b of document.querySelectorAll('[data-length]')) b.setAttribute('aria-pressed', String(b.dataset.length === scene.units.length));
   $('floor').value = scene.environment.floor;
-  $('btn-imd').setAttribute('aria-pressed', String(!!(scene.imd && scene.imd.enabled)));
   if (scene.coverage) $('cov-mode').value = scene.coverage.mode;
   const tl = link.telemetry;
   $('btn-batt').hidden = $('btn-batt-reset').hidden = !tl || !tl.enabled;

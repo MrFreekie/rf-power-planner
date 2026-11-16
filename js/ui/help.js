@@ -24,7 +24,6 @@ export const TOOLTIPS = Object.freeze({
   'batt-scale': 'How many times faster than real time the battery drains.',
   'btn-vnalab': 'Open the VNA lab: a virtual network analyser with return loss, VSWR, Smith chart, calibration, distance to fault and a library of cable, antenna and filter faults.',
   'btn-modlab': 'Open the Modulation lab: animated AM, FM, digital, stereo FM and radio-mic tone-key demonstrations with spectra.',
-  'btn-imd': 'Show intermodulation: unwanted extra signals made when several transmitters mix.',
   'cov-mode': 'How the signals from several transmit antennas are added when drawing coverage.',
   examples: 'Load a ready-made example scene with a note explaining what to look at.',
   'btn-share': 'Copy a link that contains this whole scene. Nothing is uploaded.',
