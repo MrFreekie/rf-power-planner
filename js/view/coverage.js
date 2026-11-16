@@ -30,7 +30,7 @@ export function mountCoverage({ container, store }) {
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
   const h2 = el('h2', null, 'Coverage and zones');
   const controls = el('div', 'cv-controls');
-  const modeSel = el('select'); modeSel.setAttribute('aria-label', 'Coverage combine mode');
+  const modeSel = el('select'); modeSel.setAttribute('aria-label', 'Coverage combine mode'); modeSel.title = 'How the signals from several transmit antennas are added when drawing coverage.';
   for (const [v, t] of MODES) { const o = el('option', null, t); o.value = v; modeSel.append(o); }
   modeSel.addEventListener('change', () => setCoverageMode(store, modeSel.value));
   const mkCheck = (label, key) => {
