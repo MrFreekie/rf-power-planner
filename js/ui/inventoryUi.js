@@ -2,7 +2,7 @@
 // Clicking a row selects that link's transmitter, so the plan highlights it, the side view follows it and the inspector opens its fields.
 // Pure helpers (inventoryView) are tested without a DOM; mountInventory() builds the panel.
 import { inventoryRows, inventoryTotals, linkCard, gearOptions, powerChoices } from '../model/inventory.js';
-import { setTxFmPreset, setRxFmPreset, setTxPowerOption } from '../actions.js';
+import { setTxFmPreset, setRxFmPreset, setTxPowerOption, addLink } from '../actions.js';
 import { activeLink, solveCached } from '../view/util.js';
 import { getLinkFocus, setLinkFocus, subscribeLinkFocus } from '../view/linkFocus.js';
 
@@ -31,7 +31,20 @@ export function mountInventory({ container, store }) {
   const intro = el('p', 'hint', 'Every link in the show. Pick one to see it highlighted in the plan, followed in the side view and opened in the inspector.');
   const out = el('div', 'inv-out');
   out.setAttribute('aria-live', 'polite');
-  body.append(intro, out);
+  const bar = el('div', 'inv-add'), msg = el('p', 'hint inv-msg'); msg.setAttribute('role', 'status');
+  for (const [kind, word] of [['mic', 'microphone'], ['iem', 'in-ear monitor']]) {
+    const b = el('button', '', `Add ${kind === 'mic' ? 'mic' : 'IEM'}`); b.type = 'button';
+    b.title = `Add another ${word} link at the next free frequency, beside the last one`;
+    b.addEventListener('click', () => {
+      const id = addLink(store, kind);
+      if (!id) { msg.textContent = 'The link limit has been reached.'; return; }
+      const l = store.getScene().links.find((q) => q.id === id);
+      msg.textContent = `Added ${l.name} at ${l.freqMHz} MHz. Check it against the others in the Coordination panel.`;
+      store.select(l.tx.id);
+    });
+    bar.append(b);
+  }
+  body.append(intro, bar, msg, out);
 
   /** Transmitter model, power and receiver model selects for one link. Each change is one undoable step through the same actions the inspector uses. */
   function gearPickers(link) {

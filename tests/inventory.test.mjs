@@ -83,3 +83,37 @@ test('picking a model through the actions changes the card and the power choices
   setTxFmPreset(store, l0.id, '');
   assert.match(txDeviceName(store.getScene().links.find((l) => l.id === l0.id)), /^Generic/);
 });
+
+import { addLink, removeLink } from '../js/actions.js';
+import { validateScene } from '../js/model/scene.js';
+
+test('addLink adds a mic or IEM at a free frequency, beside the last one, as one undo step', () => {
+  const store = createStore(people()), before = store.getScene().links.length, freqs = store.getScene().links.map((l) => l.freqMHz);
+  const id = addLink(store, 'mic');
+  const sc = store.getScene(), l = sc.links.find((q) => q.id === id);
+  assert.equal(sc.links.length, before + 1);
+  assert.equal(l.kind, 'mic'); assert.equal(l.name, 'Mic 5');
+  assert.ok(freqs.every((f) => Math.abs(f - l.freqMHz) >= 0.2));
+  assert.deepEqual(validateScene(sc).errors || [], []);
+  assert.ok(store.undo()); assert.equal(store.getScene().links.length, before);
+});
+
+test('addLink works for IEM, keeps ids unique, rejects other kinds and removeLink takes it back out', () => {
+  const store = createStore(people());
+  const a = addLink(store, 'iem'), b = addLink(store, 'iem');
+  const ids = store.getScene().links.flatMap((l) => [l.id, l.tx.id, l.rx.id]);
+  assert.equal(new Set(ids).size, ids.length);
+  assert.equal(store.getScene().links.find((l) => l.id === b).name, 'IEM 6');
+  assert.equal(addLink(store, 'p2p'), null);
+  assert.ok(removeLink(store, a));
+  assert.ok(!store.getScene().links.some((l) => l.id === a));
+});
+
+test('addLink on a one-link scene starts from the defaults and stops at the link limit', () => {
+  const store = createStore(createDefaultScene());
+  const id = addLink(store, 'iem');
+  assert.ok(id); assert.equal(store.getScene().links.length, 2);
+  for (let i = 0; i < 80; i++) addLink(store, 'mic');
+  assert.equal(store.getScene().links.length, 64);
+  assert.equal(addLink(store, 'mic'), null);
+});

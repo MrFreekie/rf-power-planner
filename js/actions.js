@@ -5,7 +5,7 @@ import { buildExample } from './examples.js';
 import { IMD_PRESETS, COMBINER_PRESETS } from './model/imd-params.js';
 import { startWalk, stopWalk } from './walk.js';
 import { effectiveAntennaB } from './model/diversity.js';
-import { migrateScene, validateScene, createDefaultScene, createDefaultLink, createChainItem, createReflector, createBranch, createZone, createPlatform, STAGE_LIMITS, PLATFORM_LIMITS, PLATFORM_MATERIALS, createImdTransmitter, defaultImdTransmitters, newId, SCENE_LIMITS } from './model/scene.js';
+import { migrateScene, validateScene, createDefaultScene, createDefaultLink, syncBranches, createChainItem, createReflector, createBranch, createZone, createPlatform, STAGE_LIMITS, PLATFORM_LIMITS, PLATFORM_MATERIALS, createImdTransmitter, defaultImdTransmitters, newId, SCENE_LIMITS } from './model/scene.js';
 import { applyFmPreset } from './model/fm-presets.js';
 import { DEFAULT_MIC_OFFSET, DEFAULT_IEM_OFFSET, PEOPLE_LIMITS, PERSON_ROLES, PERSON_COLOURS, createPerson, personLinkName, extraLinkName, personPackPositions, offsetFromPack, linkOwners, prunePeople } from './model/people.js';
 import { validateVenue } from './model/venue-underlay.js';
@@ -982,6 +982,37 @@ function pruneMeasurements(d) {
 /** pruneScenePeople(store): after the UI deletes a link, call this to drop the references to it (people never keep a dangling link; the link's walk-test readings go too). */
 export function pruneScenePeople(store) {
   return store.update((d) => { if (Array.isArray(d.people)) prunePeople(d); pruneMeasurements(d); });
+}
+
+/**
+ * addLink(store, kind, { name?, freqMHz? }) -> id of the new link, or null (kind not 'mic' or 'iem', or the link cap is reached).
+ * The new link starts from the default link of its kind, takes the next free number in its name ("Mic 3"), the next free frequency (0.475 MHz above the highest in use,
+ * and at least 0.2 MHz from every other link), and sits beside the last link of the same kind: the performer end (mic transmitter or IEM bodypack) is moved 0.8 m along the stage,
+ * the rack end (receiver or IEM transmitter) 0.5 m. One undo step.
+ */
+export function addLink(store, kind, partial = {}) {
+  if (kind !== 'mic' && kind !== 'iem') return null;
+  let id = null;
+  store.update((d) => {
+    if (!Array.isArray(d.links) || d.links.length >= SCENE_LIMITS.maxLinks) return;
+    const link = createDefaultLink(kind), word = kind === 'mic' ? 'Mic' : 'IEM';
+    const same = d.links.filter((l) => l.kind === kind), ref = same[same.length - 1];
+    const taken = new Set(d.links.map((l) => l.name));
+    let n = same.length + 1; while (taken.has(`${word} ${n}`)) n += 1;
+    link.name = typeof partial.name === 'string' && partial.name.trim() ? partial.name.trim().slice(0, 80) : `${word} ${n}`;
+    let f = Number.isFinite(partial.freqMHz) && partial.freqMHz > 0 ? partial.freqMHz : Math.round(((d.links.reduce((m, l) => Math.max(m, l.freqMHz), 0) || 600) + 0.475) * 1000) / 1000;
+    if (!Number.isFinite(partial.freqMHz)) while (d.links.some((l) => Math.abs(l.freqMHz - f) < 0.2)) f = Math.round((f + 0.025) * 1000) / 1000;
+    link.freqMHz = f;
+    if (ref) {
+      const performer = kind === 'mic' ? 'tx' : 'rx', rack = kind === 'mic' ? 'rx' : 'tx', width = (d.stage && d.stage.width) || 12;
+      const wrap = (x) => Math.round((((x % width) + width) % width) * 100) / 100;
+      link[performer].pos = { ...ref[performer].pos, x: wrap(ref[performer].pos.x + 0.8) };
+      link[rack].pos = { ...ref[rack].pos, x: wrap(ref[rack].pos.x + 0.5) };
+      if (kind === 'iem') syncBranches(link);
+    }
+    d.links.push(link); id = link.id;
+  });
+  return id;
 }
 
 /** removeLink(store, linkId) -> true when removed. The last link cannot be removed. People lose their reference to it and its walk-test readings are deleted, in one undo step. */
