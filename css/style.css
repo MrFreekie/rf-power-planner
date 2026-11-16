@@ -1129,3 +1129,9 @@ body.vnalab-open { overflow: hidden; }
 .inv-add { display: flex; gap: 6px; margin: 4px 0; }
 .inv-msg:empty { display: none; }
 .imd-toggle { font-size: 12px; font-weight: 400; margin-left: 8px; vertical-align: middle; }
+
+.rack-cat { font-size: 12px; margin: 10px 0 4px; text-transform: uppercase; letter-spacing: .04em; opacity: .75; }
+.rack-item { border: 1px solid var(--line, #3a3f4a); border-radius: 4px; margin: 3px 0; font-size: 12px; }
+.rack-item > summary { padding: 4px 6px; cursor: pointer; }
+.rack-edit { display: grid; gap: 6px; padding: 6px; }
+.rack-edit input[type=text], .rack-edit input[type=number], .rack-edit select { width: 100%; font: inherit; box-sizing: border-box; }

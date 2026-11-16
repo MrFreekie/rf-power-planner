@@ -36,6 +36,7 @@ import { AUDIENCE_KINDS, AUDIENCE_DENSITY_LIMITS, AUDIENCE_MAX } from './audienc
 import { CROWD_MODES, CROWD_LIMITS } from './crowd.js';
 import { ANTENNA_BANDS } from './antenna-band.js';
 import { TV_BLOCK_LEVEL_LIMITS } from './spectrum-map.js';
+import { compileRack, validateRack } from './rack.js';
 import { MEASUREMENT_LIMITS, validateMeasurement, CALIBRATION_FIELDS, WALL_ADJUST_BY_MATERIAL } from './measurement-schema.js';
 
 // Stage and platform limits. Item pos.z everywhere stays the height above the LOCAL floor (deck or platform top).
@@ -226,6 +227,7 @@ export function syncSharedAntennas(scene) {
 
 /** Run syncBranches over every link of a scene (in place), then the shared receive antennas. */
 export function syncScene(scene) {
+  compileRack(scene, { fromPreset: createChainItemFromPreset, item: createChainItem }); // before the branch mirrors so an IEM antenna from the rack is copied into them
   if (scene && Array.isArray(scene.links)) for (const l of scene.links) syncBranches(l);
   syncSharedAntennas(scene);
   return scene;
@@ -507,6 +509,7 @@ export function validateScene(scene) {
   if (errors.length) return { ok: false, errors };
   if (scene.version !== SCHEMA_VERSION) errors.push(`version must be ${SCHEMA_VERSION}`);
   if (scene.venue !== undefined) errors.push(...validateVenue(scene.venue));
+  errors.push(...validateRack(scene));
   if (!isObj(scene.units) || !POWER_UNITS.includes(scene.units.power)) errors.push('units.power invalid');
   if (!isObj(scene.units) || !LENGTH_UNITS.includes(scene.units.length)) errors.push('units.length invalid');
   if (!isObj(scene.stage) || !(scene.stage.width > 0) || !(scene.stage.depth > 0)) {
