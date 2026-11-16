@@ -1,9 +1,9 @@
-// Inspector: scene-wide forms (stage, platforms, people, noise, audience, ceiling, environment, reflectors). The active mic or IEM link's own
+// Inspector: the people form and the point-to-point and intermod demo forms. The venue forms (stage, platforms, noise, audience, ceiling, environment, reflectors) are built here but shown in the Venue builder panel. The active mic or IEM link's own
 // Link, Transmitter, Receiver and cable sections are built here too but shown inside its radio items (see linkDock.js, rackUi.js).
 // Structure is rebuilt only when the set of editable things changes (selection, chain items, reflectors);
 // otherwise every field is patched in place and a focused field is never overwritten.
 import { findItem, activeLink, solveCached } from '../view/util.js';
-import { setLinkDock, LINK_DOCK_SECTIONS } from './linkDock.js';
+import { setLinkDock, LINK_DOCK_SECTIONS, setVenueDock, VENUE_DOCK_SECTIONS } from './linkDock.js';
 import { chainItemLossDb } from '../model/rf.js';
 import { CABLES, ANTENNAS, SURFACES, MATERIALS, BANDS, GROUND_PLANE_LABELS, GROUND_PLANE_GAIN_DBI, ANTENNA_CONTACT_LABELS, ANTENNA_DAMPNESS_LABELS, allowedPolarisations, defaultPolarisation } from '../model/library.js';
 import { setAntennaField, setAntennaType, antennaOf } from '../actions.js';
@@ -367,7 +367,7 @@ export function mountInspector({ container, store }) {
     refs = {};
     if (!c.link) {
       container.append(el('p', 'hint', 'No link in the scene.'));
-      setLinkDock(null);
+      setLinkDock(null); setVenueDock(null);
       return;
     }
     const link = c.link;
@@ -654,7 +654,9 @@ export function mountInspector({ container, store }) {
     if (c.scene.imd && c.scene.imd.enabled) { buildImd(section('imd', 'Intermod demo'), c); secs.unshift('imd'); }
     // A mic or IEM link's own sections are shown inside its radio items (ui/rackUi.js); a point-to-point link has no item, so it keeps them here.
     const docked = link.kind === 'p2p' ? [] : LINK_DOCK_SECTIONS.filter((n) => refs[n]);
-    container.append(...secs.filter((n) => !docked.includes(n)).map((n) => refs[n].details));
+    const venueDocked = VENUE_DOCK_SECTIONS.filter((n) => refs[n]);
+    container.append(...secs.filter((n) => !docked.includes(n) && !venueDocked.includes(n)).map((n) => refs[n].details));
+    { const vmap = {}; for (const n of venueDocked) vmap[n] = refs[n].details; setVenueDock(vmap); } // shown in the Venue builder panel (ui/venueBuilderUi.js)
     if (docked.length) { const map = {}; for (const n of docked) { refs[n].details.open = true; map[n] = refs[n].details; } setLinkDock(map); } else setLinkDock(null);
   }
 

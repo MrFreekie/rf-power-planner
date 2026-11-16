@@ -6,3 +6,11 @@ export const LINK_DOCK_SECTIONS = Object.freeze(['link', 'tx', 'rx', 'chain', 'r
 export const getLinkDock = () => sections;
 export function setLinkDock(map) { sections = map; for (const cb of [...subs]) cb(sections); }
 export function subscribeLinkDock(cb) { subs.add(cb); return () => subs.delete(cb); }
+
+// The scene-wide venue sections (stage, platforms, audience, crowd, ceiling, noise sources, environment, reflectors), shown in the Venue builder panel.
+let venue = null;
+const venueSubs = new Set();
+export const VENUE_DOCK_SECTIONS = Object.freeze(['stage', 'plats', 'aud', 'crowd', 'ovh', 'noise', 'env', 'refl']);
+export const getVenueDock = () => venue;
+export function setVenueDock(map) { venue = map; for (const cb of [...venueSubs]) cb(venue); }
+export function subscribeVenueDock(cb) { venueSubs.add(cb); return () => venueSubs.delete(cb); }

@@ -25,6 +25,7 @@ import { mountHelp } from './ui/help.js';
 import { mountScenes } from './ui/scenes.js';
 import { mountCompare } from './ui/compare.js';
 import { mountRack } from './ui/rackUi.js';
+import { mountVenueBuilder } from './ui/venueBuilderUi.js';
 import { mountCoordination } from './ui/coordination.js';
 import { mountGlossary } from './ui/glossary.js';
 import { mountPanels } from './ui/panels.js';
@@ -496,6 +497,7 @@ for (const [path, name, id] of [
 for (const [name, fn] of [
   ['welcome', () => mountWelcome({ container: $('welcome'), openButton: $('btn-help') })],
   ['rack', () => mountRack({ container: $('rack'), store })],
+  ['venue-builder', () => mountVenueBuilder({ container: $('venue-builder') })],
   ['scenes', () => mountScenes({ container: $('scenes'), getScene: () => store.getScene(), onLoad: loadSavedScene })],
   ['compare', () => mountCompare({ container: $('compare'), store })],
   ['coordination', () => mountCoordination({ container: $('coordination'), store })],
