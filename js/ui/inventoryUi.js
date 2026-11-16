@@ -4,6 +4,7 @@
 import { inventoryRows, inventoryTotals, linkCard, gearOptions, powerChoices } from '../model/inventory.js';
 import { setTxFmPreset, setRxFmPreset, setTxPowerOption } from '../actions.js';
 import { activeLink, solveCached } from '../view/util.js';
+import { getLinkFocus, setLinkFocus, subscribeLinkFocus } from '../view/linkFocus.js';
 
 const STATUS_WORD = { pass: 'Pass', marginal: 'Marginal', fail: 'Fail' };
 
@@ -84,6 +85,9 @@ export function mountInventory({ container, store }) {
       const b = el('button', 'inv-pick', r.name || r.id); b.type = 'button';
       b.dataset.kind = r.kind; if (r.active) b.setAttribute('aria-current', 'true');
       b.title = `Select ${r.name || 'this link'}: highlight it in the plan and follow it in the side view`;
+      tr.dataset.link = r.id; if (getLinkFocus() === r.id) tr.dataset.focus = 'true';
+      for (const ev of ['pointerenter', 'focus']) b.addEventListener(ev, () => setLinkFocus(r.id));
+      for (const ev of ['pointerleave', 'blur']) b.addEventListener(ev, () => setLinkFocus(null));
       b.addEventListener('click', () => { const l = store.getScene().links.find((q) => q.id === r.id); if (l) store.select(l.tx.id); });
       th.append(b);
       const short = (t) => t.replace(/^Generic /, '').replace(/ \((illustrative|assumed figures)\)$/, '').replace(/, typical$/, '');
@@ -115,6 +119,9 @@ export function mountInventory({ container, store }) {
 
   let queued = false;
   const unsub = store.subscribe(() => { if (queued) return; queued = true; const run = () => { queued = false; try { render(); } catch (err) { console.error('inventory', err); } }; setTimeout(run, 30); }); // a timer, not requestAnimationFrame: a hidden pane pauses animation frames and the list would go stale
+  // the plan sets the focus when the pointer is on a transmitter or receiver: mark that link's row without rebuilding the table
+  const markFocus = (id) => { for (const tr of out.querySelectorAll('tr[data-link]')) { if (tr.dataset.link === id) tr.dataset.focus = 'true'; else delete tr.dataset.focus; } };
+  const unsubFocus = subscribeLinkFocus(markFocus);
   render();
-  return { render, destroy: unsub };
+  return { render, destroy() { unsub(); unsubFocus(); } };
 }

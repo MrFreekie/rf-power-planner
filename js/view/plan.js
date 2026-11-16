@@ -1,6 +1,7 @@
 // Plan view: top-down, true scale. x right, y down on screen (y = toward the audience).
 // Draws metre grid, stage (hatched floor), reflectors, links (coloured by status), antenna pattern
 // lobes, icons at real size, and scale bar. Drag Tx / Rx / reflector ends / reflector body / lobe tip.
+import { getLinkFocus, setLinkFocus, subscribeLinkFocus, linkIdOfItem } from './linkFocus.js';
 import { createViewport } from './viewport.js';
 import {
   createCanvasHost, activeLink, findItem, selectableIds, solveCached, fmtLen, fmtDb, fmtDbm, statusColor,
@@ -243,9 +244,17 @@ export function createPlanView(canvas, store) {
     }
     const muted = gateOf(link.id) && !gateOf(link.id).open;
     const info = rxInfo(link);
+    const fid = getLinkFocus(), focused = fid === link.id, dimmed = fid && !focused;
+    if (focused) { // pointer is on this link in the inventory (or on one of its ends): a wide soft band under the ray and a ring on each end
+      ctx.save(); ctx.strokeStyle = col; ctx.globalAlpha = 0.25; ctx.lineWidth = 9; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(t.x, t.y); ctx.lineTo(r.x, r.y); ctx.stroke();
+      ctx.globalAlpha = 1; ctx.strokeStyle = th.ink; ctx.lineWidth = 2; ctx.setLineDash([4, 3]);
+      for (const q of [t, r]) { ctx.beginPath(); ctx.arc(q.x, q.y, 16, 0, Math.PI * 2); ctx.stroke(); }
+      ctx.restore();
+    }
     const rayTo = (pt, on) => {
       ctx.save();
-      ctx.strokeStyle = col; ctx.lineWidth = on ? (isActive ? 2.4 : 1.6) : 1; ctx.lineCap = 'round'; ctx.globalAlpha = on ? 1 : 0.4;
+      ctx.strokeStyle = col; ctx.lineWidth = on ? (isActive || focused ? 2.4 : 1.6) : 1; ctx.lineCap = 'round'; ctx.globalAlpha = (on ? 1 : 0.4) * (dimmed ? 0.35 : 1);
       if (muted && on) ctx.setLineDash([8, 6]);
       ctx.beginPath(); ctx.moveTo(t.x, t.y); ctx.lineTo(pt.x, pt.y); ctx.stroke(); ctx.restore();
     };
@@ -256,11 +265,11 @@ export function createPlanView(canvas, store) {
     if (isActive && res) txt = `${res.status === 'pass' ? '✓ PASS' : res.status === 'marginal' ? '! MARGINAL' : '✗ FAIL'}  ${txt}`;
     if (isActive && res) txt += w < 520 ? `  ${fmtDb(res.marginDb)}` : `  ·  ${fmtDbm(res.inputPowerDbm ?? res.rxPowerDbm)}  ·  ${fmtDb(res.marginDb)} margin`;
     const mx = (t.x + r.x) / 2, my = (t.y + r.y) / 2;
-    setFont(ctx, th, 12, isActive ? '600' : '');
+    setFont(ctx, th, 12, isActive || focused ? '600' : '');
     const ly = placer.place(ctx.measureText(txt).width, mx, my - 8);
     const ltw = ctx.measureText(txt).width;
     linkLabelRects.push({ x: mx - ltw / 2 - 2, y: ly - 13, w: ltw + 4, h: 17 }); // reserved so crew and noise labels keep clear of the link status text
-    haloText(ctx, th, txt, mx, ly, { align: 'center', color: th.ink, weight: isActive ? '600' : '' });
+    haloText(ctx, th, txt, mx, ly, { align: 'center', color: th.ink, weight: isActive || focused ? '600' : '' });
   }
 
   function drawAntennaB(ctx, th, link, sel) {
@@ -536,7 +545,7 @@ export function createPlanView(canvas, store) {
   const detach = attachInteraction(canvas, vp, {
     hitTest, dragStart, dragMove,
     select: (id) => store.select(id),
-    hover: (hd) => { hoverKey = hd ? hd.kind + ':' + hd.itemId : null; host.invalidate(); },
+    hover: (hd) => { hoverKey = hd ? hd.kind + ':' + hd.itemId : null; setLinkFocus(hd ? linkIdOfItem(store.getScene(), hd.itemId) : null); host.invalidate(); },
     onView: () => { userView = true; host.invalidate(); },
     fit, nudge, rotate, cycle, escape: () => store.select(null),
   });
@@ -572,6 +581,7 @@ export function createPlanView(canvas, store) {
   const unsubCov = coverage.subscribe(() => host.invalidate());
   const unsubImd = imd.subscribe(() => host.invalidate());
   const unsubView = subscribeCovView(() => host.invalidate());
+  const unsubFocus = subscribeLinkFocus(() => host.invalidate());
   let stageSig = (() => { const st = store.getScene().stage; return st.width + 'x' + st.depth; })();
   const hasP2p = () => store.getScene().links.some((l) => l.kind === 'p2p');
   let p2pSig = hasP2p();
@@ -588,6 +598,6 @@ export function createPlanView(canvas, store) {
 
   return {
     viewport: vp, fit, invalidate: host.invalidate,
-    destroy() { unsubPlace(); canvas.removeEventListener('pointerdown', onPlaceDown, true); canvas.removeEventListener('keydown', onPlaceKey, true); unsubFresnel(); canvas.removeEventListener('dragover', onDragOver); canvas.removeEventListener('drop', onDrop); if (fitBtn) fitBtn.removeEventListener('click', onFitBtn); canvas.removeEventListener('pointermove', onCurMove); canvas.removeEventListener('pointerleave', onCurLeave); canvas.removeEventListener('pointercancel', onCurLeave); window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKey); unregSnap(); detachRip(); detach(); unsub?.(); unsubSq?.(); unsubRx?.(); unsubCov?.(); unsubImd?.(); unsubView?.(); host.destroy(); },
+    destroy() { unsubPlace(); canvas.removeEventListener('pointerdown', onPlaceDown, true); canvas.removeEventListener('keydown', onPlaceKey, true); unsubFresnel(); canvas.removeEventListener('dragover', onDragOver); canvas.removeEventListener('drop', onDrop); if (fitBtn) fitBtn.removeEventListener('click', onFitBtn); canvas.removeEventListener('pointermove', onCurMove); canvas.removeEventListener('pointerleave', onCurLeave); canvas.removeEventListener('pointercancel', onCurLeave); window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKey); unregSnap(); detachRip(); detach(); unsub?.(); unsubSq?.(); unsubRx?.(); unsubCov?.(); unsubImd?.(); unsubView?.(); unsubFocus?.(); setLinkFocus(null); host.destroy(); },
   };
 }
