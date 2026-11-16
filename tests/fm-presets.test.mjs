@@ -598,11 +598,11 @@ test('IEM G4, SR 3254 / 3256 / EK 3253, SR/EK IEM G2: pilot, diversity, power', 
   const sr = FM_PRESETS['sennheiser-sriemg4'].params, ek = FM_PRESETS['sennheiser-ekiemg4'].params;
   assert.equal(sr.mpxPilotKhz, 19); assert.equal(sr.pilotDeviationKhz, 5);
   assert.equal(ek.diversityMode, 'ratio'); assert.equal(FM_PRESETS['sennheiser-ekiemg4'].confidence.diversityMode, 'assumed');
-  assert.deepEqual(ek.limiterRangeDb, { min: -18, max: -6 }); assert.equal(FM_PRESETS['sennheiser-ekiemg4'].confidence.limiterRangeDb, 'assumed');
+  assert.deepEqual(ek.limiterRangeDb, { min: -18, max: -6 }); assert.equal(FM_PRESETS['sennheiser-ekiemg4'].confidence.limiterRangeDb, 'sourced');
   assert.ok(Math.abs(ek.sensitivityDbm - (20 * Math.log10(4) - 107)) < 0.06);
   assert.ok(ek.tuningWindows.some((w) => w.id === 'C-TH' && w.fromMHz === 748.2));
   assert.ok(!sr.tuningWindows.some((w) => w.id === 'C-TH'));
-  assert.equal(FM_PRESETS['sennheiser-sriemg4'].confidence.powerOptions, 'inferred');
+  assert.equal(FM_PRESETS['sennheiser-sriemg4'].confidence.powerOptions, 'sourced');
   assert.equal(FM_PRESETS['sennheiser-sr3254'].params.pilotDeviationKhz, 5);
   assert.deepEqual(FM_PRESETS['sennheiser-sr3254'].params.powerOptions.map((o) => Math.round(10 ** (o.powerDbm / 10))), [50, 100]);
   assert.equal(FM_PRESETS['sennheiser-sr3256'].params.tuningStepKhz, 5);
