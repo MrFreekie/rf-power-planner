@@ -404,12 +404,12 @@ export function mountInspector({ container, store }) {
     buildOverhead(ovb, c);
 
     // Link
-    const lb = section('link', 'Link');
+    const lb = section('link', 'Tuning'); // frequency and band; the kind is fixed by the item (Add mic / Add IEM), so only a point-to-point link shows it
     lb.append(
       textField({ key: 'link-name', label: 'Link name', get: (cc) => cc.link.name, set: (cc, v, o) => linkSet('name')(cc, v, o) }),
       selectField({
         key: 'link-kind', label: 'Link kind', options: [['mic', 'Microphone (Tx on stage, Rx at rack)'], ['iem', 'In-ear monitor (Tx at rack, Rx on performer)'], ['p2p', 'Point to point, P2P (fixed directional link)']],
-        get: (cc) => cc.link.kind, set: (cc, v) => setLinkKind(store, cc.link.id, v),
+        get: (cc) => cc.link.kind, set: (cc, v) => setLinkKind(store, cc.link.id, v), visible: (cc) => cc.link.kind === 'p2p',
       }),
       numberField({
         key: 'link-freq', label: 'Frequency', min: 1, max: 6000, step: 0.025, unit: 'MHz', decimals: 3,
