@@ -163,3 +163,13 @@ test('sharing refuses IEM links, itself, and chained shares', () => {
   assert.equal(shareRxAntenna(store, c.id, b.id), false);
   assert.equal(shareRxAntenna(store, a.id, c.id), false);
 });
+
+import { selectableIds } from '../js/view/util.js';
+
+test('keyboard cycling skips the hidden receiver of a link that shares an antenna', () => {
+  const store = createStore(people()), [a, b] = mics(store), n = selectableIds(store.getScene()).length;
+  shareRxAntenna(store, b.id, a.id);
+  const ids = selectableIds(store.getScene());
+  assert.equal(ids.length, n - 1);
+  assert.ok(!ids.includes(b.rx.id) && ids.includes(a.rx.id) && ids.includes(b.tx.id));
+});

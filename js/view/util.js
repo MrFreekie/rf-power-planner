@@ -124,7 +124,7 @@ export function activeLink(scene, selection) {
 }
 export function selectableIds(scene) {
   const ids = [];
-  for (const l of scene.links || []) ids.push(l.tx.id, l.rx.id);
+  for (const l of scene.links || []) ids.push(l.tx.id, ...(l.rx.sharedAntennaOf !== undefined ? [] : [l.rx.id])); // a shared receive antenna is drawn once, with its source
   for (const r of scene.reflectors || []) ids.push(r.id);
   for (const p of scene.platforms || []) ids.push(p.id);
   for (const a of scene.audience || []) ids.push(a.id);

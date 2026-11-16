@@ -150,6 +150,7 @@ export function createPlanView(canvas, store) {
     placer.reset(); linkLabelRects.length = 0;
     setFont(ctx, th, 12);
     for (const link of scene.links) for (const role of ['tx', 'rx']) {
+      if (role === 'rx' && link.rx.sharedAntennaOf !== undefined) continue; // a shared receive antenna is drawn once, with its source link
       const e = link[role], p = vp.worldToScreen(e.pos), tw = ctx.measureText(e.name).width;
       placer.reserve({ x: p.x - tw / 2 - 2, y: p.y + Math.max(22, 0.35 * vp.pxPerM + 12) - 12, w: tw + 4, h: 16 });
     }
@@ -162,7 +163,7 @@ export function createPlanView(canvas, store) {
     for (const link of scene.links) drawLinkLine(ctx, th, scene, link, link === link0, w);
     for (const link of scene.links) drawLinkEnds(ctx, th, scene, link, sel, w);
     const placedLabels = [...linkLabelRects];
-    for (const lk of scene.links) for (const role of ['tx', 'rx']) { const q = vp.worldToScreen(lk[role].pos); placedLabels.push({ x: q.x - 45, y: q.y + 8, w: 90, h: 30 }, { x: q.x - 16, y: q.y - 16, w: 32, h: 32 }); }
+    for (const lk of scene.links) for (const role of ['tx', 'rx']) { if (role === 'rx' && lk.rx.sharedAntennaOf !== undefined) continue; const q = vp.worldToScreen(lk[role].pos); placedLabels.push({ x: q.x - 45, y: q.y + 8, w: 90, h: 30 }, { x: q.x - 16, y: q.y - 16, w: 32, h: 32 }); }
     drawPeoplePlan(ctx, th, vp, scene, sel, handles, hoverKey, w, placedLabels);
     drawNoiseSources(ctx, th, vp, scene, sel, handles, hoverKey, w, placedLabels);
     drawMeasurementsPlan(ctx, th, vp, scene, placedLabels, w, h);
@@ -301,8 +302,10 @@ export function createPlanView(canvas, store) {
   function drawLinkEnds(ctx, th, scene, link, sel, w) {
     const personIsTx = link.kind !== 'iem';
     for (const role of ['tx', 'rx']) {
+      if (role === 'rx' && link.rx.sharedAntennaOf !== undefined) continue; // drawn once, with the link that owns the antenna; its line still ends here
       const e = link[role], p = vp.worldToScreen(e.pos);
       const selected = sel === e.id;
+      const sharers = role === 'rx' ? scene.links.filter((q) => q.rx.sharedAntennaOf === link.id).length : 0;
       const hasPerson = (role === 'tx') === personIsTx;
       const ant = e.antenna, az = ant.orientation?.az ?? 0;
       const R = clamp(0.9 * vp.pxPerM, 26, 80);
@@ -322,7 +325,7 @@ export function createPlanView(canvas, store) {
         icons.drawAntenna(ctx, vp, e.pos.x, e.pos.y, { view: 'plan', ink, fill, type: ant.type, pol: ant.polarisation, rollDeg: ant.rollDeg, groundPlane: ant.groundPlane, angleDeg: 180 - az });
       }
       if (selected) ringAt(ctx, th, p.x, p.y, 17);
-      if (w >= 520 || selected) haloText(ctx, th, e.name, p.x, p.y + Math.max(22, 0.35 * vp.pxPerM + 12), { align: 'center', color: selected ? th.ink : th.inkSoft, weight: selected ? '600' : '' });
+      if (w >= 520 || selected) haloText(ctx, th, sharers ? `${e.name} (+${sharers} shared)` : e.name, p.x, p.y + Math.max(22, 0.35 * vp.pxPerM + 12), { align: 'center', color: selected ? th.ink : th.inkSoft, weight: selected ? '600' : '' });
       if (role === 'rx') {
         const inf = rxInfo(link);
         drawOverloadHalo(ctx, th, p.x, p.y, inf.overload);
