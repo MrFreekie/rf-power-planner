@@ -183,3 +183,16 @@ test('changing a rack antenna model or aim reaches every link it feeds', () => {
   assert.equal(s.getScene().links.find((l) => l.kind === 'iem').tx.antenna.type, 'paddle');
   assert.ok(validateScene(s.getScene()).ok, validateScene(s.getScene()).errors.join());
 });
+
+test('tuning clashes: same frequency and overlapping bandwidths warn, spaced links do not', async () => {
+  const { tuningClashes, rackWarnings } = await import('../js/model/rack.js');
+  const { createDefaultScene } = await import('../js/model/scene.js');
+  const s = createDefaultScene();
+  const l1 = s.links[0], l2 = structuredClone(l1); l2.id = 'x2'; l2.name = 'Second';
+  l1.freqMHz = 600; l2.freqMHz = 600; s.links.push(l2);
+  assert.equal(tuningClashes(s).length, 1); assert.equal(tuningClashes(s)[0].same, true);
+  l2.freqMHz = 600.1; assert.equal(tuningClashes(s)[0].same, false);
+  l2.freqMHz = 600.4; assert.equal(tuningClashes(s).length, 0);
+  assert.equal(tuningClashes(s, () => 1000).length, 1);
+  l2.freqMHz = 600; assert.ok(rackWarnings(s).some((w) => w.level === 'warn' && /same frequency/.test(w.text)));
+});

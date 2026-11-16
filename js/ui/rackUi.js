@@ -9,6 +9,7 @@ import { addLink, assignMic, assignIem, removeExtraMic, peopleLinkOwners } from 
 import { setLinkFocus } from '../view/linkFocus.js';
 import { getLinkDock, subscribeLinkDock } from './linkDock.js';
 import { activeLink } from '../view/util.js';
+import { FM_PRESETS } from '../model/fm-presets.js';
 import { CHAIN_PRESETS } from '../model/chain-presets.js';
 import { gearPickers } from './gearUi.js';
 import {
@@ -60,7 +61,8 @@ export function mountRack({ container, store }) {
     { const hold = document.getElementById('live-holder'); if (hold) for (const id of ['diversity', 'telemetry']) { const n = document.getElementById(id); if (n && out.contains(n)) hold.append(n); } } // park the live panels before the list is rebuilt
     out.textContent = '';
     const linkName = (id) => { const l = scene.links.find((q) => q.id === id); return l ? l.name : id; };
-    const warns = rackWarnings(scene), warnBy = new Map();
+    const bwOf = (l) => { const p = l.tx && l.tx.fmPreset && FM_PRESETS[l.tx.fmPreset]; return p && p.params ? p.params.occupiedBwKhz : 200; };
+    const warns = rackWarnings(scene, bwOf), warnBy = new Map();
     const dcOf = new Map(); // bias warnings from the link maths, shown on the receiver and on the antennas that feed it
     for (const l of scene.links) if (l.kind === 'mic') { const r = solveCached(scene, l); const ws = ((r && r.warnings) || []).filter((t) => /bias|DC/i.test(t)); if (ws.length) dcOf.set(l.id, ws); }
     for (const [lid, ws] of dcOf) {

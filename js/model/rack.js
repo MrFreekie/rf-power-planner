@@ -212,7 +212,7 @@ function freePorts(rack) {
 }
 
 /** rackWarnings(scene) -> [{ key, level: 'warn'|'info', text }] ; key is "<kind>:<id>" of the list item it belongs to. */
-export function rackWarnings(scene) {
+export function rackWarnings(scene, bwOf) { // bwOf(link) -> occupied bandwidth in kHz, for the same-frequency / overlap check
   const rack = scene.rack || deriveRack(scene), links = scene.links || [], w = [];
   const nm = (id) => { const l = links.find((q) => q.id === id); return l ? String(l.name || l.id) : '?'; };
   const ant = (id) => (rack.antennas || []).find((a) => a.id === id);
@@ -229,6 +229,7 @@ export function rackWarnings(scene) {
     for (const z of zones) if (!rxAnt.some((a) => (a.zones || []).includes(z.id))) w.push({ key: `zone:${z.id}`, level: 'info', text: `Zone ${z.name || z.id} has no receive antenna serving it.` });
     for (const a of rxAnt) if (!(a.zones || []).length) w.push({ key: `antenna:${a.id}`, level: 'info', text: `${a.name} serves no zone.` });
   }
+  for (const t of tuningClashes(scene, bwOf)) for (const k of [t.a, t.b].map((id) => `${(links.find((q) => q.id === id) || {}).kind === 'iem' ? 'transmitter' : 'mic'}:${id}`)) w.push({ key: k, level: 'warn', text: t.text });
   for (const f of freePorts(rack)) w.push({ key: `${f.kind}:${f.id}`, level: 'info', text: `${f.name} has ${f.free} unused ${f.kind === 'combiner' ? 'input' : 'output'}${f.free === 1 ? '' : 's'}: fit a 50 ohm load on ${f.free === 1 ? 'it' : 'each'} (1 W is plenty for an IEM, 2 W gives margin).` });
   return w;
 }
@@ -238,4 +239,20 @@ export function rackLoads(scene) {
   const rack = scene && scene.rack; if (!rack) return { dummyLoads: 0, freePorts: 0, total: 0 };
   const d = (rack.antennas || []).filter((a) => a.load).length, p = freePorts(rack).reduce((n, f) => n + f.free, 0);
   return { dummyLoads: d, freePorts: p, total: d + p };
+}
+
+/**
+ * tuningClashes(scene, bwOf?) -> [{ a, b, same, text }] : pairs of mic or IEM transmitters on the same frequency or closer than their occupied bandwidths allow.
+ * bwOf(link) gives the occupied bandwidth in kHz (default 200). Two links of different kinds can still clash, since they share the air.
+ */
+export function tuningClashes(scene, bwOf) {
+  const bw = (l) => { const v = bwOf ? bwOf(l) : 200; return Number.isFinite(v) && v > 0 ? v : 200; };
+  const ls = ((scene && scene.links) || []).filter((l) => l.kind !== 'p2p' && Number.isFinite(l.freqMHz)), out = [];
+  for (let i = 0; i < ls.length; i++) for (let j = i + 1; j < ls.length; j++) {
+    const a = ls[i], b = ls[j], dk = Math.abs(a.freqMHz - b.freqMHz) * 1000, need = (bw(a) + bw(b)) / 2;
+    if (dk >= need) continue;
+    const same = dk < 0.5, nm = (l) => String(l.name || l.id);
+    out.push({ a: a.id, b: b.id, same, text: same ? `${nm(a)} and ${nm(b)} are on the same frequency (${a.freqMHz} MHz): they will interfere.` : `${nm(a)} and ${nm(b)} are ${Math.round(dk)} kHz apart, inside their ${Math.round(need)} kHz combined bandwidth: they overlap.` });
+  }
+  return out;
 }
