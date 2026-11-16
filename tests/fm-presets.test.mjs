@@ -419,7 +419,8 @@ test('G3 / 2000: deviation, windows, steps, banks, power', () => {
   assert.deepEqual(mw('sk500g3'), [10, 30]);
   assert.deepEqual(mw('sk2000'), [10, 30, 50]);
   assert.deepEqual(mw('sr2050iem'), [10, 30, 50, 100]);
-  assert.equal(FM_PRESETS['sennheiser-sr2050iem'].params.powerOptions[3].assumed, true);
+  assert.notEqual(FM_PRESETS['sennheiser-sr2050iem'].params.powerOptions[3].assumed, true);
+  assert.equal(FM_PRESETS['sennheiser-sr2050iem'].confidence.powerOptions, 'sourced');
   assert.equal(FM_PRESETS['sennheiser-skm300g3'].confidence.powerOptions, 'assumed');
   assert.equal(FM_PRESETS['sennheiser-skm500g3'].confidence.powerOptions, 'assumed');
   assert.equal(FM_PRESETS['sennheiser-sk300g3'].confidence.powerOptions, 'sourced');

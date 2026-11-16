@@ -74,7 +74,7 @@ const PWR = {
   low: { id: 'low-10mw', label: '10 mW (Low)', powerDbm: mwToDbm(10), lowIntermod: false },
   std: { id: 'std-30mw', label: '30 mW (Standard)', powerDbm: mwToDbm(30), lowIntermod: false },
   high: { id: 'high-50mw', label: '50 mW (High)', powerDbm: mwToDbm(50), lowIntermod: false },
-  xp: { id: 'xp-100mw', label: '100 mW (SR 2050XP version)', powerDbm: mwToDbm(100), lowIntermod: false, assumed: true },
+  xp: { id: 'xp-100mw', label: '100 mW (Maximum, XP versions only)', powerDbm: mwToDbm(100), lowIntermod: false },
 };
 const SRC_G3 = {
   100: ['Sennheiser EM 100 G3 manual', 'Sennheiser ew 100 G3 data sheets', 'Sennheiser SK 100 G3 / SKM 100 G3 specification'],
@@ -191,10 +191,10 @@ const SENNHEISER_G3_2000 = [
     sources: SRC_G3[2000], caveat: '10 / 30 / 50 mW. Occupied bandwidth is a Carson estimate (assumed).' }),
   senTx({ id: 'sennheiser-skp2000', model: 'SKP 2000', kind: 'plug-on', options: [PWR.low, PWR.std, PWR.high], ranges: S2000_RANGES, windowMHz: 75, freqs: 3000, chPerBank: 64, userBanks: 6, devConf: S, powerConf: S, audioKhz: 18, ppm: 15,
     sources: SRC_G3[2000], caveat: '10 / 30 / 50 mW. Occupied bandwidth is a Carson estimate (assumed).' }),
-  senTx({ id: 'sennheiser-sr2050iem', model: 'SR 2050 IEM', kind: 'IEM transmitter (dual stereo)', options: [PWR.low, PWR.std, PWR.high, PWR.xp], ranges: S2000_IEM_RANGES, windowMHz: 75, freqs: 3000, chPerBank: 32, userBanks: 6, devConf: S, powerConf: I, audioKhz: 15, ppm: 10,
+  senTx({ id: 'sennheiser-sr2050iem', model: 'SR 2050 IEM', kind: 'IEM transmitter (dual stereo)', options: [PWR.low, PWR.std, PWR.high, PWR.xp], ranges: S2000_IEM_RANGES, windowMHz: 75, freqs: 3000, chPerBank: 32, userBanks: 6, devConf: S, powerConf: S, audioKhz: 15, ppm: 10,
     extra: { mpxPilotKhz: 19, pilotDeviationKhz: 5, antennaOutput: { connector: 'BNC', impedanceOhm: 50 } },
     extraConf: { mpxPilotKhz: S, pilotDeviationKhz: S, antennaOutput: S },
-    sources: SRC_G3['2000.5'], caveat: '10 / 30 / 50 mW; the 100 mW option belongs to the SR 2050XP version and is flagged assumed. 19 kHz pilot with +-5 kHz deviation is sourced.' }),
+    sources: SRC_G3['2000.5'], caveat: 'Typical RF output power at 50 ohm, switchable: Low 10 mW, Standard 30 mW, High 50 mW, 100 mW on the SR 2050XP only. Nominal/peak deviation +-24/+-48 kHz, 19 kHz pilot with +-5 kHz deviation, +-10 ppm (SP_1266 v2.0 and 2000 IEM Specifications 10/2023, which agree). Twin transmitter: two independent stereo channels. The Gw1 range is sold as an XP version only. Occupied bandwidth is a Carson estimate (assumed).' }),
   senRx({ id: 'sennheiser-ek2000iem', model: 'EK 2000 IEM', kind: 'bodypack receiver', iem: true, uv: 4, typUv: 1.6, ranges: S2000_IEM_RANGES, windowMHz: 75, freqs: 3000, chPerBank: 32, userBanks: 6, acr: 80, im: 78, blk: 80, diversity: 'ratio', diversityConf: A,
     sources: SRC_G3['2000.5'], caveat: 'Under 4 uV (-95 dBm), typically 1.6 uV (-103 dBm) for 52 dBA S/N; the planner uses the guaranteed figure. Adaptive diversity is mapped to ratio combining (assumed).' }),
 ];
