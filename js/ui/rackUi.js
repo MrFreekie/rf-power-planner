@@ -7,6 +7,8 @@ import { linkCard, txFormFactor } from '../model/inventory.js';
 import { inventoryView } from './inventoryUi.js';
 import { addLink, assignMic, assignIem, removeExtraMic, peopleLinkOwners } from '../actions.js';
 import { setLinkFocus } from '../view/linkFocus.js';
+import { getLinkDock, subscribeLinkDock } from './linkDock.js';
+import { activeLink } from '../view/util.js';
 import { CHAIN_PRESETS } from '../model/chain-presets.js';
 import { gearPickers } from './gearUi.js';
 import {
@@ -15,6 +17,9 @@ import {
 } from '../actionsRack.js';
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+
+// Which of the selected link's inspector sections each kind of item hosts.
+const DOCK_FOR = { mic: ['link', 'tx'], transmitter: ['link', 'tx', 'chain'], receiver: ['rx', 'chain', 'chainB'], bodypack: ['rx', 'rxchain'] };
 
 export function mountRack({ container, store }) {
   container.textContent = '';
@@ -41,7 +46,14 @@ export function mountRack({ container, store }) {
   };
   const btn = (label, onClick, title) => { const b = el('button', '', label); b.type = 'button'; if (title) b.title = title; b.addEventListener('click', onClick); return b; };
 
+  let lastSel = Symbol('none');
   function render() {
+    const selNow = store.getSelection();
+    if (selNow !== lastSel) { // picking a transmitter or receiver on the plan opens its items here
+      lastSel = selNow;
+      const sc0 = store.getScene(), l0 = sc0.links.find((q) => q.tx.id === selNow || q.rx.id === selNow);
+      if (l0) for (const k of (l0.tx.id === selNow ? ['mic', 'transmitter'] : ['receiver', 'bodypack'])) open.add(`${k}:${l0.id}`);
+    }
     const scene = store.getScene(), rack = scene.rack || deriveRack(scene), sections = rackSections(scene, txFormFactor);
     out.textContent = '';
     const linkName = (id) => { const l = scene.links.find((q) => q.id === id); return l ? l.name : id; };
@@ -65,7 +77,14 @@ export function mountRack({ container, store }) {
       d.addEventListener('toggle', () => { if (d.open) open.add(key); else open.delete(key); });
       const ws = warnBy.get(key) || [], sum = el('summary', ws.some((w) => w.level === 'warn') ? 'rack-warn' : '', (ws.length ? (ws.some((w) => w.level === 'warn') ? '⚠ ' : 'ℹ ') : '') + title);
       if (['mic', 'bodypack', 'receiver', 'transmitter'].includes(key.split(':')[0])) { const lid = key.split(':')[1]; sum.addEventListener('pointerenter', () => setLinkFocus(lid)); sum.addEventListener('pointerleave', () => setLinkFocus(null)); }
-      d.append(sum); const b = el('div', 'rack-edit'); for (const w of ws) b.append(el('p', w.level === 'warn' ? 'rack-warn-text' : 'hint', w.text)); fill(b); d.append(b); return d;
+      const kind = key.split(':')[0], lid = key.split(':')[1], lk = scene.links.find((q) => q.id === lid);
+      if (lk && DOCK_FOR[kind]) sum.addEventListener('click', () => { if (!d.open) store.select((kind === 'mic' || kind === 'transmitter' ? lk.tx : lk.rx).id); }); // opening an item selects its link so the link's own fields appear in it
+      d.append(sum); const b = el('div', 'rack-edit'); for (const w of ws) b.append(el('p', w.level === 'warn' ? 'rack-warn-text' : 'hint', w.text)); fill(b);
+      if (lk && DOCK_FOR[kind] && d.open) { // the selected link's Link, Transmitter, Receiver and cable sections live here
+        const dock = getLinkDock(), act = activeLink(scene, store.getSelection());
+        if (dock && act && act.id === lid) { const host = el('div', 'rack-docked'); for (const n of DOCK_FOR[kind]) if (dock[n]) host.append(dock[n]); b.append(host); }
+      }
+      d.append(b); return d;
     };
     const props = (id, b, idx) => { const c = linkCard(scene, id); if (c) for (const i of idx) if (c.lines[i]) b.append(el('p', 'hint', c.lines[i])); };
     const owner = (id, b, which) => { // who wears or holds this link: choosing someone moves the pack onto them (the link takes their name)
@@ -79,10 +98,9 @@ export function mountRack({ container, store }) {
       })));
     };
     const gear = (id, b, part) => { const l = scene.links.find((q) => q.id === id); if (l) b.append(gearPickers(store, l, part)); };
-    const show = (id, b) => b.append(btn('Show this link', () => { const l = scene.links.find((q) => q.id === id); if (l) store.select(l.tx.id); }, 'Highlight it in the plan and open it in the inspector'));
     const editors = {
-      mic: (it, b) => { props(it.id, b, [0, 1]); owner(it.id, b, 'mic'); gear(it.id, b, 'tx'); show(it.id, b); },
-      bodypack: (it, b) => { props(it.id, b, [2]); owner(it.id, b, 'iem'); gear(it.id, b, 'rx'); show(it.id, b); },
+      mic: (it, b) => { props(it.id, b, [0, 1]); owner(it.id, b, 'mic'); gear(it.id, b, 'tx'); },
+      bodypack: (it, b) => { props(it.id, b, [2]); owner(it.id, b, 'iem'); gear(it.id, b, 'rx'); },
       antenna: (it, b) => {
         const a = rack.antennas.find((x) => x.id === it.id);
         b.append(field('Name', text('Antenna name', a.name, (v) => renameRackItem(store, 'antennas', a.id, v))));
@@ -191,7 +209,16 @@ export function mountRack({ container, store }) {
   );
   body.append(el('p', 'hint', 'Every radio item in the show. Open one to see its properties, pick its equipment and change what it is connected to; the link maths follows.'), bar, msg, status, out);
   let timer = null;
-  const queue = () => { clearTimeout(timer); timer = setTimeout(render, 30); };
-  const unsub = store.subscribe(queue); render();
-  return { render, destroy() { clearTimeout(timer); if (typeof unsub === 'function') unsub(); } };
+  let pending = false;
+  const queue = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => { // a field being typed in must keep focus: redraw when it is left
+      const a = document.activeElement;
+      if (a && a.closest && a.closest('.rack-docked') && out.contains(a)) { pending = true; return; }
+      render();
+    }, 30);
+  };
+  out.addEventListener('focusout', () => { if (pending) { pending = false; queue(); } });
+  const unsub = store.subscribe(queue), unsubDock = subscribeLinkDock(queue); render();
+  return { render, destroy() { clearTimeout(timer); if (typeof unsub === 'function') unsub(); unsubDock(); } };
 }
