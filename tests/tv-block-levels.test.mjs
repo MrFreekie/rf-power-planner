@@ -38,6 +38,25 @@ test('setTvBlockLevel respects the 70-entry cap (still allows editing existing)'
   s.update((d) => { for (let i = 0; i < 2; i++) d.tvBlockLevelsDbm['x' + i] = -80; }); // force 70 entries
   assert.equal(setTvBlockLevel(s, 40, -55), true, 'existing channel still editable');
 });
+test('70-entry cap: validateScene flags 71 entries, setTvBlockLevel refuses a new channel at 70 without touching the scene', () => {
+  const base = () => { const m = {}; for (let n = 2; n <= 60; n++) m[n] = -80; return m; }; // 59 real channels
+  const sc = createDefaultScene();
+  sc.tvBlockLevelsDbm = base(); for (let i = 0; i < 11; i++) sc.tvBlockLevelsDbm['x' + i] = -80; // 70 entries (junk keys flagged separately)
+  assert.equal(Object.keys(sc.tvBlockLevelsDbm).length, 70);
+  assert.ok(!validateScene(sc).errors.some((e) => /more than 70/.test(e)), 'exactly 70 is not over the cap');
+  sc.tvBlockLevelsDbm.x11 = -80; // 71
+  assert.ok(validateScene(sc).errors.some((e) => /more than 70 channels/.test(e)), 'over the cap is flagged');
+  // setTvBlockLevel at exactly 70 entries
+  const s = mk();
+  s.update((d) => { d.tvBlockLevelsDbm = base(); for (let i = 0; i < 11; i++) d.tvBlockLevelsDbm['x' + i] = -80; });
+  const before = JSON.stringify(s.getScene());
+  assert.equal(setTvBlockLevel(s, 61, -50), false, 'new channel beyond the cap refused');
+  assert.equal(JSON.stringify(s.getScene()), before, 'scene unchanged');
+  assert.equal(Object.keys(s.getScene().tvBlockLevelsDbm).length, 70);
+  assert.equal(setTvBlockLevel(s, 60, -55), true, 'existing channel still editable');
+  assert.equal(setTvBlockLevel(s, 60, null), true, 'removing still works');
+  assert.equal(setTvBlockLevel(s, 61, -50), true, 'room freed, add accepted');
+});
 test('clearTvBlockLevels clears in one undo step', () => {
   const s = mk(); assert.equal(clearTvBlockLevels(s), false);
   setTvBlockLevel(s, 21, -60); setTvBlockLevel(s, 22, -61);

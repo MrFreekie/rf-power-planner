@@ -122,9 +122,28 @@ function reflectorMap(list) {
   return reflCache.map;
 }
 
-function ringAlpha(cfg, f) {
-  const base = cfg.mode === 'faint' ? 0.4 : cfg.mode === 'wall' ? 0.75 : 0.85;
-  return base * (1 - f * f) * Math.min(1, f * 8 + 0.25);
+function ringAlpha(cfg, f, dark = false) {
+  const base = cfg.mode === 'faint' ? (dark ? 0.7 : 0.4) : cfg.mode === 'wall' ? 0.75 : 0.85;
+  const fade = dark ? 1 - f * f * f : 1 - f * f; // dark theme: keep the ring bright for longer so brief sources (speedlight) are seen
+  return base * fade * Math.min(1, f * 8 + 0.25);
+}
+const hexLum = (c) => {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(c || '').trim());
+  if (!m) return 1;
+  const v = parseInt(m[1], 16);
+  return (0.2126 * (v >> 16) + 0.7152 * ((v >> 8) & 255) + 0.0722 * (v & 255)) / 255;
+};
+/** True when the theme tokens describe a dark paper (light theme stays exactly as before). */
+export const isDarkTheme = (th) => hexLum(th && th.paper) < 0.4;
+/** noiseRingPaint(th, cfg, f) -> { color, alpha, width, haloAlpha }: dark theme uses the full ink token, a thicker line and stronger alpha. */
+export function noiseRingPaint(th, cfg, f) {
+  const dark = isDarkTheme(th);
+  return {
+    color: dark ? (th.ink || th.inkSoft) : (th.inkSoft || th.ink),
+    alpha: ringAlpha(cfg, f, dark),
+    width: dark ? NOISE_RING_STYLE.width + 0.6 : NOISE_RING_STYLE.width,
+    haloAlpha: dark ? 0.6 : NOISE_RING_STYLE.haloAlpha,
+  };
 }
 
 function stadium(ctx, a, b, d) {
@@ -249,13 +268,14 @@ export function drawNoiseWaves(ctx, th, vp, scene, w, h, rip, result = null) {
     drawn++;
     for (const r of rings) {
       const rad = Math.max(2, r.f * reachPx);
-      ctx.globalAlpha = isQuiet ? 0.18 : reduced ? 0.14 : ringAlpha(cfg, r.f);
+      const pt = noiseRingPaint(th, cfg, r.f), dk = isDarkTheme(th);
+      ctx.globalAlpha = isQuiet ? (dk ? 0.3 : 0.18) : reduced ? (dk ? 0.25 : 0.14) : pt.alpha;
       if (ctx.globalAlpha <= 0.005) continue;
       const path = () => { if (wall) stadium(ctx, a, b, Math.max(3, rad)); else { ctx.beginPath(); ctx.arc(c.x, c.y, rad, 0, Math.PI * 2); } };
       // a paper-coloured halo under the dashes keeps them readable over the denser, darker link rings; the dashes stay greyscale
       const al = ctx.globalAlpha;
-      ctx.setLineDash([]); ctx.strokeStyle = th.paper || '#ffffff'; ctx.lineWidth = NOISE_RING_STYLE.haloWidth; ctx.globalAlpha = al * NOISE_RING_STYLE.haloAlpha; path(); ctx.stroke();
-      ctx.setLineDash(isQuiet ? NOISE_RING_STYLE.dotted : NOISE_RING_STYLE.dash); ctx.strokeStyle = th.inkSoft || th.ink; ctx.lineWidth = NOISE_RING_STYLE.width; ctx.globalAlpha = al; path(); ctx.stroke();
+      ctx.setLineDash([]); ctx.strokeStyle = th.paper || '#ffffff'; ctx.lineWidth = NOISE_RING_STYLE.haloWidth + (dk ? 1 : 0); ctx.globalAlpha = Math.min(1, al * pt.haloAlpha); path(); ctx.stroke();
+      ctx.setLineDash(isQuiet ? NOISE_RING_STYLE.dotted : NOISE_RING_STYLE.dash); ctx.strokeStyle = pt.color; ctx.lineWidth = pt.width; ctx.globalAlpha = al; path(); ctx.stroke();
     }
   }
   ctx.restore();

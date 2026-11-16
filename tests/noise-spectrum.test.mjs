@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { noiseActivity, noiseBursts, classifyNoiseWave, keyedState, NOISE_FLASH_S } from '../js/view/noiseWaves.js';
-import { drawNoiseBurst } from '../js/view/spectra.js';
+import { noiseActivity, noiseBursts, classifyNoiseWave, keyedState, NOISE_FLASH_S, noiseRingPaint, isDarkTheme, NOISE_RING_STYLE } from '../js/view/noiseWaves.js';
+import { drawNoiseBurst, stepSpectraClock, setSpectraRunning, FRAME_MS } from '../js/view/spectra.js';
 import { createNoiseSource } from '../js/model/noise-sources.js';
 
 const src = (kind, o = {}) => createNoiseSource(kind, o);
@@ -99,14 +99,38 @@ test('noiseIsOn and drawNoiseBurst: on or off follows source activity, not the s
   assert.match(calls.filter((c) => c[0] === 'fillText' || c[0] === 'strokeText').map((c) => c[1][0]).join('|'), /noise source on: \+0\.1 dB \(LED\)/);
 });
 
-test('spectra: pause freezes the noise clock; pause button has a changing label and no aria-pressed', () => {
+test('spectra clock: Pause freezes noiseT and t, Play resumes without a time jump', () => {
+  let wave = 100; const clk = () => wave; // times in ms like performance.now()
+  const S = { t: 0, noiseT: 100, lastNow: 0, lastFrame: 0, running: true };
+  wave = 101; assert.equal(stepSpectraClock(S, 1000, clk), true);
+  assert.equal(S.noiseT, 101); assert.ok(Math.abs(S.t - 1) < 1e-9);
+  assert.equal(stepSpectraClock(S, 1000 + FRAME_MS / 2, clk), false, 'faster than the frame rate: no step');
+  setSpectraRunning(S, false, 2000);
+  wave = 105; assert.equal(stepSpectraClock(S, 5000, clk), false);
+  assert.equal(S.noiseT, 101, 'noise state frozen while paused'); assert.ok(Math.abs(S.t - 1) < 1e-9);
+  setSpectraRunning(S, true, 9000); wave = 109;
+  assert.equal(stepSpectraClock(S, 9100, clk), true);
+  assert.equal(S.noiseT, 109); assert.ok(Math.abs(S.t - 1.1) < 1e-9, 'paused time is not counted');
+});
+
+test('spectra: pause button has a changing label and no aria-pressed', () => {
   const code = readFileSync(new URL('../js/view/spectra.js', import.meta.url), 'utf8');
   assert.match(code, /noiseBursts\(scene, r, noiseT\)/);
-  assert.doesNotMatch(code, /noiseBursts\(scene, r, noiseClockNow\(\)\)/);
-  assert.match(code, /noiseT = noiseClockNow\(\); invalidateAll\(\)/, 'refreshed inside tick only');
-  assert.doesNotMatch(code, /lastNow = lastNow/);
   assert.doesNotMatch(code, /btn-spectra-pause[^\n]*aria-pressed/);
   assert.doesNotMatch(code, /pauseBtn\.setAttribute\('aria-pressed'/);
   const css = readFileSync(new URL('../css/style.css', import.meta.url), 'utf8');
   assert.match(css, /#toolbar > #btn-spectra-pause/);
+});
+
+test('noise rings: dark theme draws brighter, thicker, stronger rings; light theme unchanged', () => {
+  const light = { paper: '#fbf9f3', ink: '#1d2733', inkSoft: '#5b6673' }, dark = { paper: '#14181d', ink: '#e8e6df', inkSoft: '#a9b3be' };
+  assert.equal(isDarkTheme(dark), true); assert.equal(isDarkTheme(light), false);
+  const pulse = classifyNoiseWave(src('speedlight-flash')), faint = classifyNoiseWave(src('wifi-ap'));
+  assert.equal(pulse.mode, 'pulse');
+  for (const cfg of [pulse, faint]) for (const f of [0.1, 0.5, 0.8]) {
+    const l = noiseRingPaint(light, cfg, f), d = noiseRingPaint(dark, cfg, f);
+    assert.equal(l.color, light.inkSoft); assert.equal(l.width, NOISE_RING_STYLE.width); assert.equal(l.haloAlpha, NOISE_RING_STYLE.haloAlpha);
+    assert.equal(d.color, dark.ink); assert.ok(d.width > l.width); assert.ok(d.alpha >= l.alpha, `alpha at f=${f}`);
+  }
+  assert.ok(noiseRingPaint(dark, pulse, 0.6).alpha > 0.4, 'a mid-life speedlight ring stays clearly visible');
 });

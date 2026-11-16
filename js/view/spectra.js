@@ -31,6 +31,13 @@ export const SPECTRA = Object.freeze([
 ]);
 export const TABS_BELOW_PX = 640; // the spectra container is narrower than this: show one spectrum at a time under tabs
 export const FRAME_MS = 50; // about 20 fps for the animated views
+/** Pure animation clock for the spectra loop: S = { t, noiseT, lastNow, lastFrame, running }. Returns true when a frame was taken. noiseT only moves here, so Pause freezes it. */
+export function stepSpectraClock(S, n, noiseClock) {
+  if (!S.running || n - S.lastFrame < FRAME_MS) return false;
+  S.t += (n - S.lastNow) / 1000; S.lastNow = n; S.lastFrame = n; S.noiseT = noiseClock();
+  return true;
+}
+export function setSpectraRunning(S, on, n) { S.running = !!on; S.lastNow = n; }
 
 // ---- pure helpers ----------------------------------------------------------------------------
 
@@ -522,8 +529,8 @@ export function mountSpectra({ container, store, now = () => performance.now() }
   import('../model/spectrum-views.js').then((m) => { model = m; invalidateAll(); }).catch((e) => { console.warn('spectrum model missing', e); invalidateAll(); });
   import('../mpxTracker.js').then((m) => { mpxTracker = m.mpx || m.default; mpxTracker.subscribe(() => panels.mpx.host && panels.mpx.host.invalidate()); invalidateAll(); }).catch(() => {});
 
-  let t = 0, lastNow = now(), running = !reduce, loop = 0, lastFrame = 0;
-  let noiseT = noiseClockNow(); // noise wave time: refreshed only inside tick (like t), so Pause freezes the on/off state of the noise sources
+  const S = { t: 0, lastNow: now(), lastFrame: 0, running: !reduce, noiseT: 0 }; let loop = 0;
+  let t = 0, noiseT = S.noiseT = noiseClockNow(); // noise wave time: refreshed only inside tick (like t), so Pause freezes the on/off state of the noise sources
   const ctxInfo = () => {
     const scene = store.getScene(), link = activeLink(scene, store.getSelection());
     const r = link ? solveCached(scene, link) : null;
@@ -644,20 +651,19 @@ export function mountSpectra({ container, store, now = () => performance.now() }
 
   function tick(ts) {
     loop = 0;
-    if (!running) return;
-    const n = now();
-    if (n - lastFrame >= FRAME_MS) { t += (n - lastNow) / 1000; lastNow = n; lastFrame = n; noiseT = noiseClockNow(); invalidateAll(); }
+    if (!S.running) return;
+    if (stepSpectraClock(S, now(), noiseClockNow)) { t = S.t; noiseT = S.noiseT; invalidateAll(); }
     loop = requestAnimationFrame(tick);
   }
   function setRunning(on) {
-    running = on; lastNow = now();
+    setSpectraRunning(S, on, now());
     pauseBtn.textContent = pauseLabel(on);
     if (on && !loop && !document.hidden) loop = requestAnimationFrame(tick);
     if (!on && loop) { cancelAnimationFrame(loop); loop = 0; }
     invalidateAll();
   }
-  pauseBtn.addEventListener('click', () => setRunning(!running));
-  const onVis = () => { if (document.hidden) { if (loop) { cancelAnimationFrame(loop); loop = 0; } } else if (running && !loop) { lastNow = now(); loop = requestAnimationFrame(tick); } };
+  pauseBtn.addEventListener('click', () => setRunning(!S.running));
+  const onVis = () => { if (document.hidden) { if (loop) { cancelAnimationFrame(loop); loop = 0; } } else if (S.running && !loop) { S.lastNow = now(); loop = requestAnimationFrame(tick); } };
   document.addEventListener('visibilitychange', onVis);
 
   const ro = typeof ResizeObserver === 'function' ? new ResizeObserver((es) => {
@@ -668,9 +674,9 @@ export function mountSpectra({ container, store, now = () => performance.now() }
   if (ro) ro.observe(container);
   syncTabs();
   const unsub = [store.subscribe(() => invalidateAll())];
-  if (running) loop = requestAnimationFrame(tick);
+  if (S.running) loop = requestAnimationFrame(tick);
   return {
     setRunning, invalidate: invalidateAll, panels, zoom, openZoom,
-    destroy() { running = false; if (loop) cancelAnimationFrame(loop); document.removeEventListener('visibilitychange', onVis); if (ro) ro.disconnect(); unsub.forEach((u) => u && u()); zoom.destroy(); zoomSliders.destroy(); sourceBar.destroy(); pauseBtn.remove(); for (const sp of SPECTRA) panels[sp.id].host.destroy(); container.textContent = ''; },
+    destroy() { S.running = false; if (loop) cancelAnimationFrame(loop); document.removeEventListener('visibilitychange', onVis); if (ro) ro.disconnect(); unsub.forEach((u) => u && u()); zoom.destroy(); zoomSliders.destroy(); sourceBar.destroy(); pauseBtn.remove(); for (const sp of SPECTRA) panels[sp.id].host.destroy(); container.textContent = ''; },
   };
 }
