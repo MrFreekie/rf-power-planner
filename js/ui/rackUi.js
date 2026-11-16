@@ -1,8 +1,9 @@
 // Radio items panel: every mic, receive antenna, splitter, receiver, IEM transmitter, combiner and transmit antenna in categories,
 // each item expandable to show its details and edit its connections. Edits go through js/actionsRack.js (one undo step each).
-import { rackSections, deriveRack, rackWarnings, rackLoads } from '../model/rack.js';
+import { rackSections, deriveRack, rackWarnings, rackLoads, channelRoute } from '../model/rack.js';
+import { solveCached } from '../view/util.js';
 import { CABLES } from '../model/library.js';
-import { linkCard } from '../model/inventory.js';
+import { linkCard, txFormFactor } from '../model/inventory.js';
 import { inventoryView } from './inventoryUi.js';
 import { addLink, assignMic, assignIem, removeExtraMic, peopleLinkOwners } from '../actions.js';
 import { setLinkFocus } from '../view/linkFocus.js';
@@ -10,7 +11,7 @@ import { CHAIN_PRESETS } from '../model/chain-presets.js';
 import { gearPickers } from './gearUi.js';
 import {
   renameRackItem, addRackAntenna, addRackSplitter, setSplitterType, setSplitterInput, connectChannel, moveChannel, removeRackItem, setRackAntenna,
-  addRackCombiner, setCombiner, setSplitterPorts, addAntennaChainItem, setAntennaChainItem, removeAntennaChainItem, setAntennaZones, connectTxChannel, moveTxChannel, removeCombiner,
+  addRackCombiner, setCombiner, setSplitterPorts, setRxBias, addAntennaChainItem, setAntennaChainItem, removeAntennaChainItem, setAntennaZones, connectTxChannel, moveTxChannel, removeCombiner,
 } from '../actionsRack.js';
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
@@ -18,7 +19,7 @@ const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls)
 export function mountRack({ container, store }) {
   container.textContent = '';
   const summary = el('summary', container.tagName === 'DETAILS' ? '' : 'ob-summary', 'Radio items');
-  const body = el('div', 'ob-body'), out = el('div', 'rack-out'), pack = el('details', 'inv-pack');
+  const body = el('div', 'ob-body'), out = el('div', 'rack-out');
   out.setAttribute('aria-live', 'polite');
   container.append(summary, body);
   if (container.tagName === 'DETAILS') container.open = true;
@@ -41,13 +42,20 @@ export function mountRack({ container, store }) {
   const btn = (label, onClick, title) => { const b = el('button', '', label); b.type = 'button'; if (title) b.title = title; b.addEventListener('click', onClick); return b; };
 
   function render() {
-    const scene = store.getScene(), rack = scene.rack || deriveRack(scene), sections = rackSections(scene);
+    const scene = store.getScene(), rack = scene.rack || deriveRack(scene), sections = rackSections(scene, txFormFactor);
     out.textContent = '';
+    const linkName = (id) => { const l = scene.links.find((q) => q.id === id); return l ? l.name : id; };
     const warns = rackWarnings(scene), warnBy = new Map();
+    const dcOf = new Map(); // bias warnings from the link maths, shown on the receiver and on the antennas that feed it
+    for (const l of scene.links) if (l.kind === 'mic') { const r = solveCached(scene, l); const ws = ((r && r.warnings) || []).filter((t) => /bias|DC/i.test(t)); if (ws.length) dcOf.set(l.id, ws); }
+    for (const [lid, ws] of dcOf) {
+      const m = (rack.receivers || []).flatMap((r) => r.channels).find((c) => c.linkId === lid); if (!m) continue;
+      const route = channelRoute(rack, m), keys = [`receiver:${lid}`, ...[route.antA, route.antB].filter(Boolean).map((a) => `antenna:${a.id}`)];
+      for (const k of new Set(keys)) for (const t of new Set(ws)) warns.push({ key: k, level: 'warn', text: `${linkName(lid)}: ${t}` });
+    }
     for (const w of warns) warnBy.set(w.key, [...(warnBy.get(w.key) || []), w]);
     const portOpts = [['', 'As many as used'], ...[2, 3, 4, 5, 6, 8, 12, 16].map((n) => [String(n), `${n} ports`])];
     const antOpts = (role) => [['', 'No antenna'], ...rack.antennas.filter((a) => (a.role === 'tx') === (role === 'tx')).map((a) => [a.id, a.name])];
-    const linkName = (id) => { const l = scene.links.find((q) => q.id === id); return l ? l.name : id; };
     const find = {
       receiver: (id) => { for (const r of rack.receivers) { const c = r.channels.find((x) => x.linkId === id); if (c) return { r, c }; } return null; },
       transmitter: (id) => { for (const r of rack.transmitters || []) { const c = r.channels.find((x) => x.linkId === id); if (c) return { r, c }; } return null; },
@@ -111,6 +119,11 @@ export function mountRack({ container, store }) {
       receiver: (it, b) => {
         const m = find.receiver(it.id); if (!m) return;
         props(it.id, b, [2, 3, 4]); gear(it.id, b, 'rx');
+        const lk = scene.links.find((q) => q.id === it.id), on = lk.rx.antennaBiasV > 0, bias = el('input'); bias.type = 'checkbox'; bias.checked = on; bias.setAttribute('aria-label', 'Antenna bias for ' + lk.name);
+        bias.addEventListener('change', () => setRxBias(store, it.id, { on: bias.checked }));
+        const bl = el('label', 'inv-field'); bl.append(bias, el('span', '', ' Supply antenna bias from this receiver (powers a booster or active antenna up the cable)')); b.append(bl);
+        if (on) b.append(field('Bias voltage (V)', num('Bias voltage', lk.rx.antennaBiasV, (v) => setRxBias(store, it.id, { volts: v }), 1, 48)), field('Bias current limit (mA, 0 = not stated)', num('Bias current', lk.rx.antennaBiasMa || 0, (v) => setRxBias(store, it.id, { ma: v }), 0, 1000)));
+        else b.append(el('p', 'hint', 'Or put a bias tee in the antenna cable run. The list warns when something on the line needs bias and none reaches it.'));
         const recvOpts = [...rack.receivers.map((r) => [r.id, r.name]), ['new', 'A new receiver']];
         b.append(field('Receiver', select('Receiver for ' + linkName(it.id), recvOpts, m.r.id, (v) => moveChannel(store, it.id, v))),
           field('Receiver name', text('Receiver name', m.r.name, (v) => renameRackItem(store, 'receivers', m.r.id, v))),
@@ -152,13 +165,6 @@ export function mountRack({ container, store }) {
     if (!sections.length) out.append(el('p', 'hint', 'No radio items yet.'));
     const iv = inventoryView(scene, store.getSelection());
     summary.textContent = `Radio items (${iv.summary})`;
-    pack.textContent = ''; pack.append(el('summary', '', 'What to pack'));
-    const list = (title, items, fmt) => { if (!items.length) return; pack.append(el('h5', '', title)); const ul = el('ul'); for (const it of items) ul.append(el('li', '', fmt(it))); pack.append(ul); };
-    list('Transmitters', iv.totals.transmitters, (x) => `${x.count} x ${x.label}`);
-    list('Receivers and bodypacks', iv.totals.receivers, (x) => `${x.count} x ${x.label}`);
-    list('Antennas (body-worn excluded)', iv.totals.antennas, (x) => `${x.count} x ${x.label}`);
-    if (iv.totals.loads && iv.totals.loads.total) list('Terminations', [iv.totals.loads], (x) => `${x.total} x 50 ohm load, 1 W or more (${x.dummyLoads} dummy load${x.dummyLoads === 1 ? '' : 's'} for transmitters, ${x.freePorts} for unused splitter or combiner ports)`);
-    list('Cables', iv.totals.cables, (x) => `${x.count} x ${x.label}, ${x.lengthM} m in total`);
     const nWarn = warns.filter((w) => w.level === 'warn').length, loads = rackLoads(scene);
     status.textContent = [nWarn ? `⚠ ${nWarn} warning${nWarn === 1 ? '' : 's'}: open the marked items.` : '', loads.total ? `${loads.total} x 50 ohm load to pack.` : ''].filter(Boolean).join(' ');
   }
@@ -178,7 +184,7 @@ export function mountRack({ container, store }) {
     btn('Add Rx antenna', () => addRackAntenna(store)), btn('Add splitter', () => addRackSplitter(store)),
     btn('Add Tx antenna', () => addRackAntenna(store, { role: 'tx' })), btn('Add combiner', () => addRackCombiner(store)),
   );
-  body.append(el('p', 'hint', 'Every radio item in the show. Open one to see its properties, pick its equipment and change what it is connected to; the link maths follows.'), bar, msg, status, out, pack);
+  body.append(el('p', 'hint', 'Every radio item in the show. Open one to see its properties, pick its equipment and change what it is connected to; the link maths follows.'), bar, msg, status, out);
   let timer = null;
   const queue = () => { clearTimeout(timer); timer = setTimeout(render, 30); };
   const unsub = store.subscribe(queue); render();

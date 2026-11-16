@@ -32,6 +32,13 @@ export function rxDeviceName(link) {
   return label || `Generic ${link && link.kind === 'iem' ? 'bodypack' : 'receiver'}`;
 }
 
+/** Form factor of a transmitter from its model: 'handheld', 'bodypack', 'plug-on', or 'other' when no model is chosen (a generic transmitter is not guessed). */
+export function txFormFactor(link) {
+  const id = link && link.tx && link.tx.fmPreset, p = id && FM_PRESETS[id];
+  if (!p) return 'other';
+  return /handheld/i.test(p.label) ? 'handheld' : /plug-?on/i.test(p.label) ? 'plug-on' : /bodypack/i.test(p.label) ? 'bodypack' : 'other';
+}
+
 /** Antenna name from the library; a tx that is a handheld or bodypack has its body as the antenna. */
 export function antennaName(ant) {
   if (!ant) return 'None';

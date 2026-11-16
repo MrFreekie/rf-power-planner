@@ -148,3 +148,27 @@ test('a mic and an IEM link can be given to another person and taken off them', 
   assert.ok(assignMic(s, p2.id, null));
   assert.equal(peopleLinkOwners(s.getScene()).has(m1), false);
 });
+
+import { setRxBias } from '../js/actionsRack.js';
+test('an LNA up the antenna cable warns until the receiver supplies bias, or a bias tee is added', () => {
+  const s = mk(); adoptRack(s); const m = mics(s)[0], ant = s.getScene().rack.antennas[0];
+  addAntennaChainItem(s, ant.id, { presetId: 'lna-20' });
+  const dc = () => solveLink(s.getScene(), mics(s)[0]).warnings.filter((t) => /bias/i.test(t));
+  assert.ok(dc().length, 'bias needed, none supplied');
+  setRxBias(s, m.id, { on: true, volts: 12 });
+  assert.equal(dc().length, 0); assert.equal(mics(s)[0].rx.antennaBiasV, 12);
+  setRxBias(s, m.id, { on: false }); assert.ok(dc().length);
+  addAntennaChainItem(s, ant.id, { presetId: 'biastee' });
+  assert.equal(dc().length, 0, 'a bias tee in the run powers the LNA');
+});
+
+import { txFormFactor } from '../js/model/inventory.js';
+import { setTxFmPreset } from '../js/actions.js';
+test('microphones are split by form factor when a model is chosen', () => {
+  const s = mk(), [a, b] = mics(s);
+  setTxFmPreset(s, a.id, 'sennheiser-skm5200ii'); setTxFmPreset(s, b.id, 'sennheiser-skp2000');
+  assert.equal(txFormFactor(mics(s)[0]), 'handheld'); assert.equal(txFormFactor(mics(s)[1]), 'plug-on');
+  const keys = rackSections(s.getScene(), txFormFactor).map((x) => x.key);
+  assert.ok(keys.includes('mics-handheld') && keys.includes('mics-plug-on'));
+  assert.ok(rackSections(s.getScene()).some((x) => x.key === 'mics'));
+});

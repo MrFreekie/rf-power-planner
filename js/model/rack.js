@@ -157,9 +157,10 @@ export function validateRack(scene) {
 
 /**
  * rackSections(scene) -> the radio items in categories, as plain data for the list (works on scene.rack or, without one, on deriveRack(scene)):
+ * formOf(link) -> 'handheld' | 'bodypack' | 'plug-on' | other: splits the microphones into one category each (omit it for a single list).
  *   [{ key, title, items:[{ id, kind, text }] }] with kinds mic, antenna, splitter, receiver (one item per channel), iem, txantenna, combiner, transmitter (per channel).
  */
-export function rackSections(scene) {
+export function rackSections(scene, formOf) {
   const rack = scene.rack || deriveRack(scene), links = scene.links || [];
   const nameOf = (id) => { const l = links.find((q) => q.id === id); return l ? String(l.name || l.id) : '?'; };
   const an = (id) => { const a = (rack.antennas || []).find((x) => x.id === id); return a ? a.name : 'no antenna'; };
@@ -167,7 +168,12 @@ export function rackSections(scene) {
   const sp = (id) => (rack.splitters || []).find((x) => x.id === id), cb = (id) => (rack.combiners || []).find((x) => x.id === id);
   const sections = [];
   const mic = links.filter((l) => l.kind === 'mic');
-  if (mic.length) sections.push({ key: 'mics', title: 'Microphones', items: mic.map((l) => ({ id: l.id, kind: 'mic', text: String(l.name || l.id) })) });
+  const micItems = (list) => list.map((l) => ({ id: l.id, kind: 'mic', text: String(l.name || l.id) }));
+  if (mic.length && typeof formOf !== 'function') sections.push({ key: 'mics', title: 'Microphones', items: micItems(mic) });
+  else for (const [f, title] of [['handheld', 'Handheld microphones'], ['bodypack', 'Bodypack transmitters'], ['plug-on', 'Plug-on transmitters'], ['other', 'Other microphones (no model chosen)']]) {
+    const group = mic.filter((l) => (['handheld', 'bodypack', 'plug-on'].includes(formOf(l)) ? formOf(l) : 'other') === f);
+    if (group.length) sections.push({ key: `mics-${f}`, title, items: micItems(group) });
+  }
   if (rxAnts.length) sections.push({ key: 'rxant', title: 'Receive antennas', items: rxAnts.map((a) => {
     const to = [];
     for (const s of rack.splitters || []) { if (s.antA === a.id) to.push(`${s.name} A`); if (s.antB === a.id) to.push(`${s.name} B`); }

@@ -194,3 +194,13 @@ export const setAntennaZones = (store, antennaId, zoneIds) => store.update((d) =
   const a = adopt(d).antennas.find((x) => x.id === antennaId); if (!a) return;
   const ok = new Set((d.zones || []).map((z) => z.id)); a.zones = [...new Set(zoneIds)].filter((z) => ok.has(z));
 });
+
+/** setRxBias(store, linkId, { on, volts?, ma? }): the receiver puts DC on its antenna input (rx.antennaBiasV, 0 = off) so a booster or active antenna up the cable is powered. */
+export function setRxBias(store, linkId, { on, volts, ma } = {}) {
+  return store.update((d) => {
+    const l = d.links.find((q) => q.id === linkId); if (!l || l.kind === 'iem') return;
+    const v = Number.isFinite(Number(volts)) && Number(volts) > 0 ? Math.min(Number(volts), 48) : (l.rx.antennaBiasV > 0 ? l.rx.antennaBiasV : 12);
+    if (on !== undefined) l.rx.antennaBiasV = on ? v : 0; else if (volts !== undefined && l.rx.antennaBiasV > 0) l.rx.antennaBiasV = v;
+    if (ma !== undefined) { const m = Math.max(0, Math.min(1000, Number(ma) || 0)); if (m > 0) l.rx.antennaBiasMa = m; else delete l.rx.antennaBiasMa; }
+  });
+}
