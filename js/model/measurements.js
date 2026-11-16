@@ -94,7 +94,7 @@ function solveSmall(A, b) {
   for (let c = 0; c < n; c++) {
     let piv = c;
     for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[piv][c])) piv = r;
-    if (Math.abs(M[piv][c]) < 0.05 * scale[c]) return null; // the material is almost a combination of the others: cannot be told apart
+    if (Math.abs(M[piv][c]) < 0.15 * scale[c]) return null; // the material is almost a combination of the others: cannot be told apart
     [M[c], M[piv]] = [M[piv], M[c]];
     for (let r = c + 1; r < n; r++) { const f = M[r][c] / M[c][c]; for (let k = c; k <= n; k++) M[r][k] -= f * M[c][k]; }
   }
@@ -138,7 +138,11 @@ export function suggestCalibration(scene) {
   // distinct geometry: the spread of the distances between the fixed transmitter and the measured receiver positions
   const dists = base.points.map((p) => { const l = linkOf(scene, p.linkId); return Math.hypot(p.x - l.tx.pos.x, p.y - l.tx.pos.y, p.z - l.tx.pos.z); });
   const spread = Math.max(...dists) - Math.min(...dists), meanDist = dists.reduce((a, b) => a + b, 0) / dists.length;
-  const crossings = base.points.map((p) => directCrossings(solveAt(scene, linkOf(scene, p.linkId), p)));
+  // one solve per reading: wall crossings, crossed materials and polarisation loss are all read from it
+  const solved = base.points.map((p) => solveAt(scene, linkOf(scene, p.linkId), p));
+  const crossings = solved.map(directCrossings);
+  const matLists = solved.map(directMaterials);
+  const polMatters = solved.some((r) => r.polarisation && r.polarisation.lossDb >= 3);
 
   const cand = (id, label, field, current, fitted, applicable, reason, knownAfterRms) => {
     const lim = CALIBRATION_FIELDS[field], v = Math.min(lim.max, Math.max(lim.min, fitted));
@@ -153,15 +157,27 @@ export function suggestCalibration(scene) {
 
   // 2) wall loss: closed form from the crossing counts of the points that cross a wall
   const adjNow = finite(env.wallLossAdjustDb) ? env.wallLossAdjustDb : 0;
-  const k2 = crossings.reduce((a, k) => a + k * k, 0);
+  // walls whose material has its own per-material figure do not take the single figure, so they are not counted here
+  const ovr = env.wallLossAdjustByMaterialDb && typeof env.wallLossAdjustByMaterialDb === 'object' ? env.wallLossAdjustByMaterialDb : null;
+  const hasOvr = (m) => !!ovr && Number.isFinite(ovr[m]) && Object.prototype.hasOwnProperty.call(ovr, m);
+  const singleCross = crossings.map((k, i) => (ovr && Object.keys(ovr).length ? matLists[i].filter((m) => !hasOvr(m)).length : k));
+  const k2 = singleCross.reduce((a, k) => a + k * k, 0);
   if (k2 > 0) {
-    const kr = crossings.reduce((a, k, i) => a + k * (base.points[i].deltaDb), 0);
+    const kr = singleCross.reduce((a, k, i) => a + k * (base.points[i].deltaDb), 0);
     cand('wall-loss', 'Extra loss per wall crossed', 'environment.wallLossAdjustDb', adjNow, adjNow - kr / k2, true);
   } else cand('wall-loss', 'Extra loss per wall crossed', 'environment.wallLossAdjustDb', adjNow, adjNow, false, 'no measured path crosses a wall');
 
+  // 3) cross-polar floor: only matters where the antennas are cross-polarised (computed before 2b, which must beat every simpler candidate)
+  const xpdNow = finite(env.xpdDb) ? env.xpdDb : DEFAULT_XPD_DB;
+  if (polMatters) {
+    const lim = CALIBRATION_FIELDS['environment.xpdDb'];
+    const fit = minimise((v) => rmsOf(withEnv(scene, 'xpdDb', v)).rmsDb, lim.min, lim.max);
+    cand('cross-polar', 'Cross-polar floor', 'environment.xpdDb', xpdNow, fit.x, true, undefined, fit.f);
+  } else cand('cross-polar', 'Cross-polar floor', 'environment.xpdDb', xpdNow, xpdNow, false, 'the antennas are not cross-polarised on any measured path');
+
   // 2b) wall loss per wall material: only when enough readings cross each of at least two materials, and they are not always crossed together
   const byMatNow = env.wallLossAdjustByMaterialDb && typeof env.wallLossAdjustByMaterialDb === 'object' ? env.wallLossAdjustByMaterialDb : {};
-  const matCounts = base.points.map((p) => { const c = {}; for (const m of directMaterials(solveAt(scene, linkOf(scene, p.linkId), p))) c[m] = (c[m] || 0) + 1; return c; });
+  const matCounts = matLists.map((list) => { const c = {}; for (const m of list) c[m] = (c[m] || 0) + 1; return c; });
   const readingsBy = {};
   matCounts.forEach((c) => { for (const m of Object.keys(c)) readingsBy[m] = (readingsBy[m] || 0) + 1; });
   const eligible = Object.keys(readingsBy).filter((m) => readingsBy[m] >= MIN_READINGS_PER_MATERIAL).sort();
@@ -182,7 +198,7 @@ export function suggestCalibration(scene) {
     else {
       const x = solveSmall(A, bv);
       if (!x) wmReason = 'the walls of different materials are always crossed together, so their losses cannot be told apart';
-      else wmFit = { x, perUsed, dropped: base.n - used.length };
+      else wmFit = { x, perUsed, dropped: base.points.filter((_, i) => !used.includes(i) && Object.keys(matCounts[i]).length > 0).length }; // only readings whose wall material is under-measured; readings crossing no wall are not "left out"
     }
   }
   if (wmFit) {
@@ -193,25 +209,17 @@ export function suggestCalibration(scene) {
     });
     const merged = { ...byMatNow, ...fitted };
     const after = rmsOf(withEnv(scene, 'wallLossAdjustByMaterialDb', merged)).rmsDb; // verified by solving again
-    const single = out.candidates.find((c) => c.id === 'wall-loss');
-    const gain = (single && single.applicable ? single.afterRmsDb : base.rmsDb) - after; // must beat the single figure, or it is overfitting
-    if (gain < NEEDED_IMPROVEMENT_DB) wmNo('no better than one figure for all walls, so the single figure is kept (a per-material fit would overfit)');
+    const others = out.candidates.filter((c) => c.applicable).map((c) => c.afterRmsDb); // body loss, single wall figure, cross-polar
+    const otherBest = others.length ? Math.min(...others) : base.rmsDb;
+    const gain = otherBest - after; // must beat the best simpler candidate, or it is overfitting
+    if (gain < NEEDED_IMPROVEMENT_DB || otherBest <= after * AMBIGUOUS_RATIO) wmNo('no better than one figure for all walls, body loss or the cross-polar floor, so the simpler one is kept (a per-material fit would overfit)');
     else {
       const low = rows.some((r) => r.readings < CONFIDENT_READINGS_PER_MATERIAL);
       out.candidates.push({ id: wmId, label: wmLabel, field: wmField, current: { ...byMatNow }, fitted: merged, byMaterial: rows, afterRmsDb: after, improvementDb: base.rmsDb - after, applicable: true, confidence: low ? 'low' : 'ok', readingsPerMaterial: wmFit.perUsed, ignoredReadings: wmFit.dropped });
       if (low) out.cautions.push(`Per-material wall figures rest on few readings (under ${CONFIDENT_READINGS_PER_MATERIAL} per material): treat them as low confidence and walk more paths through each wall type.`);
-      if (wmFit.dropped > 0) out.cautions.push(`${wmFit.dropped} reading${wmFit.dropped === 1 ? '' : 's'} (no wall crossed, or a wall material with under ${MIN_READINGS_PER_MATERIAL} readings) left out of the per-material fit.`);
+      if (wmFit.dropped > 0) out.cautions.push(`${wmFit.dropped} reading${wmFit.dropped === 1 ? '' : 's'} (a wall material with under ${MIN_READINGS_PER_MATERIAL} readings) left out of the per-material fit.`);
     }
   } else wmNo(wmReason);
-
-  // 3) cross-polar floor: only matters where the antennas are cross-polarised
-  const xpdNow = finite(env.xpdDb) ? env.xpdDb : DEFAULT_XPD_DB;
-  const polMatters = base.points.some((p) => { const r = solveAt(scene, linkOf(scene, p.linkId), p); return r.polarisation && r.polarisation.lossDb >= 3; });
-  if (polMatters) {
-    const lim = CALIBRATION_FIELDS['environment.xpdDb'];
-    const fit = minimise((v) => rmsOf(withEnv(scene, 'xpdDb', v)).rmsDb, lim.min, lim.max);
-    cand('cross-polar', 'Cross-polar floor', 'environment.xpdDb', xpdNow, fit.x, true, undefined, fit.f);
-  } else cand('cross-polar', 'Cross-polar floor', 'environment.xpdDb', xpdNow, xpdNow, false, 'the antennas are not cross-polarised on any measured path');
 
   out.candidates.sort((a, b) => (b.applicable - a.applicable) || (a.afterRmsDb - b.afterRmsDb));
   const top = out.candidates[0];

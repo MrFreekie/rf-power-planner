@@ -59,6 +59,6 @@ test('free gap, strong neighbour, strong co-channel: ordering and quoted figures
   for (const v of [f1(sc.averageDbm), f1(R['strong-cochannel'].riseDb), f1(R['strong-cochannel'].marginDb)]) assert.ok(note('tv-strong-cochannel').includes(v), v);
   for (const id of ['tv-weak-on-channel', 'tv-weak-free-gap', 'tv-weak-strong-neighbour', 'tv-strong-cochannel']) {
     assert.match(note(id), /^(Best practice|Less ideal|Problem)/, id);
-    assert.ok(note(id).split('. ').length <= 4, id);
+    assert.ok(note(id).split('. ').length <= 5, id);
   }
 });

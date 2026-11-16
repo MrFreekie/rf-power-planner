@@ -203,7 +203,7 @@ export function mountMeasure({ doc = document, button, store, hostFactory = (c, 
     const wrapc = el('div', 'meas-cards');
     for (const v of cardViews(sug)) {
       const card = el('div', `meas-card${v.isBest ? ' best' : ''}${v.applicable ? '' : ' na'}`, null, { role: 'group', 'aria-label': v.label });
-      card.append(el('h4', null, v.isBest ? `${v.label} (best fit)` : v.label), el('p', 'meas-change', v.change), el('p', null, v.rms), el('p', null, v.improvement));
+      card.append(el('h4', null, v.isBest ? `${v.label} (best fit)` : v.label), el('p', 'meas-change', v.change), ...[v.rms, v.improvement].filter(Boolean).map((tx) => el('p', null, tx)));
       if (v.perMaterial && v.materials.length) {
         const t = el('table', 'meas-mat'), hr = el('tr'); for (const h of ['Wall material', 'Current dB', 'Fitted dB', 'Readings']) hr.append(el('th', null, h, { scope: 'col' }));
         const th2 = el('thead'); th2.append(hr); const tb = el('tbody');

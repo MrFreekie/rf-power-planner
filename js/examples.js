@@ -1403,25 +1403,25 @@ export const EXAMPLES = [
   {
     id: 'video-wall-class-b',
     title: 'Video wall: EMC class B noise, FOH versus stage side',
-    note: 'Problem: a 14 m LED wall behind the band radiates at the class B limit (30 / 37 dBuV/m at 10 m, a ceiling, assumed). The FOH paddle 27 m away looks straight at it: -98.3 dBm in 200 kHz lifts the floor 14.3 dB and cuts the mic margin from 34.2 dB (wall off) to 19.8 dB. A stage-side receiver sees 17.5 dB of rise but is close to the mic, so it keeps 48.9 dB. The metal wall also returns a reflection only 3.5 dB below the direct ray, so expect multipath.',
+    note: 'Problem: a 14 m LED wall behind the band radiates at the class B limit (30 / 37 dBuV/m at 10 m, a ceiling, assumed). The FOH paddle 27 m away looks straight at it: -98.3 dBm in 200 kHz lifts the floor 14.3 dB and cuts the mic margin from 34.2 dB (wall off) to 19.8 dB. A stage-side receiver sees 17.5 dB of rise but is close to the mic, so it keeps 48.9 dB. The metal wall also returns a reflection only 3.5 dB below the direct ray, so expect multipath. This source does not pulse: the floor is a steady line in the RF spectrum.',
     build: () => ({ scene: videoWallScene({ preset: 'class-b', rx: 'foh' }) }),
   },
   {
     id: 'video-wall-noisy',
     title: 'Video wall: noisy budget panels',
-    note: 'Problem: budget panels or poor cabling (class A plus 15 dB, assumed) put -73.3 dBm in the FOH receiver and raise the floor by 39.2 dB, so the mic margin falls to -5.0 dB and the link fails. A wall at the class A limit leaves 10.0 dB. With the receiver at the stage front, 3 m from the wall, the noisy wall still leaves only 8.2 dB, and 24.0 dB with the receiver at the stage side. A CE-marked wall can still be the loudest thing in the band.',
+    note: 'Problem: budget panels or poor cabling (class A plus 15 dB, assumed) put -73.3 dBm in the FOH receiver and raise the floor by 39.2 dB, so the mic margin falls to -5.0 dB and the link fails. A wall at the class A limit leaves 10.0 dB. With the receiver at the stage front, 3 m from the wall, the noisy wall still leaves only 8.2 dB, and 24.0 dB with the receiver at the stage side. A CE-marked wall can still be the loudest thing in the band. This source does not pulse: the floor is a steady line in the RF spectrum.',
     build: () => ({ scene: videoWallScene({ preset: 'noisy', rx: 'foh' }) }),
   },
   {
     id: 'video-wall-fixes',
     title: 'Video wall: the fixed scene (distance, aim, cabling)',
-    note: 'Best practice: this is the fixed version of video-wall-noisy, whose FOH receiver has a margin of -5.0 dB: the receiver sits at the stage side aimed at the performer with the wall off its beam, and ferrite chokes and shielded data cable bring the wall down to class B (15 dB less, assumed). The noise in the receiver is -95.0 dBm, 17.5 dB of rise, and the mic margin is 48.9 dB, 53.9 dB better. Moving the receiver alone gives 24.0 dB (28.9 dB better) and the class B wall alone 19.8 dB at FOH (24.8 dB better).',
+    note: 'Best practice: this is the fixed version of video-wall-noisy, whose FOH receiver has a margin of -5.0 dB: the receiver sits at the stage side aimed at the performer with the wall off its beam, and ferrite chokes and shielded data cable bring the wall down to class B (15 dB less, assumed). The noise in the receiver is -95.0 dBm, 17.5 dB of rise, and the mic margin is 48.9 dB, 53.9 dB better. Moving the receiver alone gives 24.0 dB (28.9 dB better) and the class B wall alone 19.8 dB at FOH (24.8 dB better). This source does not pulse: the floor is a steady line in the RF spectrum.',
     build: () => ({ scene: videoWallScene({ preset: 'class-b', rx: 'side' }) }),
   },
   {
     id: 'video-wall-solid-vs-mesh',
     title: 'Video wall: solid metal, mesh and carbon fibre construction',
-    note: 'Compare: three wall sections side by side on one stage (solid metal, 10 mm metal mesh and carbon mesh, class A noise), each with a receiver 2.5 m behind it: the crossing loss is 40.0, 27.9 and 28.9 dB, and the noise reaching each receiver is -91.0, -72.2 and -75.1 dBm (the solid one includes the neighbouring walls leaking in), leaving margins of 16.2, -2.6 and 0.4 dB. Seen from FOH the metal and metal mesh both reflect at -3.5 dB and carbon at -9.5 dB. Holes of 100 mm (a coarse curtain) shield only 7.9 dB at 606 MHz, so a mesh wall is no free pass at UHF. All construction figures are assumed.',
+    note: 'Compare: three wall sections side by side on one stage (solid metal, 10 mm metal mesh and carbon mesh, class A noise), each with a receiver 2.5 m behind it: the crossing loss is 40.0, 27.9 and 28.9 dB, and the noise reaching each receiver is -91.0, -72.2 and -75.1 dBm (the solid one includes the neighbouring walls leaking in), leaving margins of 16.2, -2.6 and 0.4 dB. Seen from FOH the metal and metal mesh both reflect at -3.5 dB and carbon at -9.5 dB. Holes of 100 mm (a coarse curtain) shield only 7.9 dB at 606 MHz, so a mesh wall is no free pass at UHF. All construction figures are assumed. This source does not pulse: the floor is a steady line in the RF spectrum.',
     build: () => ({ scene: videoWallScene({ preset: 'class-a', rx: 'back', sections: ['solid-metal', 'mesh-metal', 'mesh-carbon'] }) }),
   },
   {
@@ -1886,55 +1886,55 @@ export const EXAMPLES = [
   {
     id: 'noise-flash-at-pit',
     title: 'Noise: a speedlight at the photo pit',
-    note: 'Problem: a photographer\'s speedlight 2 m from the FOH receive antenna is a 1 ms broadband click about 3 times a second (duty 0.3 percent, assumed): -49.9 dBm at its peak but only -75.1 dBm on average. The average lifts the floor by 36.9 dB and leaves 17.4 dB of margin, and the peak is 62.1 dB above the floor, the pop on the squelch. Keep flashes away from the antenna and use a filtered, shielded run (figures assumed).',
+    note: 'Problem: a photographer\'s speedlight 2 m from the FOH receive antenna is a 1 ms broadband click about 3 times a second (duty 0.3 percent, assumed): -49.9 dBm at its peak but only -75.1 dBm on average. The average lifts the floor by 36.9 dB and leaves 17.4 dB of margin, and the peak is 62.1 dB above the floor, the pop on the squelch. Keep flashes away from the antenna and use a filtered, shielded run (figures assumed). Select the link and watch the RF spectrum: the floor jumps to the peak with each flash, about three times a second, and falls back in between, in time with the plan rings; the margin quoted is the average.',
     build: () => ({ scene: noiseSourceScene('flash-at-pit') }),
   },
   {
     id: 'noise-ptt-beside-bodypack',
     title: 'Noise: a PTT radio beside an IEM bodypack',
-    note: 'Problem: a 2 W business UHF handheld keyed 1.5 m from the IEM bodypack puts -9.1 dBm at the antenna, 83.1 dB above what the 606 MHz channel filter passes (selectivity assumed). In the channel that is -92.3 dBm while keyed and -97.5 dBm on average (30 percent duty), a 13.7 dB floor rise and 37.5 dB of margin. A 0.5 W PMR446 radio gives 7.4 dB and 43.8 dB, so keep crew radios away from bodypacks (figures assumed).',
+    note: 'Problem: a 2 W business UHF handheld keyed 1.5 m from the IEM bodypack puts -9.1 dBm at the antenna, 83.1 dB above what the 606 MHz channel filter passes (selectivity assumed). In the channel that is -92.3 dBm while keyed and -97.5 dBm on average (30 percent duty), a 13.7 dB floor rise and 37.5 dB of margin. A 0.5 W PMR446 radio gives 7.4 dB and 43.8 dB, so keep crew radios away from bodypacks (figures assumed). In the RF spectrum the floor steps up while the radio is keyed and drops back when it is released, in time with the plan rings; the margin quoted is the duty-weighted average.',
     build: () => ({ scene: noiseSourceScene('ptt-beside-bodypack') }),
   },
   {
     id: 'noise-phone-buzz',
     title: 'Noise: a GSM phone near the FOH receiver',
-    note: 'Problem: a GSM 900 phone 1 m from the receive antenna bursts 2 W (33 dBm) for 0.577 ms every 4.615 ms, the 217 Hz frame: +1.9 dBm at the antenna, -87.4 dBm in the channel at the peak and -96.4 dBm on average (duty 12.5 percent). The floor rises 15.7 dB; the audible 217 Hz buzz from an audio cable or preamp that demodulates the burst is not modelled. Put phones in flight mode or away from antennas and cables (figures assumed).',
+    note: 'Problem: a GSM 900 phone 1 m from the receive antenna bursts 2 W (33 dBm) for 0.577 ms every 4.615 ms, the 217 Hz frame: +1.9 dBm at the antenna, -87.4 dBm in the channel at the peak and -96.4 dBm on average (duty 12.5 percent). The floor rises 15.7 dB; the audible 217 Hz buzz from an audio cable or preamp that demodulates the burst is not modelled. Put phones in flight mode or away from antennas and cables (figures assumed). In the RF spectrum the floor pulses 217 times a second, too fast to follow by eye, so it reads as a flicker between the peak and average levels, in time with the plan rings; the margin quoted is the average.',
     build: () => ({ scene: noiseSourceScene('phone-buzz') }),
   },
   {
     id: 'noise-dimmer-circuit',
     title: 'Noise: a dimmer rack near the receiver',
-    note: 'Less ideal: a triac dimmer 3 m from the receive antenna chops twice per mains cycle (120 Hz, duty 1.2 percent, assumed) and is strong at VHF but weak at 606 MHz: -90.6 dBm at the peak, -109.8 dBm on average, a 4.2 dB floor rise and 50.1 dB of margin. Through the air it is a small problem at UHF; the buzz that reaches the audio comes through cables and the mains, so use balanced audio and filtered power (figures assumed).',
+    note: 'Less ideal: a triac dimmer 3 m from the receive antenna chops twice per mains cycle (120 Hz, duty 1.2 percent, assumed) and is strong at VHF but weak at 606 MHz: -90.6 dBm at the peak, -109.8 dBm on average, a 4.2 dB floor rise and 50.1 dB of margin. Through the air it is a small problem at UHF; the buzz that reaches the audio comes through cables and the mains, so use balanced audio and filtered power (figures assumed). In the RF spectrum the floor pulses with the dimmer, 120 times a second, in time with the plan rings; the margin quoted is the average.',
     build: () => ({ scene: noiseSourceScene('dimmer-circuit') }),
   },
   {
     id: 'noise-eng-press-pit',
     title: 'Noise: an ENG crew at the press pit',
-    note: 'Problem: an ENG crew at the barrier (camera transmitter, two PTT radios, an LED light and a van generator, about 12 m from the FOH receiver) raises the floor by 17.6 dB together and leaves 36.7 dB of margin. The LED light dominates at -97.2 dBm, then the generator at -98.6 dBm, the PTT radios at about -108 dBm average, and the 2.3 GHz camera transmitter only -115.8 dBm because it is far out of band. Agree lights off, radios and generator away from the antennas with the press (figures assumed).',
+    note: 'Problem: an ENG crew at the barrier (camera transmitter, two PTT radios, an LED light and a van generator, about 12 m from the FOH receiver) raises the floor by 17.6 dB together and leaves 36.7 dB of margin. The LED light dominates at -97.2 dBm, then the generator at -98.6 dBm, the PTT radios at about -108 dBm average, and the 2.3 GHz camera transmitter only -115.8 dBm because it is far out of band. Agree lights off, radios and generator away from the antennas with the press (figures assumed). The RF spectrum shows continuous and keyed parts together: the LED light and generator lift the floor steadily, while the PTT radios pulse on top of it in time with the plan rings; the margin quoted is the average.',
     build: () => ({ scene: noiseSourceScene('eng-press-pit') }),
   },
   {
     id: 'tv-weak-on-channel',
     title: 'Weak TV: a mic on top of a weak local channel',
-    note: 'Less ideal: a mic 0.4 MHz above the centre of UK channel 33 (566 to 574 MHz) shares the block with a weak local transmitter (-85 dBm at the antenna, assumed). The 7.6 MHz block is flat noise, so a 200 kHz mic channel sees 15.8 dB less, -100.8 dBm, which lifts the floor by 11.5 dB and leaves 43.3 dB of margin. It works as a fallback if the channel is licensed or permitted; check the local database and scan first. The occupancy is illustrative.',
+    note: 'Less ideal: a mic 0.4 MHz above the centre of UK channel 33 (566 to 574 MHz) shares the block with a weak local transmitter (-85 dBm at the antenna, assumed). The 7.6 MHz block is flat noise, so a 200 kHz mic channel sees 15.8 dB less, -100.8 dBm, which lifts the floor by 11.5 dB and leaves 43.3 dB of margin. It works as a fallback if the channel is licensed or permitted; check the local database and scan first. The occupancy is illustrative. This source does not pulse: the floor is a steady line in the RF spectrum.',
     build: () => ({ scene: weakTvScene('on-channel') }),
   },
   {
     id: 'tv-weak-free-gap',
     title: 'Weak TV: the mic moved to a free gap',
-    note: 'Best practice: the same mic on channel 30 (542 to 550 MHz), two channels from the nearest transmitters on 33 and 34 in the illustrative occupancy. The weak block is now 65.9 dB down (selectivity assumed), the floor rise is 0.0 dB and the margin is 55.3 dB. A free channel costs nothing: prefer it to any shared one.',
+    note: 'Best practice: the same mic on channel 30 (542 to 550 MHz), two channels from the nearest transmitters on 33 and 34 in the illustrative occupancy. The weak block is now 65.9 dB down (selectivity assumed), the floor rise is 0.0 dB and the margin is 55.3 dB. A free channel costs nothing: prefer it to any shared one. This source does not pulse: the floor is a steady line in the RF spectrum.',
     build: () => ({ scene: weakTvScene('free-gap') }),
   },
   {
     id: 'tv-weak-strong-neighbour',
     title: 'Weak TV: weak channel with a strong adjacent block',
-    note: 'Less ideal: the mic stays on weak channel 33 but channel 34 next door is strong (-45 dBm at the antenna, assumed). The adjacent block is held 51.6 dB down by the receiver selectivity (assumed), -96.6 dBm in the channel, so with the weak block the floor rises 16.9 dB and the margin falls to 38.0 dB. A real filter skirt decides this one: measure it or move away.',
+    note: 'Less ideal: the mic stays on weak channel 33 but channel 34 next door is strong (-45 dBm at the antenna, assumed). The adjacent block is held 51.6 dB down by the receiver selectivity (assumed), -96.6 dBm in the channel, so with the weak block the floor rises 16.9 dB and the margin falls to 38.0 dB. A real filter skirt decides this one: measure it or move away. This source does not pulse: the floor is a steady line in the RF spectrum.',
     build: () => ({ scene: weakTvScene('strong-neighbour') }),
   },
   {
     id: 'tv-strong-cochannel',
     title: 'Strong TV: the failure contrast, a strong signal in the channel',
-    note: 'Problem: the same mic on channel 33 where the block is strong (-45 dBm at the antenna, assumed) puts -60.8 dBm of noise in the 200 kHz channel. The floor rises 51.2 dB and only 3.7 dB of margin is left, so the link is marginal. A strong broadcast channel is not usable: pick another one.',
+    note: 'Problem: the same mic on channel 33 where the block is strong (-45 dBm at the antenna, assumed) puts -60.8 dBm of noise in the 200 kHz channel. The floor rises 51.2 dB and only 3.7 dB of margin is left, so the link is marginal. A strong broadcast channel is not usable: pick another one. This source does not pulse: the floor is a steady line in the RF spectrum.',
     build: () => ({ scene: weakTvScene('strong-cochannel') }),
   },
   {
@@ -2012,7 +2012,7 @@ export const EXAMPLES = [
   {
     id: 'squelch-noise-burst',
     title: 'Squelch: a flash burst opens the gate',
-    note: 'Problem: a photographer speedlight 21.9 m from the FOH antenna is a 1 ms click 3 times a second: -70.5 dBm at its peak, -95.8 dBm on average, against a floor of -112.0 dBm. With the mic transmitter off the idle level is -95.7 dBm, 5.7 dB under the -90 dBm squelch, but each flash reaches -70.5 dBm, 19.5 dB over it, so in 10 s the gate opens 30 times for 30 ms and the desk hears pops. A carrier squelch cannot tell a flash from a mic: a pilot squelch needs a locked pilot and ignores it.',
+    note: 'Problem: a photographer speedlight 21.9 m from the FOH antenna is a 1 ms click 3 times a second: -70.5 dBm at its peak, -95.8 dBm on average, against a floor of -112.0 dBm. With the mic transmitter off the idle level is -95.7 dBm, 5.7 dB under the -90 dBm squelch, but each flash reaches -70.5 dBm, 19.5 dB over it, so in 10 s the gate opens 30 times for 30 ms and the desk hears pops. A carrier squelch cannot tell a flash from a mic: a pilot squelch needs a locked pilot and ignores it. In the RF spectrum the floor pulses with each flash, in time with the plan rings and the squelch opening; the margin and levels quoted as averages hide those peaks.',
     build: () => ({ scene: squelchBurstScene() }),
   },
   {
@@ -2042,19 +2042,19 @@ export const EXAMPLES = [
   {
     id: 'tv-weak-6mhz-us-plan',
     title: 'Weak TV, North America: a mic on a 6 MHz channel',
-    note: 'Less ideal: with the TV channel width set to 6 MHz a mic 0.4 MHz above the centre of channel 26 (542 to 548 MHz) shares the block with a weak local station (-85.0 dBm at the antenna, assumed). The block occupies 5.38 MHz, so a 200 kHz mic channel sees 14.3 dB less, -99.3 dBm, which is 1.5 dB more than the same power in a 7.6 MHz block; it lifts the floor by 13.0 dB and leaves 42.3 dB of margin. Check the local database and scan first; the occupancy is illustrative.',
+    note: 'Less ideal: with the TV channel width set to 6 MHz a mic 0.4 MHz above the centre of channel 26 (542 to 548 MHz) shares the block with a weak local station (-85.0 dBm at the antenna, assumed). The block occupies 5.38 MHz, so a 200 kHz mic channel sees 14.3 dB less, -99.3 dBm, which is 1.5 dB more than the same power in a 7.6 MHz block; it lifts the floor by 13.0 dB and leaves 42.3 dB of margin. Check the local database and scan first; the occupancy is illustrative. This source does not pulse: the floor is a steady line in the RF spectrum.',
     build: () => ({ scene: weakTvScene('on-channel', 6) }),
   },
   {
     id: 'noise-dect-intercom',
     title: 'Noise: a DECT crew intercom beside a 1.9 GHz mic',
-    note: 'Problem: a DECT-type crew intercom beltpack 4.0 m from the receive antenna of a 1893 MHz mic puts -29.0 dBm at the antenna and -75.6 dBm in the 200 kHz channel at the peak (one 0.417 ms slot in every 10 ms frame, duty 4.2 percent), -89.4 dBm on average. The floor rises 21.7 dB and the margin falls to 17.8 dB, with 20.2 dB between the wanted signal and each burst; the 100 Hz buzz an audio path can demodulate is not modelled. Keep intercoms off the mic band and away from the antennas (figures assumed).',
+    note: 'Problem: a DECT-type crew intercom beltpack 4.0 m from the receive antenna of a 1893 MHz mic puts -29.0 dBm at the antenna and -75.6 dBm in the 200 kHz channel at the peak (one 0.417 ms slot in every 10 ms frame, duty 4.2 percent), -89.4 dBm on average. The floor rises 21.7 dB and the margin falls to 17.8 dB, with 20.2 dB between the wanted signal and each burst; the 100 Hz buzz an audio path can demodulate is not modelled. Keep intercoms off the mic band and away from the antennas (figures assumed). The RF spectrum shows a 100 Hz flicker of the floor up to the burst level, in time with the plan rings; the slot is only 4.2 percent of the frame and the margin quoted is the average.',
     build: () => ({ scene: noiseSourceScene('dect-intercom') }),
   },
   {
     id: 'noise-pyro-trigger-433',
     title: 'Noise: a pyro cue trigger near a 433 MHz mic',
-    note: 'Less ideal: a pyro cue trigger on 433.9 MHz sends 0.1 s command bursts (duty 0.1 percent, assumed) from 19.1 m away to the receiver of a licence-free mic on 433.1 MHz. Each burst is -81.9 dBm in the channel after 38.1 dB of assumed selectivity, 30.3 dB above the floor, but the average is -111.9 dBm, a 3.2 dB floor rise with 50.2 dB of margin left. The wanted signal is 40.3 dB above each burst so the show works, but a dropout on the cue would be heard; coordinate the trigger channel (figures assumed).',
+    note: 'Less ideal: a pyro cue trigger on 433.9 MHz sends 0.1 s command bursts (duty 0.1 percent, assumed) from 19.1 m away to the receiver of a licence-free mic on 433.1 MHz. Each burst is -81.9 dBm in the channel after 38.1 dB of assumed selectivity, 30.3 dB above the floor, but the average is -111.9 dBm, a 3.2 dB floor rise with 50.2 dB of margin left. The wanted signal is 40.3 dB above each burst so the show works, but a dropout on the cue would be heard; coordinate the trigger channel (figures assumed). In the RF spectrum the floor is quiet until a cue is sent, then a single 0.1 s step appears in time with the plan rings: easy to miss in the average, which is the margin quoted, but not in the show.',
     build: () => ({ scene: noiseSourceScene('pyro-trigger-433') }),
   },
   {
@@ -2071,9 +2071,11 @@ const WALK_IDS = new Set(['dropout-two-ray', 'diversity-null', 'diversity-modes'
 export function exampleKeywords(ex) {
   const k = [];
   if (WALK_IDS.has(ex.id)) k.push('walk walking path moving');
-  if (/^measurements-/.test(ex.id)) k.push('measure measurement measurements readings walk walk-test calibrate calibration fit');
+  if (/^measurements-/.test(ex.id)) k.push('measure measurement measurements readings walk walk-test calibrate calibration fit wall material fit');
   if (/^noise-|^video-wall|^squelch-noise|^external-noise|^tv-|radio$|^stray-carrier|^wifi-busy|^even-/.test(ex.id)) k.push('noise interference');
-  if (/^noise-/.test(ex.id)) k.push('noise source emitter timing');
+  if (/^noise-/.test(ex.id)) k.push('noise source emitter timing pulse flicker');
+  if (/^squelch-noise/.test(ex.id)) k.push('pulse flicker');
+  if (/^tv-/.test(ex.id)) k.push('tv level channel per channel');
   if (/^coord-|^imd-/.test(ex.id)) k.push('coordination frequency plan intermod');
   return k.join(' ');
 }

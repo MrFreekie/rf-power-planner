@@ -142,12 +142,15 @@ export const audioSummary = (a, inp) => (a
   ? `Audio spectrum, simulated ${inp.source && AUDIO_SOURCE_LABELS[inp.source] ? AUDIO_SOURCE_LABELS[inp.source].toLowerCase() : inp.kind === 'iem' ? 'music' : 'voice'}${inp.kind === 'iem' ? (inp.stereo ? ' in stereo (left and right)' : ' (mono)') : ''}, 20 hertz to 20 kilohertz on a logarithmic axis with octave band labels from 31.5 hertz to 16 kilohertz, after de-emphasis. Noise floor ${sgn(a.floorDb, 0)} dB. Illustrative, not a measurement.`
   : 'Audio spectrum not available.');
 
+/** On or off is decided by the sources (any with activity above 0.05), not by the size of the rise: a steady weak source is on even when it lifts the floor by 0.1 dB. */
+export function noiseIsOn(nb) { return !!(nb && Array.isArray(nb.sources) && nb.sources.some((x) => x.activity > 0.05)); }
+
 export function rfSummary(s, inp) {
   if (!s) return 'RF spectrum not available: no received level for this link.';
   const bw = fin(s.bwKhz) ? `${Math.round(s.bwKhz)} kHz` : '-';
   let t = `RF spectrum of this link's carrier only (${inp.mode === 'digital' ? 'digital, flat-topped' : 'analogue FM'}): received level ${sgn(inp.rxLevelDbm)} dBm, ${sgn(s.marginToNoiseDb)} dB above the receiver channel noise floor ${sgn(inp.noiseFloorDbm, 0)} dBm (the plot shows power per ${fin(s.rbwKhz) ? Math.round(s.rbwKhz) : '-'} kHz resolution bandwidth, so the noise trace sits lower), occupied bandwidth ${bw} in a ${Math.round(inp.channelBwKhz)} kHz receiver channel.`;
   if (s.clipsAtFilter) t += ' The signal is wider than the receiver filter and is clipped by it.';
-  if (inp.noise && inp.noise.any) t += inp.noise.riseDb >= 0.3 ? ` A noise source is transmitting now and raises the floor by ${inp.noise.riseDb.toFixed(1)} dB; it follows the same on and off timing as the plan rings.` : ' A noise source that reaches this receiver is off at this moment; the floor rises when it transmits.';
+  if (inp.noise && inp.noise.any) t += noiseIsOn(inp.noise) ? ` A noise source is transmitting now and raises the floor by ${inp.noise.riseDb.toFixed(1)} dB; it follows the same on and off timing as the plan rings.` : ' A noise source that reaches this receiver is off at this moment; the floor rises when it transmits.';
   if (inp.subcarriers && inp.subcarriers.length) t += ` Control subcarriers marked at plus and minus their offset: ${inp.subcarriers.map((c) => `${c.name} ${+c.offsetKhz.toFixed(1)} kilohertz`).join(', ')}; levels illustrative.`;
   if (inp.mode === 'digital') t += ' Digital signal shown as a flat-topped block.';
   return t;
@@ -255,7 +258,7 @@ export function rfCentreLabel(inp) { return fin(inp && inp.carrierMHz) ? `fc ${+
 export function drawNoiseBurst(ctx, th, f, s, inp, xMin, xMax) {
   const nb = inp && inp.noise;
   if (!nb || !nb.any) return;
-  const rise = fin(nb.riseDb) ? nb.riseDb : 0, on = rise >= 0.3;
+  const rise = fin(nb.riseDb) ? nb.riseDb : 0, on = noiseIsOn(nb);
   const lvl = s.noiseDbm + rise;
   if (on) {
     ctx.save(); ctx.globalAlpha = 0.18; ctx.fillStyle = th.warnText; ctx.fillRect(f.L, f.Y(lvl), f.pw, Math.max(0, f.Y(s.noiseDbm) - f.Y(lvl))); ctx.restore();
@@ -447,7 +450,7 @@ export function mountSpectra({ container, store, now = () => performance.now() }
   const h2 = el('h2', null, 'Spectra');
   const tabs = el('div', 'spectra-tabs group', null, { role: 'tablist', 'aria-label': 'Spectrum views' });
   const pauseLabel = (on) => (on ? 'Pause spectra' : 'Play spectra');
-  const pauseBtn = el('button', null, pauseLabel(!reduce), { type: 'button', id: 'btn-spectra-pause', 'aria-pressed': String(reduce), title: 'Freeze or run the simulated signals in the Audio, MPX and RF spectra' });
+  const pauseBtn = el('button', null, pauseLabel(!reduce), { type: 'button', id: 'btn-spectra-pause', title: 'Freeze or run the simulated signals in the Audio, MPX and RF spectra' });
   head.append(h2, tabs);
   const sourceBar = (() => { const tb = document.getElementById('toolbar'); return tb ? mountSourceBar({ host: tb, before: document.getElementById('btn-modlab'), store, tone: toneState }) : mountSourceBar({ host: head, store, tone: toneState }); })(); // top toolbar so it is reachable without the bottom panel
   { const tb = document.getElementById('toolbar'); if (tb) tb.insertBefore(pauseBtn, document.getElementById('btn-modlab') || null); else head.append(pauseBtn); } // top toolbar, beside the audio source, so it is reachable without the bottom panel
@@ -520,6 +523,7 @@ export function mountSpectra({ container, store, now = () => performance.now() }
   import('../mpxTracker.js').then((m) => { mpxTracker = m.mpx || m.default; mpxTracker.subscribe(() => panels.mpx.host && panels.mpx.host.invalidate()); invalidateAll(); }).catch(() => {});
 
   let t = 0, lastNow = now(), running = !reduce, loop = 0, lastFrame = 0;
+  let noiseT = noiseClockNow(); // noise wave time: refreshed only inside tick (like t), so Pause freezes the on/off state of the noise sources
   const ctxInfo = () => {
     const scene = store.getScene(), link = activeLink(scene, store.getSelection());
     const r = link ? solveCached(scene, link) : null;
@@ -545,7 +549,7 @@ export function mountSpectra({ container, store, now = () => performance.now() }
         const inp = rfInputs(scene, link, r, t, Math.max(120, Math.min(400, Math.round(w - 52))));
         if (inp && dist) inp.distortion = dist;
         if (inp && tp) inp.toneProducts = tp;
-        if (inp) { try { const nb = noiseBursts(scene, r, noiseClockNow()); if (nb.any) inp.noise = nb; } catch (e) { console.warn(e); } } // noise sources in this channel, on or off right now
+        if (inp) { try { const nb = noiseBursts(scene, r, noiseT); if (nb.any) inp.noise = nb; } catch (e) { console.warn(e); } } // noise sources in this channel, on or off right now
         let s = null; if (inp) { try { s = model.rfSpectrum(inp); } catch (e) { console.warn(e); } }
         if (inp && s && inp.mode !== 'digital' && model.monoBasebandSpectrum) { // tone key, data subcarrier and pilot ride on the carrier
           try {
@@ -642,12 +646,12 @@ export function mountSpectra({ container, store, now = () => performance.now() }
     loop = 0;
     if (!running) return;
     const n = now();
-    if (n - lastFrame >= FRAME_MS) { t += (n - lastNow) / 1000; lastNow = n; lastFrame = n; invalidateAll(); } else lastNow = lastNow;
+    if (n - lastFrame >= FRAME_MS) { t += (n - lastNow) / 1000; lastNow = n; lastFrame = n; noiseT = noiseClockNow(); invalidateAll(); }
     loop = requestAnimationFrame(tick);
   }
   function setRunning(on) {
     running = on; lastNow = now();
-    pauseBtn.textContent = pauseLabel(on); pauseBtn.setAttribute('aria-pressed', String(!on));
+    pauseBtn.textContent = pauseLabel(on);
     if (on && !loop && !document.hidden) loop = requestAnimationFrame(tick);
     if (!on && loop) { cancelAnimationFrame(loop); loop = 0; }
     invalidateAll();

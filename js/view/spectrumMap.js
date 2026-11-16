@@ -452,21 +452,37 @@ export function mountSpectrumMap({ doc = document, button, store, hostFactory = 
   const tvClearAll = el('button', null, 'Clear all', { type: 'button', title: 'Go back to the assumed level on every channel' });
   const tvStatus = el('p', 'map-tvstatus', '', { role: 'status', 'aria-live': 'polite' });
   tvBox.append(lab1, lab2, tvSet, tvClear, tvClearAll, tvStatus);
-  const chanNow = () => { const n = Math.round(Number(tvChanIn.value)); return tvChanIn.value !== '' && Number.isInteger(n) && n >= LIM.channel[0] && n <= LIM.channel[1] ? n : null; };
+  // Only a whole number inside the limits is a channel; anything else (7.5, 99, text) gives null and is reported, never rounded.
+  const chanNow = () => { if (tvChanIn.value === '') return null; const n = Number(tvChanIn.value); return Number.isInteger(n) && n >= LIM.channel[0] && n <= LIM.channel[1] ? n : null; };
+  let lastMsg = '', dbmTyped = false; // lastMsg stays in the status until the next user action; dbmTyped: the level box holds text the user typed
+  const dbmFromStore = (n) => String(Math.round(tvBlockLevelDbm(n, tvBlockLevelsOf(store.getScene()))));
   const syncTv = () => {
     const lv = tvBlockLevelsOf(store.getScene()), n = chanNow(), cnt = Object.keys(lv).length;
     tvClearAll.disabled = !cnt; tvClear.disabled = n === null || tvBlockLevelIsAssumed(n, lv);
-    if (n === null) { tvStatus.textContent = `Enter a TV channel number, ${LIM.channel[0]} to ${LIM.channel[1]}, or click a channel on the map. ${cnt} channel${cnt === 1 ? '' : 's'} set by you.`; return; }
+    const pre = lastMsg ? `${lastMsg} ` : '';
+    const focused = doc.activeElement === tvDbmIn;
+    if (n !== null && !dbmTyped && !focused) tvDbmIn.value = dbmFromStore(n); // follows the store (Undo, Redo, Clear), but never a value being typed
+    if (n === null) {
+      const bad = tvChanIn.value !== '';
+      tvStatus.textContent = `${pre}${bad ? `"${tvChanIn.value}" is not a TV channel: use a whole number from ${LIM.channel[0]} to ${LIM.channel[1]}. ` : `Enter a TV channel number, ${LIM.channel[0]} to ${LIM.channel[1]}, or click a channel on the map. `}${cnt} channel${cnt === 1 ? '' : 's'} set by you.`;
+      return;
+    }
     const set = !tvBlockLevelIsAssumed(n, lv);
-    tvStatus.textContent = `Channel ${n}: ${tvBlockLevelDbm(n, lv).toFixed(0)} dBm, ${set ? 'set by you' : 'assumed'}. ${cnt} channel${cnt === 1 ? '' : 's'} set by you. A level only changes the noise floor while its channel is shown as on air.`;
+    tvStatus.textContent = `${pre}Channel ${n}: ${tvBlockLevelDbm(n, lv).toFixed(0)} dBm, ${set ? 'set by you' : 'assumed'}. ${cnt} channel${cnt === 1 ? '' : 's'} set by you. A level only changes the noise floor while its channel is shown as on air.`;
   };
-  const selectTv = (n) => { st.tvSel = n; tvChanIn.value = n === null ? '' : String(n); tvDbmIn.value = n === null ? '' : String(Math.round(tvBlockLevelDbm(n, tvBlockLevelsOf(store.getScene())))); syncTv(); };
-  tvChanIn.addEventListener('change', () => selectTv(chanNow()));
-  const say = (t) => { syncTv(); tvStatus.textContent = `${t} ${tvStatus.textContent}`; };
+  const selectTv = (n, keepTyped = false) => {
+    st.tvSel = n; lastMsg = '';
+    if (n === null) { if (!keepTyped || !dbmTyped) { tvDbmIn.value = ''; dbmTyped = false; } if (!keepTyped) tvChanIn.value = ''; }
+    else { if (!keepTyped) tvChanIn.value = String(n); if (!keepTyped || !dbmTyped) { tvDbmIn.value = dbmFromStore(n); dbmTyped = false; } }
+    syncTv();
+  };
+  tvChanIn.addEventListener('change', () => selectTv(chanNow(), true)); // a typed level survives a channel change
+  tvDbmIn.addEventListener('input', () => { dbmTyped = true; });
+  const say = (t) => { lastMsg = t; dbmTyped = false; syncTv(); };
   const doSet = () => {
     const n = chanNow(), v = Number(tvDbmIn.value);
-    if (n === null) { tvStatus.textContent = `Enter a TV channel number, ${LIM.channel[0]} to ${LIM.channel[1]}.`; return; }
-    if (tvDbmIn.value === '' || !Number.isFinite(v) || v < LIM.dbm[0] || v > LIM.dbm[1]) { tvStatus.textContent = `The level must be between ${LIM.dbm[0]} and ${LIM.dbm[1]} dBm.`; return; }
+    if (n === null) { say(`Enter a whole TV channel number, ${LIM.channel[0]} to ${LIM.channel[1]}.`); return; }
+    if (tvDbmIn.value === '' || !Number.isFinite(v) || v < LIM.dbm[0] || v > LIM.dbm[1]) { lastMsg = `The level must be between ${LIM.dbm[0]} and ${LIM.dbm[1]} dBm.`; syncTv(); return; }
     setTvBlockLevel(store, n, v); refresh(); say(`Channel ${n} set to ${v} dBm by you.`);
   };
   tvSet.addEventListener('click', doSet);

@@ -1,6 +1,6 @@
 // Scene mutations for audience areas, the ceiling, overhead panels, point-to-point settings and antenna design band.
 // Same contract as actions.js: store first, everything through store.update, bad numbers ignored, ranges clamped.
-import { createAudience, createCeiling, createOverheadPanel, PLATFORM_LIMITS } from './model/scene.js';
+import { createAudience, createCeiling, createOverheadPanel, PLATFORM_LIMITS, isSafeId } from './model/scene.js';
 import { AUDIENCE_KINDS, AUDIENCE_DENSITY_LIMITS, AUDIENCE_MAX } from './model/audience.js';
 import { CEILING_MATERIALS, CEILING_LIMITS } from './model/ceiling.js';
 import { ANTENNA_BANDS } from './model/antenna-band.js';
@@ -359,6 +359,7 @@ export function setTvBlockLevel(store, channel, dbm) {
   const cur = store.getScene().tvBlockLevelsDbm;
   const map = cur && typeof cur === 'object' && !Array.isArray(cur) ? cur : null;
   if (remove && !(map && key in map)) return false;
+  if (!remove && map && key in map && map[key] === clampTo(dbm, L.dbm)) return false; // unchanged: no undo step
   if (!remove && !(map && key in map) && map && Object.keys(map).length >= L.maxEntries) return false;
   store.update((d) => {
     if (remove) { delete d.tvBlockLevelsDbm[key]; if (Object.keys(d.tvBlockLevelsDbm).length === 0) delete d.tvBlockLevelsDbm; return; }
@@ -370,7 +371,7 @@ export function setTvBlockLevel(store, channel, dbm) {
 
 /** clearTvBlockLevels(store): removes every user-entered TV block level (back to the assumed levels) in one undo step. Returns false when there were none. */
 export function clearTvBlockLevels(store) {
-  if (store.getScene().tvBlockLevelsDbm === undefined) return false;
+  if (store.getScene().tvBlockLevelsDbm === undefined) return false; // nothing set: no undo step
   store.update((d) => { delete d.tvBlockLevelsDbm; });
   return true;
 }
@@ -509,7 +510,7 @@ export function importMeasurements(store, text, { linkId, replace = false } = {}
 export function applyCalibration(store, suggestion) {
   const c = suggestion && suggestion.field ? suggestion : suggestion && suggestion.best;
   if (c && c.field === 'environment.wallLossAdjustByMaterialDb' && c.applicable !== false && c.fitted && typeof c.fitted === 'object') { // per-material figures: { material: dB }, each clamped
-    const W = WALL_ADJUST_BY_MATERIAL, entries = Object.entries(c.fitted).filter(([k, v]) => /^[A-Za-z0-9_.:-]{1,64}$/.test(k) && k !== '__proto__' && fin(v)).slice(0, W.maxMaterials);
+    const W = WALL_ADJUST_BY_MATERIAL, entries = Object.entries(c.fitted).filter(([k, v]) => isSafeId(k) && fin(v)).slice(0, W.maxMaterials);
     if (!entries.length) return false;
     return store.update((d) => { d.environment = d.environment || {}; d.environment.wallLossAdjustByMaterialDb = Object.fromEntries(entries.map(([k, v]) => [k, round2(Math.min(W.max, Math.max(W.min, v)))])); });
   }

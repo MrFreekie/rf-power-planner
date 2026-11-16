@@ -54,3 +54,59 @@ test('drawNoiseBurst draws only when there is a noise source; on and off give di
   assert.match(text({ noise: { any: true, riseDb: 12, sources: [{ name: 'Crew PTT', activity: 1 }] } }), /noise source on: \+12 dB \(Crew PTT\)/);
   assert.match(text({ noise: { any: true, riseDb: 0, sources: [{ name: 'Crew PTT', activity: 0 }] } }), /noise source off/);
 });
+
+// ---- review fixes
+import { noiseIsOn } from '../js/view/spectra.js';
+import { readFileSync } from 'node:fs';
+
+test('noiseBursts: a video wall (reflectorId) reaches the RF spectrum as a steady source', () => {
+  const vw = { ...createNoiseSource('video-wall', { reflectorId: 'w1' }), id: 'n1' };
+  const refl = { id: 'w1', p1: { x: 0, y: 0 }, p2: { x: 10, y: 0 }, noise: { preset: 'led-wall' } };
+  const nb = noiseBursts({ noiseSources: [vw], reflectors: [refl] }, fakeResult(-80), 3);
+  assert.equal(nb.any, true); assert.equal(nb.sources[0].activity, 1);
+  assert.equal(noiseBursts({ noiseSources: [vw], reflectors: [] }, fakeResult(-80), 3).any, false, 'no reflector, nothing to show');
+  assert.equal(noiseBursts({ noiseSources: [vw], reflectors: [{ ...refl, noise: { preset: 'off' } }] }, fakeResult(-80), 3).any, false);
+});
+
+test('noiseBursts: the quiet filter uses the peak, so a pulsed source with a low average is kept', () => {
+  const s = { ...src('pyro-trigger'), id: 'n1' };
+  const res = { cascade: { noiseFloorDbm: -100 }, noiseSources: { floorBeforeDbm: -100, sources: [{ id: 'n1', peakDbm: -90, averageDbm: -140 }] } };
+  assert.equal(noiseBursts({ noiseSources: [s] }, res, 0).any, true);
+  res.noiseSources.sources[0].peakDbm = -125;
+  assert.equal(noiseBursts({ noiseSources: [s] }, res, 0).any, false, 'peak under floor - 20 dB');
+  res.noiseSources.sources[0].peakDbm = NaN;
+  assert.equal(noiseBursts({ noiseSources: [s] }, res, 0).any, false, 'non-finite peak');
+});
+
+test('noiseBursts: a faint source adds its average power, not the held peak', () => {
+  const s = { ...src('wifi-ap'), id: 'n1' };
+  const cfg = classifyNoiseWave(s);
+  assert.equal(cfg.mode, 'faint');
+  {
+    const res = { cascade: { noiseFloorDbm: -100 }, noiseSources: { floorBeforeDbm: -100, sources: [{ id: 'n1', peakDbm: -70, averageDbm: -90 }] } };
+    assert.ok(Math.abs(noiseBursts({ noiseSources: [s] }, res, 1).addedDbm + 90) < 0.01);
+  }
+});
+
+test('noiseIsOn and drawNoiseBurst: on or off follows source activity, not the size of the rise', () => {
+  assert.equal(noiseIsOn({ sources: [{ activity: 1 }] }), true);
+  assert.equal(noiseIsOn({ sources: [{ activity: 0 }, { activity: 0.04 }] }), false);
+  const calls = [];
+  const ctx = new Proxy({}, { get: (_, k) => (k === 'canvas' ? {} : (...a) => { calls.push([k, a]); }), set: () => true });
+  const f = { L: 10, pw: 200, T: 0, ph: 100, Y: (v) => 100 + v, X: (v) => v };
+  const th = { warnText: '#a60', fail: '#c00', ink: '#000', paper: '#fff', inkSoft: '#555' };
+  drawNoiseBurst(ctx, th, f, { noiseDbm: -100 }, { noise: { any: true, riseDb: 0.1, sources: [{ name: 'LED', activity: 1 }] } }, 0, 1);
+  assert.match(calls.filter((c) => c[0] === 'fillText' || c[0] === 'strokeText').map((c) => c[1][0]).join('|'), /noise source on: \+0\.1 dB \(LED\)/);
+});
+
+test('spectra: pause freezes the noise clock; pause button has a changing label and no aria-pressed', () => {
+  const code = readFileSync(new URL('../js/view/spectra.js', import.meta.url), 'utf8');
+  assert.match(code, /noiseBursts\(scene, r, noiseT\)/);
+  assert.doesNotMatch(code, /noiseBursts\(scene, r, noiseClockNow\(\)\)/);
+  assert.match(code, /noiseT = noiseClockNow\(\); invalidateAll\(\)/, 'refreshed inside tick only');
+  assert.doesNotMatch(code, /lastNow = lastNow/);
+  assert.doesNotMatch(code, /btn-spectra-pause[^\n]*aria-pressed/);
+  assert.doesNotMatch(code, /pauseBtn\.setAttribute\('aria-pressed'/);
+  const css = readFileSync(new URL('../css/style.css', import.meta.url), 'utf8');
+  assert.match(css, /#toolbar > #btn-spectra-pause/);
+});

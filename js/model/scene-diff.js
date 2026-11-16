@@ -337,6 +337,7 @@ export function headline(diff) {
     if (bits.length) out.push(`${k === 'noiseSources' ? 'Noise sources' : k[0].toUpperCase() + k.slice(1)}: ${bits.join(', ')}.`);
   }
   if (diff.items.environment.length) out.push(`Environment: ${diff.items.environment.slice(0, 3).map((e) => `${e.label.replace(/^Environment /, '')} ${e.fromText} to ${e.toText}`).join('; ')}${diff.items.environment.length > 3 ? '; and more' : ''}.`);
+  if (diff.items.other && diff.items.other.length) out.push(`Other settings: ${diff.items.other.slice(0, 3).map((e) => `${e.label} ${e.fromText} to ${e.toText}`).join('; ')}${diff.items.other.length > 3 ? '; and more' : ''}.`);
   for (const n of s.notes) out.push(n);
   if (out.length === 0) out.push('No differences.');
   return out;

@@ -65,7 +65,7 @@ test('command palette lists the audio source select and tone Hz field and focuse
 });
 
 test('narrow toolbar puts the audio source group right after the first buttons', () => {
-  const m = css.match(/@media \(max-width: 800px\) \{[^@]*?#toolbar > #btn-cmd[^}]*\{ order: -2; \}\s*#toolbar > \.source-bar \{ order: -1; \}/);
+  const m = css.match(/@media \(max-width: 800px\) \{[^@]*?#toolbar > #btn-cmd[^}]*\{ order: -2; \}\s*#toolbar > \.source-bar, #toolbar > #btn-spectra-pause \{ order: -1; \}/);
   assert.ok(m, 'phone media block orders Find and Scenario first, then .source-bar');
 });
 

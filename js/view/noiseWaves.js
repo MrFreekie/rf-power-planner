@@ -186,8 +186,9 @@ export function noiseActivity(cfg, id, t) {
 
 /**
  * noiseBursts(scene, result, t) -> { sources: [{ id, name, activity, peakDbm }], addedDbm, riseDb, floorDbm, any }
- * The noise sources that reach the selected receiver (result.noiseSources, peak levels already include the receiver selectivity) with their on/off state at wave time t. addedDbm is the power sum of
- * peak x activity, riseDb the floor rise over the quiet channel floor it makes right now. any is true when at least one in-channel source exists.
+ * The noise sources listed in result.noiseSources for the selected receiver (peak levels already include the receiver selectivity; sources whose PEAK is more than
+ * QUIET_BELOW_FLOOR_DB under the floor are left out) with their on/off state at wave time t. Video walls are classified with their reflector. addedDbm is the power sum of
+ * peak x activity (average power for faint sources), riseDb the floor rise over the quiet channel floor it makes right now. any is true when at least one such source exists.
  */
 export function noiseBursts(scene, result, t) {
   const ns = result && result.noiseSources, out = { sources: [], addedDbm: -Infinity, riseDb: 0, floorDbm: NaN, any: false };
@@ -196,15 +197,19 @@ export function noiseBursts(scene, result, t) {
   if (!Number.isFinite(floor)) return out;
   out.floorDbm = floor;
   const byId = new Map(scene.noiseSources.map((s) => [s && s.id, s]));
+  const refl = reflectorMap(scene.reflectors);
   let mw = 0;
   for (const x of ns.sources) {
     const src = byId.get(x && x.id);
-    if (!src || src.enabled === false || !Number.isFinite(x.peakDbm) || x.averageDbm < floor - QUIET_BELOW_FLOOR_DB) continue;
-    const cfg = classifyNoiseWave(src);
+    // the quiet filter uses the PEAK level: a pulsed source can have a low average and still stick out of the floor when it fires
+    if (!src || src.enabled === false || !Number.isFinite(x.peakDbm) || x.peakDbm < floor - QUIET_BELOW_FLOOR_DB) continue;
+    const cfg = classifyNoiseWave(src, src.reflectorId ? refl.get(src.reflectorId) || null : null);
     if (!cfg) continue;
     const activity = noiseActivity(cfg, src.id, t);
     out.sources.push({ id: src.id, name: src.name || src.kind, activity, peakDbm: x.peakDbm });
-    mw += Math.pow(10, x.peakDbm / 10) * activity;
+    // faint sources (dense or busy bursts) are always "on" but only add their average power, not the peak
+    const p = cfg.mode === 'faint' && Number.isFinite(x.averageDbm) ? Math.pow(10, x.averageDbm / 10) : Math.pow(10, x.peakDbm / 10) * activity;
+    mw += p;
   }
   out.any = out.sources.length > 0;
   if (mw > 0) { out.addedDbm = 10 * Math.log10(mw); out.riseDb = 10 * Math.log10(1 + Math.pow(10, (out.addedDbm - floor) / 10)); }

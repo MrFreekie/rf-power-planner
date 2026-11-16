@@ -904,7 +904,7 @@ export function solveLink(scene, link) {
     const cre = amp * (re * c - im * s), cim = amp * (re * s + im * c);
     sumRe += cre; sumIm += cim;
     return {
-      ...p, ...(wl.lossDb ? { wallLossDb: wl.lossDb, crossedWalls: wl.crossed, wallLossDetail: wl.detail } : {}),
+      ...p, ...(wl.lossDb || wl.crossed.length ? { wallLossDb: wl.lossDb, crossedWalls: wl.crossed, wallLossDetail: wl.detail } : {}),
       ...(wl.platformLossDb ? { platformLossDb: wl.platformLossDb, platformChords: wl.platforms } : {}),
       ...(wl.audienceLossDb ? { audienceLossDb: wl.audienceLossDb, audienceChords: wl.audienceChords } : {}),
       gainDb: db20(Math.hypot(cre, cim)), phaseRad: Math.atan2(cim, cre), _gt: gt, _gr: gr, ...(polLoss ? { polarisationLossDb: polLoss } : {}),

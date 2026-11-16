@@ -152,3 +152,34 @@ test('map dialog: clicking a TV channel selects it in the controls', () => {
   assert.match(mm.zoom.dialog.find((e) => e.attrs.role === 'region')[0].textContent, new RegExp(`TV channel ${h.n}`));
   mm.destroy();
 });
+
+// ---- review fixes
+test('cardViews: a not-applicable per-material card has no placeholder numbers', () => {
+  const s = measured(MANY); s.reflectors = [s.reflectors[0]];
+  const pm = cardViews(suggestCalibration(s)).find((c) => c.id === 'wall-loss-by-material');
+  assert.equal(pm.applicable, false);
+  assert.doesNotMatch(pm.change, /→|NaN|-\s*dB/); assert.equal(pm.rms, ''); assert.equal(pm.improvement, '');
+  assert.doesNotMatch(JSON.stringify(pm.change), /- dB/);
+});
+test('map dialog: status message survives the refresh, level box follows the store, typed level kept, non-integer channel reported', () => {
+  const doc = fakeDoc(), button = doc.createElement('button'), store = createStore(createDefaultScene());
+  const mm = mountSpectrumMap({ doc, button, store, hostFactory: () => ({ invalidate() {}, destroy() {} }) });
+  mm.open();
+  const root = mm.zoom.dialog;
+  const chan = root.find((e) => e.tag === 'input' && e.attrs['aria-label'] === 'TV channel number')[0];
+  const dbm = root.find((e) => e.tag === 'input' && /^TV block level in dBm/.test(e.attrs['aria-label'] || ''))[0];
+  const status = root.find((e) => e.className === 'map-tvstatus')[0];
+  const setB = byText(root, 'Set level');
+  chan.value = '34'; chan.fire('change'); dbm.value = '-50'; dbm.fire('input'); setB.fire('click');
+  assert.match(status.textContent, /^Channel 34 set to -50 dBm by you\./);
+  store.update((s) => s); // any store change: the subscription refresh must not erase the message
+  mm.refresh && mm.refresh();
+  assert.match(status.textContent, /^Channel 34 set to -50 dBm by you\./);
+  // typed level survives a channel change
+  dbm.value = '-77'; dbm.fire('input'); chan.value = '40'; chan.fire('change');
+  assert.equal(dbm.value, '-77'); assert.doesNotMatch(status.textContent, /set to -50/);
+  // non-integer channel is reported, not rounded
+  chan.value = '7.5'; chan.fire('change');
+  assert.match(status.textContent, /not a TV channel/); assert.equal(mm.state.tvSel, null);
+  mm.destroy();
+});

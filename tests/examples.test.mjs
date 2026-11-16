@@ -59,7 +59,7 @@ test('every example validates, solves, and has a title and note', () => {
   for (const e of EXAMPLES) {
     assert.ok(!ids.has(e.id)); ids.add(e.id);
     const ex = buildExample(e.id);
-    assert.ok(ex.title && ex.note.split('. ').length <= 4, e.id);
+    assert.ok(ex.title && ex.note.split('. ').length <= 5, e.id);
     assert.deepEqual(validateScene(ex.scene), { ok: true, errors: [] }, e.id);
     const link = ex.scene.links[0];
     const r = solveLink(ex.scene, link);

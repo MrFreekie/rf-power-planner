@@ -351,7 +351,7 @@ const nameErrors = (v, max, path, errors) => {
 };
 const ID_RE = /^[A-Za-z0-9_.:-]+$/;
 /** A key or id that is safe to use as a lookup key: short, plain characters, and not an Object.prototype name. */
-const isSafeId = (v) => typeof v === 'string' && v.length >= 1 && v.length <= SL.maxIdChars && ID_RE.test(v) && !(v in Object.prototype);
+export const isSafeId = (v) => typeof v === 'string' && v.length >= 1 && v.length <= SL.maxIdChars && ID_RE.test(v) && !(v in Object.prototype);
 const isFreq = (v) => v > 0 && v <= SL.maxFreqMHz;
 const isDbPos = (v) => isNum(v) && v >= 0 && v <= SL.maxDb;
 
