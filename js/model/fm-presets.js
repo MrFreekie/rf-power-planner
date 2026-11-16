@@ -69,7 +69,9 @@ const S2000_RANGES = [
   { id: 'Gw1', label: 'Gw1 558-608 MHz', fromMHz: 558, toMHz: 608 },
   { id: 'GBw', label: 'GBw 606-678 MHz (2000 series only)', fromMHz: 606, toMHz: 678 },
 ];
-const S2000_IEM_RANGES = S2000_RANGES.filter((r) => ['Aw+', 'Gw', 'Gw1', 'GBw', 'Bw'].includes(r.id));
+// Current sheet (10/2023): Aw+, Gw, Gw1, GBw, Bw. The 09/2019 sheet also lists Aw, Cw and Dw, kept as legacy ranges.
+const S2000_LEGACY_IEM = ['Aw', 'Cw', 'Dw'];
+const S2000_IEM_RANGES = S2000_RANGES.map((r) => (S2000_LEGACY_IEM.includes(r.id) ? { ...r, label: r.label + ' (legacy, 2019 sheet)' } : r));
 const PWR = {
   low: { id: 'low-10mw', label: '10 mW (Low)', powerDbm: mwToDbm(10), lowIntermod: false },
   std: { id: 'std-30mw', label: '30 mW (Standard)', powerDbm: mwToDbm(30), lowIntermod: false },
@@ -194,7 +196,7 @@ const SENNHEISER_G3_2000 = [
   senTx({ id: 'sennheiser-sr2050iem', model: 'SR 2050 IEM', kind: 'IEM transmitter (dual stereo)', options: [PWR.low, PWR.std, PWR.high, PWR.xp], ranges: S2000_IEM_RANGES, windowMHz: 75, freqs: 3000, chPerBank: 32, userBanks: 6, devConf: S, powerConf: S, audioKhz: 15, ppm: 10,
     extra: { mpxPilotKhz: 19, pilotDeviationKhz: 5, antennaOutput: { connector: 'BNC', impedanceOhm: 50 } },
     extraConf: { mpxPilotKhz: S, pilotDeviationKhz: S, antennaOutput: S },
-    sources: SRC_G3['2000.5'], caveat: 'Typical RF output power at 50 ohm, switchable: Low 10 mW, Standard 30 mW, High 50 mW, 100 mW on the SR 2050XP only. Nominal/peak deviation +-24/+-48 kHz, 19 kHz pilot with +-5 kHz deviation, +-10 ppm (SP_1266 v2.0 and 2000 IEM Specifications 10/2023, which agree). Twin transmitter: two independent stereo channels. The Gw1 range is sold as an XP version only. Occupied bandwidth is a Carson estimate (assumed).' }),
+    sources: SRC_G3['2000.5'], caveat: 'Typical RF output power at 50 ohm, switchable: Low 10 mW, Standard 30 mW, High 50 mW, 100 mW on the SR 2050XP only. Nominal/peak deviation +-24/+-48 kHz, 19 kHz pilot with +-5 kHz deviation, +-10 ppm (SP_1266 v2.0 and 2000 IEM Specifications 10/2023, which agree). Twin transmitter: two independent stereo channels. The Gw1 range is sold as an XP version only. Aw, Cw and Dw are legacy ranges from the 2019 sheet. Occupied bandwidth is a Carson estimate (assumed).' }),
   senRx({ id: 'sennheiser-ek2000iem', model: 'EK 2000 IEM', kind: 'bodypack receiver', iem: true, uv: 4, typUv: 1.6, ranges: S2000_IEM_RANGES, windowMHz: 75, freqs: 3000, chPerBank: 32, userBanks: 6, acr: 80, im: 78, blk: 80, diversity: 'ratio', diversityConf: A,
     sources: SRC_G3['2000.5'], caveat: 'Under 4 uV (-95 dBm), typically 1.6 uV (-103 dBm) for 52 dBA S/N; the planner uses the guaranteed figure. Adaptive diversity is mapped to ratio combining (assumed).' }),
 ];

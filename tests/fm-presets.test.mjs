@@ -438,7 +438,8 @@ test('G3 / 2000: deviation, windows, steps, banks, power', () => {
   assert.ok(!g3.some((w) => w.fromMHz === 606));
   assert.ok(FM_PRESETS['sennheiser-em2050'].params.tuningWindows.some((w) => w.id === 'GBw' && w.fromMHz === 606 && w.toMHz === 678));
   assert.equal(FM_PRESETS['sennheiser-em2050'].params.tuningWindows.length, 8);
-  assert.equal(FM_PRESETS['sennheiser-ek2000iem'].params.tuningWindows.length, 5);
+  assert.equal(FM_PRESETS['sennheiser-ek2000iem'].params.tuningWindows.length, 8);
+  assert.ok(FM_PRESETS['sennheiser-sr2050iem'].params.tuningWindows.some((w) => w.id === 'Dw' && w.fromMHz === 790 && w.toMHz === 865 && /legacy/.test(w.label)));
   assert.deepEqual(fmTuningCheck('sennheiser-em300g3', 590), { inWindow: true, window: 'G', onGrid: true });
   assert.equal(fmTuningCheck('sennheiser-em300g3', 620).inWindow, false);
   assert.equal(fmTuningCheck('sennheiser-em2050', 620).window, 'Gw');
