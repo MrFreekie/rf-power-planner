@@ -1146,3 +1146,4 @@ body.vnalab-open { overflow: hidden; }
 .scenes-dialog::backdrop { background: rgba(0, 0, 0, 0.4); }
 .scenes-dialog-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .refl-walls { display: flex; gap: 6px; margin: 6px 0; flex-wrap: wrap; }
+.venue-floor { display: flex; gap: 8px; align-items: center; margin: 6px 0; }

@@ -9,7 +9,10 @@ export function mountVenueBuilder({ container }) {
   const intro = document.createElement('p'); intro.className = 'hint';
   intro.textContent = 'The room the show happens in: stage and platforms, audience and crowd, ceiling, noise sources, floor and propagation settings, reflectors.';
   const host = document.createElement('div'); host.className = 'venue-docked';
-  body.append(intro, host); container.append(summary, body);
+  // The floor surface select is wired in app.js; its element moves here from the top bar so the venue settings sit together.
+  const floorSel = document.getElementById('floor'), floorLabel = floorSel && floorSel.closest('label');
+  if (floorLabel) { floorLabel.classList.add('venue-floor'); body.append(intro, floorLabel, host); } else body.append(intro, host);
+  container.append(summary, body);
   const draw = () => {
     const dock = getVenueDock(); host.textContent = '';
     if (!dock) { const p = document.createElement('p'); p.className = 'hint'; p.textContent = 'No link in the scene.'; host.append(p); return; }
