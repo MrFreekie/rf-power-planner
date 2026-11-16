@@ -28,6 +28,9 @@ import { planExtent, farBounds } from './planExtent.js';
 import { drawWallNoise } from './wallNoiseDraw.js';
 import { drawFresnelPlan, fresnelView } from './fresnelDraw.js';
 import { drawAreas } from './areasDraw.js';
+import { drawCrowds } from './crowdDraw.js';
+import { crowdAria, polygonSetPoint } from '../ui/crowdUi.js';
+import { updateCrowd, moveCrowd } from '../actionsAreas.js';
 import { drawPeoplePlan } from './peopleDraw.js';
 import { drawNoiseSources } from './noiseDraw.js';
 import { drawNoiseWaves } from './noiseWaves.js';
@@ -124,6 +127,7 @@ export function createPlanView(canvas, store) {
     drawPlatforms(ctx, th, vp, scene, sel, handles, scene.units.length);
 
     drawAreas(ctx, th, vp, scene, sel, handles, (m) => fmtLen(m, scene.units));
+    drawCrowds(ctx, th, vp, scene, sel, handles, w);
 
     // coverage heat map under everything else
     const cov = link0 ? coverage.get(link0.id) : null;
@@ -176,7 +180,7 @@ export function createPlanView(canvas, store) {
     if (cursor && !isSnap) { const wp = vp.screenToWorld(cursor.x, cursor.y); haloText(ctx, th, `cursor  x ${fmtLen(dispX(scene, wp.x), scene.units)}  y ${fmtLen(dispY(scene, wp.y), scene.units)}`, w >= 520 ? w - 8 : w / 2, w >= 520 ? h - 8 : 30, { align: w >= 520 ? 'right' : 'center', color: th.ink, px: 12 }); }
 
     const rl = link0 ? solveCached(scene, link0) : null, selF = findItem(scene, sel);
-    const desc = `Plan view of a ${fmtLen(st.width, scene.units)} by ${fmtLen(st.depth, scene.units)} stage. Coordinates: x is 0 at the centre line and grows to the right, y is 0 at the front edge and grows upstage, so the audience side is negative. The plan has ${scene.links.length} link(s) and ${(scene.reflectors || []).length} reflector(s). ${link0 && rl ? `${link0.name}: ${fmtLen(rl.distanceM, scene.units)}, ${rl.status.toUpperCase()}, margin ${fmtDb(rl.marginDb)}. ` : ''}Selected: ${selF ? `${selF.item.name}${selF.item.pos ? ` at ${describePos(scene, selF.item.pos)}` : ''}` : 'none'}. Arrow keys move the selection, Shift for big steps, Alt+arrows or R rotate an antenna, [ and ] change the selection, plus and minus zoom, 0 fits the stage.`;
+    const desc = `Plan view of a ${fmtLen(st.width, scene.units)} by ${fmtLen(st.depth, scene.units)} stage. Coordinates: x is 0 at the centre line and grows to the right, y is 0 at the front edge and grows upstage, so the audience side is negative. The plan has ${scene.links.length} link(s) and ${(scene.reflectors || []).length} reflector(s)${(scene.crowds || []).length ? ` and ${scene.crowds.length} crowd zone(s) (assumed absorption)` : ''}. ${link0 && rl ? `${link0.name}: ${fmtLen(rl.distanceM, scene.units)}, ${rl.status.toUpperCase()}, margin ${fmtDb(rl.marginDb)}. ` : ''}Selected: ${selF ? `${selF.type === 'crowd' ? crowdAria(selF.item) : selF.item.name}${selF.item.pos ? ` at ${describePos(scene, selF.item.pos)}` : ''}` : 'none'}. Arrow keys move the selection, Shift for big steps, Alt+arrows or R rotate an antenna, [ and ] change the selection, plus and minus zoom, 0 fits the stage.`;
     if (desc !== lastDesc) { lastDesc = desc; canvas.setAttribute('aria-description', desc); canvas.setAttribute('role', 'application'); canvas.setAttribute('aria-roledescription', 'interactive plan diagram'); }
   }
 
@@ -360,6 +364,11 @@ export function createPlanView(canvas, store) {
       const sc = store.getScene(), it = (hd.area === 'audience' ? sc.audience : sc.overheadPanels || []).find((q) => q.id === hd.itemId);
       return { key, area: it && { ...it }, startPtr: w0 ? { x: w0.x, y: w0.y } : { x: hd.wx, y: hd.wy } };
     }
+    if (hd.kind === 'crowdBody' || hd.kind === 'crowdVertex') {
+      const cr = (store.getScene().crowds || []).find((q) => q.id === hd.itemId);
+      const p0 = w0 ? { x: w0.x, y: w0.y } : { x: hd.wx, y: hd.wy };
+      return { key, crowd: cr && { ...cr, polygon: cr.polygon.map((p) => ({ ...p })) }, startPtr: p0, applied: { dx: 0, dy: 0 } };
+    }
     if (hd.kind === 'platBody' || hd.kind === 'platCorner' || hd.kind === 'platRot') {
       const pl = (store.getScene().platforms || []).find((q) => q.id === hd.itemId);
       return { key, plat: pl && { ...pl }, startPtr: w0 ? { x: w0.x, y: w0.y } : { x: hd.wx, y: hd.wy } };
@@ -383,6 +392,15 @@ export function createPlanView(canvas, store) {
       const upd = hd.area === 'audience' ? updateAudience : updateOverheadPanel, snap = (v) => (shiftDown ? round2(v) : Math.round(v * 10) / 10), P0 = state.area;
       if (hd.kind === 'areaBody') upd(store, hd.itemId, { x: snap(P0.x + ptr.x - state.startPtr.x), y: snap(P0.y + ptr.y - state.startPtr.y) }, { coalesce: state.key });
       else { const r = resizeFromCorner(P0, hd.corner, { x: snap(ptr.x), y: snap(ptr.y) }, { minSize: 0.2 }); upd(store, hd.itemId, { x: round2(r.x), y: round2(r.y), width: round2(r.width), depth: round2(r.depth) }, { coalesce: state.key }); }
+      return;
+    }
+    if ((hd.kind === 'crowdBody' || hd.kind === 'crowdVertex') && state.crowd) {
+      const snap = (v) => (shiftDown ? round2(v) : Math.round(v * 10) / 10), bd = bounds(store.getScene().stage);
+      if (hd.kind === 'crowdBody') {
+        // total shift since the press, snapped to 0.1 m; moveCrowd takes the step since the last event, and the shared coalesce key makes it one undo step
+        const tx = snap(ptr.x - state.startPtr.x), ty = snap(ptr.y - state.startPtr.y), dx = round2(tx - state.applied.dx), dy = round2(ty - state.applied.dy);
+        if (dx || dy) { moveCrowd(store, hd.itemId, dx, dy, { coalesce: state.key }); state.applied = { dx: tx, dy: ty }; }
+      } else updateCrowd(store, hd.itemId, { polygon: polygonSetPoint(state.crowd.polygon, hd.corner, { x: clamp(snap(ptr.x), bd.x0, bd.x1), y: clamp(snap(ptr.y), bd.y0, bd.y1) }) }, { coalesce: state.key });
       return;
     }
     if (hd.kind === 'platRot' && state.plat) {
@@ -469,6 +487,11 @@ export function createPlanView(canvas, store) {
     if (f.type === 'noise') {
       if (f.item.pos) moveNoiseSource(store, id, { x: f.item.pos.x + dx * step, y: f.item.pos.y + dy * step }, { coalesce: `plan-nudge-${id}` });
       announce(`${f.item.name} moved`, { key: 'move', delay: 350 });
+      return;
+    }
+    if (f.type === 'crowd') {
+      moveCrowd(store, id, round2(dx * step), round2(dy * step), { coalesce: `plan-nudge-${id}` });
+      announce(`${f.item.name || 'Crowd'} moved`, { key: 'move', delay: 350 });
       return;
     }
     if (f.type === 'person') {

@@ -1,6 +1,8 @@
 // Scene mutations for audience areas, the ceiling, overhead panels, point-to-point settings and antenna design band.
 // Same contract as actions.js: store first, everything through store.update, bad numbers ignored, ranges clamped.
 import { createAudience, createCeiling, createOverheadPanel, PLATFORM_LIMITS, isSafeId } from './model/scene.js';
+import { createCrowd, sanitizeName, SCENE_LIMITS } from './model/scene.js';
+import { CROWD_MODES, CROWD_LIMITS } from './model/crowd.js';
 import { AUDIENCE_KINDS, AUDIENCE_DENSITY_LIMITS, AUDIENCE_MAX } from './model/audience.js';
 import { CEILING_MATERIALS, CEILING_LIMITS } from './model/ceiling.js';
 import { ANTENNA_BANDS } from './model/antenna-band.js';
@@ -53,6 +55,64 @@ export function updateAudience(store, id, patch = {}, o = {}) {
 }
 export function removeAudience(store, id) {
   return store.update((d) => { if (Array.isArray(d.audience)) d.audience = d.audience.filter((a) => a.id !== id); });
+}
+
+// ---- crowd zones (polygon absorption, crowd.js) ------------------------------------------------------------------------
+
+const CROWD_OPTIONAL = ['densityPerM2', 'headHeightM', 'kDbPerM', 'lMaxDb'];
+
+function cleanPolygon(poly) {
+  if (!Array.isArray(poly) || poly.length < 3 || poly.length > SCENE_LIMITS.maxCrowdPoints) return null;
+  const out = [];
+  for (const pt of poly) {
+    if (!pt || !fin(pt.x) || !fin(pt.y)) return null;
+    out.push({ x: round2(clampTo(pt.x, [-SCENE_LIMITS.zoneCoordM, SCENE_LIMITS.zoneCoordM])), y: round2(clampTo(pt.y, [-SCENE_LIMITS.zoneCoordM, SCENE_LIMITS.zoneCoordM])) });
+  }
+  return out;
+}
+
+function applyCrowd(c, p) {
+  if (typeof p.name === 'string') c.name = sanitizeName(p.name, CROWD_LIMITS.nameChars, 'Crowd');
+  if (CROWD_MODES.includes(p.mode)) c.mode = p.mode;
+  if (p.polygon !== undefined) { const poly = cleanPolygon(p.polygon); if (poly) c.polygon = poly; }
+  for (const k of CROWD_OPTIONAL) {
+    if (p[k] === null) delete c[k]; // null clears an override (back to the mode default)
+    else if (fin(p[k])) c[k] = round2(clampTo(p[k], CROWD_LIMITS[k]));
+  }
+}
+
+/** addCrowd(store, partial) -> id, null at the 30-crowd limit. Default: a 6 x 4 m standing crowd in front of the stage (offset for each new one). */
+export function addCrowd(store, partial = {}) {
+  let id = null;
+  store.update((d) => {
+    if (!Array.isArray(d.crowds)) d.crowds = [];
+    if (d.crowds.length >= SCENE_LIMITS.maxCrowds) return;
+    const n = d.crowds.length;
+    const c = createCrowd({ name: `Crowd ${n + 1}` });
+    c.polygon = c.polygon.map((pt) => ({ x: pt.x, y: pt.y - 5 * n }));
+    applyCrowd(c, partial);
+    d.crowds.push(c); id = c.id;
+  });
+  return id;
+}
+
+/** updateCrowd(store, id, { name?, mode?, polygon?, densityPerM2?, headHeightM?, kDbPerM?, lMaxDb? }, { coalesce }). null clears an optional override. Returns true when found. */
+export function updateCrowd(store, id, patch = {}, o = {}) {
+  let found = false;
+  store.update((d) => { const c = (d.crowds || []).find((q) => q.id === id); if (!c) return; found = true; applyCrowd(c, patch); }, opts(o));
+  return found;
+}
+
+/** moveCrowd(store, id, dx, dy, { coalesce }): shifts every polygon point (a drag). Returns true when found. */
+export function moveCrowd(store, id, dx, dy, o = {}) {
+  let found = false;
+  if (!fin(dx) || !fin(dy)) return false;
+  store.update((d) => { const c = (d.crowds || []).find((q) => q.id === id); if (!c) return; found = true; applyCrowd(c, { polygon: c.polygon.map((pt) => ({ x: pt.x + dx, y: pt.y + dy })) }); }, opts(o));
+  return found;
+}
+
+export function removeCrowd(store, id) {
+  return store.update((d) => { if (Array.isArray(d.crowds)) { d.crowds = d.crowds.filter((c) => c.id !== id); if (!d.crowds.length) delete d.crowds; } });
 }
 
 // ---- ceiling and overhead panels ------------------------------------------------------------------------------------

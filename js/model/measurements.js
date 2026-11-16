@@ -16,6 +16,7 @@
 //   cross-polar    environment.xpdDb             the cross-polar floor (dB), 5..30, found by a bounded 1-D search (the effect is not linear)
 // Every candidate is verified by solving the scene again with the fitted value, so afterRmsDb is the real residual, not the linearised one.
 // Honest limits: with too few points, or points at nearly the same distance, a constant offset can be explained by any of the three; the cautions say so.
+import { CROWD_CALIBRATION_NOTE } from './crowd.js';
 import { solveLink, DEFAULT_XPD_DB } from './rf.js';
 import { MEASUREMENT_LIMITS, CALIBRATION_FIELDS, WALL_ADJUST_BY_MATERIAL } from './measurement-schema.js';
 
@@ -258,6 +259,7 @@ export function suggestCalibration(scene) {
   out.headline = out.best ? `Best fit: ${out.best.label} (${fmtCand(out.best)})${out.best.confidence === 'low' ? ', low confidence' : ''}.${out.notes.length ? ' This may also be body loss or another cause.' : ''}`
     : out.matches ? 'The model already matches these readings; no calibration is needed.'
     : 'The model does not match these readings and no single calibration value explains them: the readings need explaining (fades, polarisation, a wall).';
+  if (Array.isArray(scene.crowds) && scene.crowds.length) out.notes.push(CROWD_CALIBRATION_NOTE); // after the headline: a crowd note does not change its wording
   return out;
 }
 

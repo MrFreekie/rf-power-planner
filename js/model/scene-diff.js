@@ -32,7 +32,8 @@ const SKIP_TOP = new Set(['version', 'venue']); // venue: a large underlay that 
 function prepare(raw) {
   if (!isObj(raw)) return { scene: { links: [] }, note: 'not a scene object' };
   const { venue, ...rest } = raw; // the venue underlay is not cloned or compared
-  try { return { scene: migrateScene(rest), note: null }; } catch (e) { return { scene: structuredClone(rest), note: `could not be migrated: ${e.message}` }; }
+  const fill = (sc) => { if (isObj(sc) && sc.crowds === undefined) sc.crowds = []; return sc; }; // optional list: a missing one reads as empty, so one added crowd shows as that crowd
+  try { return { scene: fill(migrateScene(rest)), note: null }; } catch (e) { return { scene: fill(structuredClone(rest)), note: `could not be migrated: ${e.message}` }; }
 }
 
 // ---------------------------------------------------------------- walking changes
@@ -79,9 +80,9 @@ const KEY_LABELS = {
   externalNoise: 'external noise', interference: 'interference level', xpdDb: 'cross-polar floor (dB)', wallLossAdjustDb: 'extra wall loss (dB)', material: 'material', name: 'name', enabled: 'on or off',
   thresholdDbm: 'squelch threshold (dBm)', hysteresisDb: 'hysteresis (dB)', mode: 'mode', width: 'width (m)', depth: 'depth (m)', heightM: 'height (m)', zMin: 'bottom height (m)', zMax: 'top height (m)',
   tvChannelWidthMHz: 'TV channel width (MHz)', rxDbm: 'measured level (dBm)', op1dBDbm: 'output P1dB (dBm)', iip3Dbm: 'input IP3 (dBm)', type: 'type', kind: 'kind', preset: 'preset', rxPreset: 'receiver preset',
-  az: 'azimuth (deg)', el: 'elevation (deg)', note: 'note',
+  az: 'azimuth (deg)', polygon: 'outline', densityPerM2: 'density (people per m2)', headHeightM: 'head height (m)', kDbPerM: 'loss slope (dB per m)', lMaxDb: 'loss cap (dB)', el: 'elevation (deg)', note: 'note',
 };
-const SECTION = { links: 'Link', environment: 'Environment', reflectors: 'Reflector', zones: 'Zone', people: 'Person', noiseSources: 'Noise source', measurements: 'Measurement', platforms: 'Platform', stage: 'Stage', imd: 'IMD', coverage: 'Coverage' };
+const SECTION = { links: 'Link', environment: 'Environment', reflectors: 'Reflector', zones: 'Zone', people: 'Person', noiseSources: 'Noise source', measurements: 'Measurement', platforms: 'Platform', crowds: 'Crowd', stage: 'Stage', imd: 'IMD', coverage: 'Coverage' };
 const human = (k) => String(k).replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase();
 const resolve = (scene, segs) => { let cur = scene; for (const s of segs) { if (cur == null) return undefined; cur = typeof s === 'string' ? cur[s] : (Array.isArray(cur) ? cur.find((e) => e && e.id === s.id) : undefined); } return cur; };
 
@@ -198,7 +199,7 @@ const NON_RF_TOP = new Set(['tvBlockLevelsDbm', /* spectrum map only, never reac
 /**
  * diffScenes(a, b) -> { summary: { linksA, linksB, added[], removed[], changed[], notes[], changeCount },
  *   links: [{ id, name, fields: [{path, label, from, to, fromText, toText, kind}], resultA, resultB, deltas, attribution }],
- *   items: { environment[], reflectors{added,removed,changed}, people{...}, noiseSources{...}, zones{...}, measurements{...}, platforms{...}, other[] },
+ *   items: { environment[], reflectors{added,removed,changed}, people{...}, noiseSources{...}, zones{...}, measurements{...}, platforms{...}, crowds{...}, other[] },
  *   resolves }
  * deltas = B minus A: { marginDb, rxLevelDbm, inputPowerDbm, noiseFloorDbm, compressionDb, statusFrom, statusTo, imd: {from, to}, warningsAdded[], warningsRemoved[] } (null when not finite).
  * attribution = { contributions: [{path, label, from, to, contributionDb}], explainedDb, residualDb, exact, truncated } for links whose margin moved, else null.
@@ -218,7 +219,7 @@ export function diffScenes(a, b) {
   const pub = new Map(changes.map((c) => [c, publicChange(c, A, B)]));
   const ownerId = (c) => (c.segs[0] === 'links' && typeof c.segs[1] === 'object' ? c.segs[1].id : null);
 
-  const items = { environment: [], reflectors: emptyItems(), people: emptyItems(), noiseSources: emptyItems(), zones: emptyItems(), measurements: emptyItems(), platforms: emptyItems(), other: [] };
+  const items = { environment: [], reflectors: emptyItems(), people: emptyItems(), noiseSources: emptyItems(), zones: emptyItems(), measurements: emptyItems(), platforms: emptyItems(), crowds: emptyItems(), other: [] };
   for (const c of changes) {
     const top = c.segs[0];
     if (top === 'links') continue;
@@ -331,8 +332,9 @@ export function headline(diff) {
   if (s.imd && s.imd.from !== s.imd.to) out.push(`Intermodulation conflicts go from ${s.imd.from} to ${s.imd.to}.`); // one scene-level sentence, not one per link
   for (const x of s.added) out.push(`${x.name} was added.`);
   for (const x of s.removed) out.push(`${x.name} was removed.`);
-  for (const k of ['reflectors', 'zones', 'noiseSources', 'people', 'platforms', 'measurements']) {
+  for (const k of ['reflectors', 'zones', 'noiseSources', 'people', 'platforms', 'crowds', 'measurements']) {
     const it = diff.items[k], bits = [];
+    if (!it) continue;
     if (it.added.length) bits.push(`${it.added.length} added`); if (it.removed.length) bits.push(`${it.removed.length} removed`); if (it.changed.length) bits.push(`${it.changed.length} changed`);
     if (bits.length) out.push(`${k === 'noiseSources' ? 'Noise sources' : k[0].toUpperCase() + k.slice(1)}: ${bits.join(', ')}.`);
   }

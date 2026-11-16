@@ -724,6 +724,14 @@ summary { min-height: 24px; }
 .flag { display: inline-block; min-width: 1.3em; margin-left: 6px; padding: 0 3px; font-size: 12px; font-weight: 700; line-height: 1.4; text-align: center; color: var(--ink); background: var(--paper); border: 1px solid var(--ink); border-radius: 3px; cursor: help; }
 .flag-I { border-style: dashed; }
 .flag-U { border-style: dotted; border-width: 2px; }
+.flag-A { border-style: double; border-width: 3px; padding: 0 4px; }
+.crowd-form .crowd-pts { margin: 8px 0; padding: 4px 8px 8px; border: 1px solid var(--line); border-radius: var(--radius); min-width: 0; }
+.crowd-form .crowd-pts legend { font-size: 12px; font-weight: 600; padding: 0 4px; }
+.crowd-pt { display: grid; gap: 4px 8px; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px dotted var(--line); }
+.crowd-pt:last-child { border-bottom: 0; margin-bottom: 0; }
+.crowd-conf { margin: 4px 0 8px; padding-left: 18px; font-size: 12px; color: var(--ink-soft); }
+.crowd-caveat { color: var(--ink); }
+@media (max-width: 480px) { .insp-body { padding-left: 16px; padding-right: 16px; } .crowd-form .crowd-pts { margin-left: 0; margin-right: 0; } }
 .ci-preset { margin: 4px 0 0; }
 #readout-extra dd[data-severity="warning"] { color: var(--warn-text); }
 #readout-extra dd { font-size: 13px; }

@@ -10,6 +10,7 @@
 // noise source lists none of the noise assumptions). Flag: U = assumed with no source behind it, I = inferred from a rule of thumb or a published range.
 // sensitivityDb = a plausible size of the error this figure could add to or take off the margin, dB (a stated rule of thumb for each item, not a bound),
 // or null when it cannot be put as a single number. marginIsProven() combines them with combineSensitivity(): root sum of squares between independent mechanisms, a linear sum inside one mechanism.
+import { CROWD_CAVEAT } from './crowd.js';
 import { solveLink, bodyCouplingLossDb, externalNoiseNfDb, DEFAULT_XPD_DB } from './rf.js';
 import { digitalConfigOf, digitalProfile } from './digital-link.js';
 import { COMPRESSION_KNEE_DB, OP1DB_BELOW_OIP3_DB, DEFAULT_OIP3_DBM } from './compression.js';
@@ -106,7 +107,7 @@ function itemsForLink(scene, link, res) {
 
   // Wall and audience loss on the direct path
   const maxOf = (k) => (res.paths || []).reduce((a, p) => Math.max(a, Number.isFinite(p[k]) ? p[k] : 0), 0);
-  const wallDb = Math.max(0, maxOf('wallLossDb') - maxOf('audienceLossDb') - maxOf('platformLossDb'));
+  const wallDb = Math.max(0, maxOf('wallLossDb') - maxOf('audienceLossDb') - maxOf('platformLossDb') - maxOf('crowdLossDb'));
   if (wallDb > 0.05) {
     add({
       id: 'wall-loss', label: 'Wall transmission loss', value: `${fmt(wallDb)} dB`, flag: 'I', sensitivityDb: r1(Math.min(wallDb, Math.max(2, 0.3 * wallDb))), effectDb: r1(wallDb),
@@ -120,6 +121,15 @@ function itemsForLink(scene, link, res) {
       id: 'audience-loss', label: 'Audience absorption', value: `${fmt(audDb)} dB`, flag: 'U', sensitivityDb: r1(Math.min(audDb, Math.max(2, 0.5 * audDb))), effectDb: r1(audDb),
       effect: `A crowd on the path is assumed to absorb ${fmt(audDb)} dB (a fixed figure per metre of crowd, capped). Real absorption depends on crowd density, clothing and height of the antennas.`,
       fix: 'A measured crowd-loss trial at the venue, or a published crowd-attenuation survey at the carrier frequency.',
+    });
+  }
+
+  const crowdDb = maxOf('crowdLossDb');
+  if (crowdDb > 0.05) {
+    add({
+      id: 'crowd-loss', label: 'Crowd absorption', value: `${fmt(crowdDb)} dB`, flag: 'U', sensitivityDb: r1(Math.min(crowdDb, Math.max(3, 0.5 * crowdDb))), effectDb: r1(crowdDb),
+      effect: `The path runs through a crowd zone that is assumed to absorb ${fmt(crowdDb)} dB. ${CROWD_CAVEAT}`,
+      fix: 'An on-site scan with a beacon transmitter through the audience (seated and standing), and antennas raised clear of the heads.',
     });
   }
 

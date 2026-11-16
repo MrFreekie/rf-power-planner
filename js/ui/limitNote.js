@@ -8,6 +8,7 @@ export const LIMIT_OF = Object.freeze({
   transmitter: () => SCENE_LIMITS.maxImdTransmitters,
   platform: () => PLATFORM_LIMITS.max,
   band: () => 16,
+  'crowd zone': () => SCENE_LIMITS.maxCrowds,
 });
 
 /** limitText('reflector') -> 'Limit reached (500 reflectors).' */

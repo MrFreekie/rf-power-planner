@@ -24,6 +24,7 @@ export function planPoints(scene) {
   }
   for (const r of (scene && scene.reflectors) || []) if (r) { add(r.p1); add(r.p2); }
   for (const z of (scene && scene.zones) || []) for (const p of (z && z.polygon) || []) add(p);
+  for (const c of (scene && scene.crowds) || []) for (const p of (c && c.polygon) || []) add(p);
   for (const p of (scene && scene.platforms) || []) {
     if (!p || !num(p.x) || !num(p.y) || !num(p.width) || !num(p.depth)) continue;
     const a = ((num(p.rotationDeg) ? p.rotationDeg : 0) * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);

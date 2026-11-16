@@ -29,6 +29,7 @@ import { noiseSourcesAt, mutedReflectorIds, floorRiseDb } from './noise-sources.
 export { wallNoiseAt, wallFieldDbuvm, WALL_NOISE_PRESETS, WALL_CONSTRUCTIONS, wallConstruction, meshShieldingDb } from './ledwall.js';
 export { rofEffective, rofOpticalLossDb, rofIip3FromSfdr, rofBranchDelays } from './rof.js';
 import { audiencePathLoss } from './audience.js';
+import { crowdPathLoss, CROWD_CAVEAT } from './crowd.js';
 import { CEILING_MATERIALS, overheadPlanes, overheadZoneFraction } from './ceiling.js';
 import { antennaMatch, vswrThroughLoss, BAND_VSWR_WARN, BAND_VSWR_STRONG } from './antenna-band.js';
 export { antennaMatch, mismatchLossDb, returnLossSweep, ANTENNA_BANDS, resolveDesignBand } from './antenna-band.js';
@@ -521,7 +522,10 @@ export function pathWallLoss(scene, points, freqMHz) {
   // Audience (crowd) absorption below head height, ASSUMED model (audience.js)
   const aud = audiencePathLoss(scene, points);
   lossDb += aud.lossDb;
-  return { lossDb, crossed, detail, platformLossDb, platforms, audienceLossDb: aud.lossDb, audienceChords: aud.chords };
+  // Crowd zones (crowd.js): polygon absorption with a Fresnel clearance factor above head height, ASSUMED slope
+  const crowd = crowdPathLoss(scene, points, freqMHz);
+  lossDb += crowd.lossDb;
+  return { lossDb, crossed, detail, platformLossDb, platforms, audienceLossDb: aud.lossDb, audienceChords: aud.chords, crowdLossDb: crowd.lossDb, crowdChords: crowd.chords, crowdDetail: crowd.crowds };
 }
 
 // ---------------------------------------------------------------- cables and chains
@@ -907,6 +911,7 @@ export function solveLink(scene, link) {
       ...p, ...(wl.lossDb || wl.crossed.length ? { wallLossDb: wl.lossDb, crossedWalls: wl.crossed, wallLossDetail: wl.detail } : {}),
       ...(wl.platformLossDb ? { platformLossDb: wl.platformLossDb, platformChords: wl.platforms } : {}),
       ...(wl.audienceLossDb ? { audienceLossDb: wl.audienceLossDb, audienceChords: wl.audienceChords } : {}),
+      ...(wl.crowdLossDb ? { crowdLossDb: wl.crowdLossDb, crowdChords: wl.crowdChords, crowdDetail: wl.crowdDetail } : {}),
       gainDb: db20(Math.hypot(cre, cim)), phaseRad: Math.atan2(cim, cre), _gt: gt, _gr: gr, ...(polLoss ? { polarisationLossDb: polLoss } : {}),
     };
   });
@@ -947,9 +952,11 @@ export function solveLink(scene, link) {
   step(`Free-space loss (${formatLength(distanceM, scene && scene.units && scene.units.length)})`, -fspl);
   const directPlatformDb = direct.platformLossDb || 0;
   const directAudienceDb = direct.audienceLossDb || 0;
-  if (directWallDb - directPlatformDb - directAudienceDb > 1e-12) step('Wall transmission', -(directWallDb - directPlatformDb - directAudienceDb));
+  const directCrowdDb = direct.crowdLossDb || 0;
+  if (directWallDb - directPlatformDb - directAudienceDb - directCrowdDb > 1e-12) step('Wall transmission', -(directWallDb - directPlatformDb - directAudienceDb - directCrowdDb));
   if (directPlatformDb) step('Platform obstruction', -directPlatformDb);
   if (directAudienceDb) step('Audience absorption (assumed)', -directAudienceDb);
+  if (directCrowdDb) step('Crowd absorption (assumed)', -directCrowdDb);
   if (Math.abs(multipathDb) > 1e-9) step('Multipath (coherent sum)', multipathDb);
   step('Rx antenna gain', direct._gr);
   if (isP2p && p2pInfo.diffractionLossDb > 0.05) step(`Diffraction (single knife edge, ${p2pInfo.edge === 'earth' ? 'earth curvature' : 'obstacle'})`, -p2pInfo.diffractionLossDb);
@@ -1082,7 +1089,7 @@ export function solveLink(scene, link) {
     tx: txM.matched ? null : { vswr: txM.vswr, returnLossDb: txM.returnLossDb, mismatchDb: txM.mismatchDb, inBand: txM.inBand, reflectedDbm: txReflectedDbm, reflectedAtPaDbm, vswrAtPa },
     rx: rxM.matched ? null : { vswr: rxM.vswr, returnLossDb: rxM.returnLossDb, mismatchDb: rxM.mismatchDb, inBand: rxM.inBand },
   };
-  return { distanceM, paths, pathLossDb, fsplDb: fspl, rxPowerDbm, antennaMismatch, polarisation, p2p: p2pInfo, wallNoise, noiseSources, compression, waterfall: wf, inputPowerDbm, marginDb, status, cascade, requiredSnrDb: cascade.requiredSnrDb, nearField, warnings };
+  return { distanceM, paths, pathLossDb, fsplDb: fspl, ...(directCrowdDb ? { crowd: { lossDb: directCrowdDb, chords: direct.crowdChords, crowds: direct.crowdDetail, caveat: CROWD_CAVEAT } } : {}), rxPowerDbm, antennaMismatch, polarisation, p2p: p2pInfo, wallNoise, noiseSources, compression, waterfall: wf, inputPowerDbm, marginDb, status, cascade, requiredSnrDb: cascade.requiredSnrDb, nearField, warnings };
 }
 
 // ---------------------------------------------------------------- multi-antenna (branch) IEM zones

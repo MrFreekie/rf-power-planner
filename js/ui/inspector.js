@@ -21,6 +21,9 @@ import { IIP2_PRESETS, DEFAULT_IIP2_DBM, IIP4_OVER_IIP2_DB } from '../model/imd-
 import { WALL_CONSTRUCTIONS, WALL_NOISE_PRESETS, WALL_NOISE_LIMITS } from '../model/ledwall.js';
 import { AUDIENCE_DENSITY_PRESETS, AUDIENCE_DENSITY_LIMITS, AUDIENCE_DB_PER_M_PER_PERSON, AUDIENCE_MAX_LOSS_DB } from '../model/audience.js';
 import { CEILING_MATERIALS, CEILING_LIMITS } from '../model/ceiling.js';
+import { addCrowd, updateCrowd, removeCrowd } from '../actionsAreas.js';
+import { CROWD_MODES, CROWD_DEFAULTS, CROWD_LIMITS, CROWD_CAVEAT, crowdParams } from '../model/crowd.js';
+import { CROWD_MODE_LABELS, CROWD_SHORT_NOTE, newCrowdPartial, polygonAddAfter, polygonRemoveAt, polygonSetPoint, confidenceLines, crowdParamText } from './crowdUi.js';
 import { ANTENNA_BANDS, antennaMatch, resolveDesignBand } from '../model/antenna-band.js';
 import { rofEffective } from '../model/rof.js';
 import { vswrText } from './budgetExtras.js';
@@ -63,7 +66,7 @@ const KIND_NAMES = {
   rof: 'RF over fibre', coupler: 'Directional coupler', biastee: 'Bias tee', dcblock: 'DC block', activesplitter: 'Active splitter', activecombiner: 'Active combiner',
 };
 const PREVIEW_KINDS = new Set(['splitter', 'combiner']);
-const SECTION_FOR = { tx: 'tx', rx: 'rx', reflector: 'refl', link: 'link', platform: 'plats', audience: 'aud', panel: 'ovh', person: 'ppl', noise: 'noise' };
+const SECTION_FOR = { tx: 'tx', rx: 'rx', reflector: 'refl', link: 'link', platform: 'plats', audience: 'aud', crowd: 'crowd', panel: 'ovh', person: 'ppl', noise: 'noise' };
 
 export function mountInspector({ container, store }) {
   container.classList.add('inspector');
@@ -367,7 +370,7 @@ export function mountInspector({ container, store }) {
     const link = c.link;
     const heading = el('h2', null, 'Inspector');
     const who = c.found
-      ? el('p', 'insp-who', c.found.type === 'platform' ? `Selected: platform "${c.found.item.name}"` : c.found.type === 'audience' ? `Selected: audience area "${c.found.item.name}"` : c.found.type === 'panel' ? `Selected: overhead panel "${c.found.item.name}"` : c.found.type === 'reflector' ? `Selected: reflector "${c.found.item.name}"`
+      ? el('p', 'insp-who', c.found.type === 'platform' ? `Selected: platform "${c.found.item.name}"` : c.found.type === 'audience' ? `Selected: audience area "${c.found.item.name}"` : c.found.type === 'crowd' ? `Selected: crowd zone "${c.found.item.name}"` : c.found.type === 'panel' ? `Selected: overhead panel "${c.found.item.name}"` : c.found.type === 'reflector' ? `Selected: reflector "${c.found.item.name}"`
         : c.found.type === 'link' ? `Selected: link "${link.name}"` : `Selected: ${c.found.type === 'tx' ? 'transmitter' : 'receiver'} "${c.found.item.name}"`)
       : el('p', 'insp-who', `Nothing selected: editing link "${link.name}"`);
     container.append(heading, who);
@@ -388,6 +391,8 @@ export function mountInspector({ container, store }) {
 
     const audb = section('aud', 'Audience', `A crowd absorbs signal below head height: ${AUDIENCE_DB_PER_M_PER_PERSON} dB per metre per person per square metre, capped at ${AUDIENCE_MAX_LOSS_DB} dB per path (assumed, unverified). Drag an audience area onto the plan, or add one here.`);
     buildAudience(audb, c);
+    const crb = section('crowd', 'Crowd zones (assumed)', `A crowd zone is a polygon on the plan that absorbs signal passing through it below head height. ${CROWD_SHORT_NOTE} Drag a zone or its corner squares on the plan, or edit the corners below.`);
+    buildCrowd(crb, c);
     const ppb = section('ppl', 'People', 'A person carries a mic and an in-ear pack. Dragging a person moves both packs together; each link stays selectable on its own. Body contact and dampness apply to both packs.');
     buildPeople(ppb, c);
     const nsb = section('noise', 'Noise sources', 'Things that raise the receiver noise floor: displays and lights, power electronics, camera flash, crew radios and phones. All catalogue figures are planning values; the letter in brackets is the least certain figure (S rule or class limit, I inferred, U unverified guess). Average power raises the floor; the peak is what a squelch or meter sees during a burst.');
@@ -642,7 +647,7 @@ export function mountInspector({ container, store }) {
 
     const p2pb = c.link.kind === 'p2p' ? section('p2p', 'Point-to-point path', 'Heights are above a common flat datum. Terrain profiles, multiple edges, rain and ducting are not modelled.') : null;
     if (p2pb) buildP2p(p2pb);
-    const secs = ['stage', 'plats', ...(p2pb ? ['p2p'] : []), 'ppl', 'noise', 'aud', 'ovh', 'link', 'tx', 'rx', 'env', 'chain', ...(refs.chainB ? ['chainB'] : []), 'refl'];
+    const secs = ['stage', 'plats', ...(p2pb ? ['p2p'] : []), 'ppl', 'noise', 'aud', 'crowd', 'ovh', 'link', 'tx', 'rx', 'env', 'chain', ...(refs.chainB ? ['chainB'] : []), 'refl'];
     if (c.scene.imd && c.scene.imd.enabled) { buildImd(section('imd', 'Intermod demo'), c); secs.unshift('imd'); }
     container.append(...secs.map((n) => refs[n].details));
   }
@@ -990,6 +995,73 @@ export function mountInspector({ container, store }) {
     const info = el('p', 'hint');
     updaters.push((cc) => { const a = Aa(cc); if (a) info.textContent = `About ${Math.round(a.width * a.depth * a.densityPerM2)} people. Loss ${(AUDIENCE_DB_PER_M_PER_PERSON * a.densityPerM2).toFixed(2)} dB per metre of path inside the crowd (assumed, unverified).`; });
     form.append(srow, info, button('Remove audience area', 'aud-remove', () => { removeAudience(store, id); store.select(null); }, { cls: 'danger' }));
+    body.append(form);
+  }
+
+  // ---- crowd zones (polygon absorption) ------------------------------------------------------------
+  function buildCrowd(body, c) {
+    const zones = c.scene.crowds || [];
+    const list = el('ul', 'refl-list');
+    zones.forEach((q) => {
+      const li = el('li');
+      const b = button(q.name || 'Crowd', `crowd:${q.id}`, () => store.select(q.id));
+      b.setAttribute('aria-pressed', String(c.sel === q.id));
+      li.append(b); list.append(li);
+    });
+    if (!zones.length) body.append(el('p', 'hint', 'No crowd zones. Add one to model audience absorption.'));
+    body.append(list, button('Add crowd zone', 'crowd-add', (e) => { addOrLimit(store, e && e.currentTarget, 'crowd zone', () => addCrowd(store, newCrowdPartial(store.getScene()))); }, { label: 'Add a crowd zone in front of the stage' }));
+    const q0 = c.found?.type === 'crowd' ? c.found.item : null;
+    if (!q0) return;
+    const id = q0.id;
+    const Q = (cc) => (cc.scene.crowds || []).find((q) => q.id === id) || q0;
+    const upd = (patch, o) => updateCrowd(store, id, patch, o);
+    const assumedFlag = (row) => { const sp = el('span', 'flag flag-A', 'assumed'); sp.title = 'Assumed: an engineering estimate, not a measurement'; row.querySelector('.inp').append(sp); return row; };
+    const lenAxis = (key, label, axis, i) => numberField({
+      key, label, decimals: 2, min: (cc) => lengthToUi(dispRange(cc.scene, axis, -500, 1000)[0], cc.lu), max: (cc) => lengthToUi(dispRange(cc.scene, axis, -500, 1000)[1], cc.lu), step: (cc) => (cc.lu === 'ft' ? 0.5 : 0.1), unit: (cc) => cc.lu,
+      get: (cc) => lengthToUi(dispAxis(cc.scene, axis, (Q(cc).polygon[i] || {})[axis] ?? 0), cc.lu),
+      set: (cc, v, o) => { const pt = { ...Q(cc).polygon[i] }; pt[axis] = internalAxis(cc.scene, axis, lengthFromUi(v, cc.lu)); upd({ polygon: polygonSetPoint(Q(cc).polygon, i, pt) }, o); },
+    });
+    const form = el('div', 'refl-form crowd-form');
+    const def = (cc) => CROWD_DEFAULTS[crowdParams(Q(cc)).mode];
+    form.append(
+      textField({ key: 'crowd-name', label: 'Name', maxLength: CROWD_LIMITS.nameChars, get: (cc) => Q(cc).name, fallback: () => 'Crowd', set: (cc, v, o) => upd({ name: v }, o) }),
+      assumedFlag(selectField({ key: 'crowd-mode', label: 'Mode', options: CROWD_MODES.map((m) => [m, `${CROWD_MODE_LABELS[m]} (head ${CROWD_DEFAULTS[m].headHeightM} m, cap ${CROWD_DEFAULTS[m].lMaxDb} dB)`]), get: (cc) => crowdParams(Q(cc)).mode, set: (cc, v) => upd({ mode: v }) })),
+      assumedFlag(numberField({
+        key: 'crowd-dens', label: 'Density', decimals: 2, min: CROWD_LIMITS.densityPerM2[0], max: CROWD_LIMITS.densityPerM2[1], step: 0.1, unit: 'persons per m2',
+        get: (cc) => crowdParams(Q(cc)).densityPerM2, set: (cc, v, o) => upd({ densityPerM2: v, kDbPerM: null }, o), // density drives the slope (0.9 dB per metre per person per m2) until the slope is set by hand
+      })),
+      assumedFlag(numberField({
+        key: 'crowd-head', label: 'Head height', decimals: 2, min: (cc) => lengthToUi(CROWD_LIMITS.headHeightM[0], cc.lu), max: (cc) => lengthToUi(CROWD_LIMITS.headHeightM[1], cc.lu), step: (cc) => (cc.lu === 'ft' ? 0.25 : 0.05), unit: (cc) => cc.lu,
+        get: (cc) => lengthToUi(crowdParams(Q(cc)).headHeightM, cc.lu), set: (cc, v, o) => upd({ headHeightM: lengthFromUi(v, cc.lu) }, o),
+      })),
+      assumedFlag(numberField({
+        key: 'crowd-k', label: 'Loss slope', decimals: 2, min: CROWD_LIMITS.kDbPerM[0], max: CROWD_LIMITS.kDbPerM[1], step: 0.1, unit: 'dB per metre inside',
+        get: (cc) => crowdParams(Q(cc)).kDbPerM, set: (cc, v, o) => upd({ kDbPerM: v }, o),
+      })),
+      assumedFlag(numberField({
+        key: 'crowd-lmax', label: 'Loss cap', decimals: 1, min: CROWD_LIMITS.lMaxDb[0], max: CROWD_LIMITS.lMaxDb[1], step: 0.5, unit: 'dB (at most 26)',
+        get: (cc) => crowdParams(Q(cc)).lMaxDb, set: (cc, v, o) => upd({ lMaxDb: v }, o),
+      })),
+    );
+    const eff = el('p', 'hint');
+    updaters.push((cc) => { const t = `${crowdParamText(Q(cc))} Mode default: slope ${def(cc).kDbPerM} dB per metre, cap ${def(cc).lMaxDb} dB.`; if (eff.textContent !== t) eff.textContent = t; });
+    form.append(eff, button('Reset to mode defaults', 'crowd-reset', () => { upd({ densityPerM2: null, headHeightM: null, kDbPerM: null, lMaxDb: null }); announce('Crowd values reset to the mode defaults', { key: 'crowd', delay: 100 }); }, { label: 'Clear the density, head height, slope and cap overrides of this crowd zone' }));
+    const pts = el('fieldset', 'crowd-pts');
+    pts.append(el('legend', null, 'Corners (stage coordinates)'));
+    q0.polygon.forEach((_, i) => {
+      const row = el('div', 'crowd-pt');
+      row.append(lenAxis(`crowd-x${i}`, `Corner ${i + 1} x`, 'x', i), lenAxis(`crowd-y${i}`, `Corner ${i + 1} y`, 'y', i));
+      row.append(button('Add corner after', `crowd-add-pt${i}`, () => { const p = polygonAddAfter(Q(getCtx()).polygon, i); if (p) { upd({ polygon: p }); announce(`Corner added after corner ${i + 1}`, { key: 'crowd', delay: 100 }); } }, { label: `Add a corner after corner ${i + 1}` }));
+      row.append(button('Remove', `crowd-del-pt${i}`, () => { const p = polygonRemoveAt(Q(getCtx()).polygon, i); if (p) { upd({ polygon: p }); announce(`Corner ${i + 1} removed`, { key: 'crowd', delay: 100 }); } }, { label: `Remove corner ${i + 1} (a zone needs at least three)` }));
+      pts.append(row);
+    });
+    form.append(pts);
+    const cav = el('p', 'hint crowd-caveat'); cav.textContent = CROWD_CAVEAT; cav.setAttribute('role', 'note');
+    const conf = el('ul', 'crowd-conf'); conf.setAttribute('aria-label', 'Confidence of the crowd model: S sourced, I inferred, A assumed');
+    for (const t of confidenceLines()) conf.append(el('li', null, t));
+    const info = el('p', 'hint');
+    updaters.push((cc) => { const r = cc.result && cc.result.crowd, m = r && r.crowds.find((x) => x.id === id); const t = m ? `On the active link: ${m.lengthM.toFixed(1)} m of path inside, ${m.lossDb.toFixed(1)} dB${m.capped ? ' (at the cap)' : ''}${m.clearance < 1 ? `, antenna height factor ${m.clearance.toFixed(2)}` : ''} (assumed).` : 'The active link does not pass through this zone.'; if (info.textContent !== t) info.textContent = t; });
+    form.append(info, cav, conf, button('Delete crowd zone', 'crowd-remove', () => { removeCrowd(store, id); store.select(null); announce('Crowd zone deleted', { key: 'crowd', delay: 100 }); }, { label: 'Delete this crowd zone', cls: 'danger' }));
     body.append(form);
   }
 
@@ -1475,7 +1547,7 @@ export function mountInspector({ container, store }) {
       (c.scene.noiseSources || []).map((n) => `${n.id}:${n.kind}:${n.reflectorId || ''}`),
       (c.scene.people || []).map((p) => `${p.id}:${p.micLinkId || ''}:${p.iemLinkId || ''}:${(p.extraLinkIds || []).join('+')}`), c.scene.links.map((l) => `${l.id}:${l.kind}`),
       (c.scene.platforms || []).map((p) => p.id),
-      (c.scene.audience || []).map((a) => a.id), (c.scene.overheadPanels || []).map((o) => o.id), !!(c.scene.ceiling),
+      (c.scene.audience || []).map((a) => a.id), (c.scene.crowds || []).map((q) => `${q.id}:${q.id === c.sel ? q.polygon.length : ''}`), (c.scene.overheadPanels || []).map((o) => o.id), !!(c.scene.ceiling),
       c.scene.imd && c.scene.imd.enabled ? c.scene.imd.transmitters.map((t) => t.id) : null,
       c.scene.imd && c.scene.imd.enabled ? (c.scene.imd.bands || []).length : null,
     ]);

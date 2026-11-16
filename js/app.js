@@ -364,9 +364,12 @@ function renderWarnings(list) {
 
 import { peoplePathRows, peopleBudgetRows } from './ui/peopleUi.js';
 import { noiseBudgetRows, noisePathRows } from './ui/noiseUi.js';
+import { crowdBudgetRows, crowdPathRows } from './ui/crowdUi.js';
+import { addCrowd } from './actionsAreas.js';
+import { newCrowdPartial } from './ui/crowdUi.js';
 function renderExtras(r, scene = null, link = null) {
   const dl = $('readout-extra');
-  const rows = budgetExtras(r, fresnelView.on && scene && link ? fresnelFor(scene, link) : null, scene && link ? [...peopleBudgetRows(scene, link, (l) => solveLink(scene, l)), ...noiseBudgetRows(r && r.noiseSources)] : []);
+  const rows = budgetExtras(r, fresnelView.on && scene && link ? fresnelFor(scene, link) : null, scene && link ? [...peopleBudgetRows(scene, link, (l) => solveLink(scene, l)), ...noiseBudgetRows(r && r.noiseSources), ...crowdBudgetRows(r)] : []);
   const sig = JSON.stringify(rows);
   if (dl.dataset.sig === sig) return;
   dl.dataset.sig = sig;
@@ -428,7 +431,7 @@ function renderMode(r, link) {
 
 function renderPaths(r, scene) {
   const body = $('paths-body');
-  const rows = r ? [...pathRows(r, scene, scene.units.length), ...noisePathRows(r.noiseSources, (m) => formatLength(m, scene.units.length)), ...peoplePathRows(scene, pickActiveLink(scene, store.getSelection()), (l) => solveLink(scene, l))] : [];
+  const rows = r ? [...pathRows(r, scene, scene.units.length), ...noisePathRows(r.noiseSources, (m) => formatLength(m, scene.units.length)), ...crowdPathRows(r, (m) => formatLength(m, scene.units.length)), ...peoplePathRows(scene, pickActiveLink(scene, store.getSelection()), (l) => solveLink(scene, l))] : [];
   $('paths-summary').textContent = `Paths (${rows.length})`;
   $('paths-len-h').textContent = `Length (${scene.units.length})`;
   const sig = JSON.stringify([rows, scene.units.length]);
@@ -564,6 +567,7 @@ try {
     ...collectToolbarItems(document),
     ...collectControlItems(document),
     { id: 'cmd:btn-plan-fit', label: 'Fit all (plan view)', group: 'Command', keywords: 'zoom fit view reset', run: () => { const b = $('btn-plan-fit'); if (b) b.click(); } },
+    { id: 'cmd:add-crowd', label: 'Add crowd zone', group: 'Command', keywords: 'crowd audience absorption polygon people add', run: () => { const id = addCrowd(store, newCrowdPartial(store.getScene())); if (id) store.select(id); } },
     ...collectSectionItems(document),
     ...exampleItems(EXAMPLES, (id) => { applyExample(id); }),
   ] });

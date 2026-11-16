@@ -33,6 +33,7 @@ import { WALL_NOISE_PRESETS, WALL_NOISE_LIMITS, WALL_CONSTRUCTIONS } from './led
 import { validatePerson, prunePeople, PEOPLE_LIMITS, linkOwners } from './people.js';
 import { validateNoiseSource, wallNoiseSourcesFromReflectors, NOISE_SOURCE_LIMITS } from './noise-sources.js';
 import { AUDIENCE_KINDS, AUDIENCE_DENSITY_LIMITS, AUDIENCE_MAX } from './audience.js';
+import { CROWD_MODES, CROWD_LIMITS } from './crowd.js';
 import { ANTENNA_BANDS } from './antenna-band.js';
 import { TV_BLOCK_LEVEL_LIMITS } from './spectrum-map.js';
 import { MEASUREMENT_LIMITS, validateMeasurement, CALIBRATION_FIELDS, WALL_ADJUST_BY_MATERIAL } from './measurement-schema.js';
@@ -57,6 +58,11 @@ export function createCeiling(overrides = {}) {
 /** An audience area (crowd absorption layer, audience.js). */
 export function createAudience(overrides = {}) {
   return { id: newId('aud'), name: 'Audience', x: 0, y: 0, width: 6, depth: 4, kind: 'standing', densityPerM2: 2, ...overrides };
+}
+
+/** A crowd zone (polygon absorption, crowd.js). Default: a 6 x 4 m standing crowd. Optional fields: densityPerM2, headHeightM, kDbPerM, lMaxDb. */
+export function createCrowd(overrides = {}) {
+  return { id: newId('crowd'), name: 'Crowd', mode: 'standing', polygon: [{ x: 0, y: 2 }, { x: 6, y: 2 }, { x: 6, y: 6 }, { x: 0, y: 6 }], ...overrides };
 }
 
 export function createPlatform(overrides = {}) {
@@ -328,7 +334,7 @@ const inRange = (v, lo, hi) => isNum(v) && v >= lo && v <= hi;
 export const SCENE_LIMITS = Object.freeze({
   maxText: 4 * 1024 * 1024, // characters of scene JSON that deserialize() will parse
   maxDepth: 24, maxNodes: 200000, maxString: 1000, // generic shape guard (the venue underlay is checked on its own)
-  maxLinks: 64, maxPeople: 64, maxReflectors: 500, maxZones: 100, maxZonePoints: 500, maxImdTransmitters: 16, maxImdGroups: 8, maxChain: 32, maxBranches: 16, maxTvBlockLevels: 70, maxWallAdjustMaterials: 32,
+  maxLinks: 64, maxPeople: 64, maxReflectors: 500, maxZones: 100, maxZonePoints: 500, maxImdTransmitters: 16, maxImdGroups: 8, maxChain: 32, maxBranches: 16, maxTvBlockLevels: 70, maxWallAdjustMaterials: 32, maxCrowds: 30, maxCrowdPoints: 64,
   coordM: 10000, zoneCoordM: 2000, zM: 1000, maxFreqMHz: 1e6, maxDb: 1000, maxIdChars: 64,
 });
 const SL = SCENE_LIMITS;
@@ -569,6 +575,22 @@ export function validateScene(scene) {
       for (const k of ['width', 'depth']) if (!(isNum(a[k]) && a[k] >= s0 && a[k] <= s1)) errors.push(`${p}.${k} must be between ${s0} and ${s1}`);
       if (!(isNum(a.densityPerM2) && a.densityPerM2 >= AUDIENCE_DENSITY_LIMITS[0] && a.densityPerM2 <= AUDIENCE_DENSITY_LIMITS[1])) errors.push(`${p}.densityPerM2 must be between ${AUDIENCE_DENSITY_LIMITS[0]} and ${AUDIENCE_DENSITY_LIMITS[1]}`);
       if (a.headM !== undefined && !(isNum(a.headM) && a.headM >= 0.3 && a.headM <= 2.5)) errors.push(`${p}.headM must be between 0.3 and 2.5`);
+    });
+  }
+  if (scene.crowds !== undefined) { // optional crowd zones (crowd.js)
+    if (!Array.isArray(scene.crowds)) errors.push('crowds must be an array');
+    else if (!checkCount(scene.crowds, SL.maxCrowds, 'crowds', errors)) { /* reported */ } else scene.crowds.forEach((c, i) => {
+      const p = `crowds[${i}]`;
+      if (!isObj(c)) { errors.push(`${p} must be an object`); return; }
+      checkId(c.id, p);
+      nameErrors(c.name, CROWD_LIMITS.nameChars, p, errors);
+      if (!CROWD_MODES.includes(c.mode)) errors.push(`${p}.mode must be seated, standing or packed`);
+      if (!Array.isArray(c.polygon) || c.polygon.length < 3) errors.push(`${p}.polygon needs at least 3 points`);
+      else if (checkCount(c.polygon, SL.maxCrowdPoints, `${p}.polygon`, errors)) c.polygon.forEach((pt, j) => checkPos(pt, `${p}.polygon[${j}]`, errors, ['x', 'y'], SL.zoneCoordM));
+      for (const k of ['densityPerM2', 'headHeightM', 'kDbPerM', 'lMaxDb']) {
+        const lim = CROWD_LIMITS[k];
+        if (c[k] !== undefined && !(isNum(c[k]) && c[k] >= lim[0] && c[k] <= lim[1])) errors.push(`${p}.${k} must be between ${lim[0]} and ${lim[1]}`);
+      }
     });
   }
   if (scene.tvChannelWidthMHz !== undefined && scene.tvChannelWidthMHz !== 6 && scene.tvChannelWidthMHz !== 8) errors.push('tvChannelWidthMHz must be 6 or 8');
@@ -865,6 +887,7 @@ export function migrateScene(raw) {
   if (Array.isArray(raw.zones) && raw.zones.length > SL.maxZones) throw new Error(`Scene has more than ${SL.maxZones} zones`);
   if (Array.isArray(raw.overheadPanels) && raw.overheadPanels.length > CEILING_LIMITS.panelsMax) throw new Error(`Scene has more than ${CEILING_LIMITS.panelsMax} overhead panels`);
   if (Array.isArray(raw.audience) && raw.audience.length > AUDIENCE_MAX) throw new Error(`Scene has more than ${AUDIENCE_MAX} audience areas`);
+  if (Array.isArray(raw.crowds) && raw.crowds.length > SL.maxCrowds) throw new Error(`Scene has more than ${SL.maxCrowds} crowds`);
   if (Array.isArray(raw.platforms) && raw.platforms.length > PLATFORM_LIMITS.max) throw new Error(`Scene has more than ${PLATFORM_LIMITS.max} platforms`);
   if (Array.isArray(raw.measurements) && raw.measurements.length > MEASUREMENT_LIMITS.max) throw new Error(`Scene has more than ${MEASUREMENT_LIMITS.max} measurements`);
   if (Array.isArray(raw.noiseSources) && raw.noiseSources.length > NOISE_SOURCE_LIMITS.max) throw new Error(`Scene has more than ${NOISE_SOURCE_LIMITS.max} noise sources`);
@@ -953,6 +976,7 @@ export function migrateScene(raw) {
   if (Array.isArray(s.reflectors)) for (const r of s.reflectors) if (isObj(r) && r.name !== undefined) { const n = sanitizeName(r.name, NAME_LIMITS.reflector, 'Reflector'); if (n !== r.name) r.name = n; }
   if (Array.isArray(s.people)) for (const pe of s.people) if (isObj(pe) && pe.name !== undefined) { const n = sanitizeName(pe.name, NAME_LIMITS.person, 'Person'); if (n !== pe.name) pe.name = n; }
   if (Array.isArray(s.noiseSources)) for (const n0 of s.noiseSources) if (isObj(n0) && n0.name !== undefined) { const n = sanitizeName(n0.name, NAME_LIMITS.noiseSource, 'Noise source'); if (n !== n0.name) n0.name = n; }
+  if (Array.isArray(s.crowds)) for (const c0 of s.crowds) if (isObj(c0) && c0.name !== undefined) { const n = sanitizeName(c0.name, CROWD_LIMITS.nameChars, 'Crowd'); if (n !== c0.name) c0.name = n; }
   if (Array.isArray(s.people)) prunePeople(s); // item 36: no reference to a link that is gone, wrong or already owned
   syncScene(s);
   // while (s.version < SCHEMA_VERSION) { apply step; s.version++ }
