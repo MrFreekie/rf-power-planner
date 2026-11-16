@@ -1,7 +1,7 @@
 // Receive rack edits (antennas, splitters, receivers and their connections). Each runs as one undo step through store.update.
 // The first edit adopts the links as they are into scene.rack (deriveRack); from then on the rack drives each mic link's receive path.
 import { deriveRack, RACK_LIMITS } from './model/rack.js';
-import { newId } from './model/scene.js';
+import { newId, createChainItem, createChainItemFromPreset } from './model/scene.js';
 
 const LEGACY_SPLIT = (it) => !!it && (it.presetId === 'splitter-2' || it.presetId === 'active-splitter-4') && !it.rackSplitter;
 
@@ -167,3 +167,30 @@ export function removeCombiner(store, id) {
 
 /** setSplitterPorts(store, id, ports | null): the physical outputs of a splitter (null = as many as are used). Unused ones are reported as needing a 50 ohm load. */
 export const setSplitterPorts = (store, id, ports) => store.update((d) => { const s = adopt(d).splitters.find((x) => x.id === id); if (!s) return; const n = Math.round(Number(ports)); if (n >= 2 && n <= 16) s.ports = n; else delete s.ports; });
+
+/** addAntennaChainItem(store, antennaId, { kind?: 'cable', presetId? }): append a cable, booster, filter or fibre item to the run between a receive antenna and its splitter or receiver. */
+export function addAntennaChainItem(store, antennaId, { kind = 'cable', presetId } = {}) {
+  return store.update((d) => {
+    const a = adopt(d).antennas.find((x) => x.id === antennaId); if (!a) return;
+    a.chain = a.chain || []; if (a.chain.length >= 8) return;
+    a.chain.push(presetId ? createChainItemFromPreset(presetId) : createChainItem(kind));
+  });
+}
+
+/** setAntennaChainItem(store, antennaId, itemId, patch): change lengthM, cableType, gainDb, nfDb or lossDb of one item. */
+export function setAntennaChainItem(store, antennaId, itemId, patch) {
+  return store.update((d) => {
+    const a = adopt(d).antennas.find((x) => x.id === antennaId), it = a && (a.chain || []).find((c) => c.id === itemId); if (!it) return;
+    for (const k of ['lengthM', 'gainDb', 'nfDb', 'lossDb', 'fibreKm']) if (patch[k] !== undefined && Number.isFinite(Number(patch[k]))) it[k] = Math.max(-200, Math.min(2000, Number(patch[k])));
+    if (typeof patch.cableType === 'string' && /^[a-z0-9_-]{1,32}$/.test(patch.cableType)) it.cableType = patch.cableType;
+  });
+}
+
+/** removeAntennaChainItem(store, antennaId, itemId) */
+export const removeAntennaChainItem = (store, antennaId, itemId) => store.update((d) => { const a = adopt(d).antennas.find((x) => x.id === antennaId); if (a && a.chain) a.chain = a.chain.filter((c) => c.id !== itemId); });
+
+/** setAntennaZones(store, antennaId, zoneIds): the coverage zones this receive antenna is meant to serve (a planning note; the maths does not use it yet). */
+export const setAntennaZones = (store, antennaId, zoneIds) => store.update((d) => {
+  const a = adopt(d).antennas.find((x) => x.id === antennaId); if (!a) return;
+  const ok = new Set((d.zones || []).map((z) => z.id)); a.zones = [...new Set(zoneIds)].filter((z) => ok.has(z));
+});

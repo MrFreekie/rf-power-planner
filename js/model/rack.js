@@ -59,6 +59,8 @@ export function compileRack(scene, mk) {
   const rack = scene && scene.rack;
   if (!rack || !Array.isArray(rack.receivers)) return scene;
   const links = scene.links || [], used = new Map();
+  const zoneIds = new Set((scene.zones || []).map((z) => z.id));
+  for (const a of rack.antennas || []) if (Array.isArray(a.zones)) a.zones = a.zones.filter((z) => zoneIds.has(z)); // a deleted zone leaves the list
   for (const r of rack.receivers) r.channels = (r.channels || []).filter((c) => links.some((l) => l.id === c.linkId && l.kind === 'mic')); // a link that went or changed kind leaves its channel
   rack.receivers = rack.receivers.filter((r) => r.channels.length);
   const placed = new Set(rack.receivers.flatMap((r) => r.channels.map((c) => c.linkId)));
@@ -74,15 +76,20 @@ export function compileRack(scene, mk) {
     delete l.rx.sharedAntennaOf; // the rack owns the sharing now
     l.chain = (l.chain || []).filter((it) => !isRackItem(it));
     const { splitter, antA, antB } = channelRoute(rack, ch);
+    const run = (a, tag) => ((a && a.chain) || []).map((it) => ({ ...structuredClone(it), id: `${String(it.id || 'ci').slice(0, 24)}_${tag}${l.id.slice(0, 30)}`, rackSplitter: true })); // an antenna's own cable, booster or fibre run, in front of any splitter
+    const preA = run(antA, 'a'), preB = run(antB, 'b');
     if (antA) { l.rx.pos = structuredClone(antA.pos); l.rx.antenna = structuredClone(antA.antenna); }
     const div = l.rx.diversity;
     if (div && antB) { div.enabled = true; div.antennaB = { ...(div.antennaB || {}), pos: structuredClone(antB.pos), antenna: structuredClone(antB.antenna) }; }
     else if (div && ch.antB === null && !splitter && div.enabled) { /* channel says no antenna B: leave the link's own setting */ }
-    if (splitter) {
-      const item = { ...mk.fromPreset(RACK_SPLITTER[splitter.type] || RACK_SPLITTER.passive, { ports: Math.min(Math.max(used.get(splitter.id) || 2, splitter.ports || 2), 16) }), rackSplitter: true };
-      l.chain.unshift(item);
-      if (div && div.antennaB && Array.isArray(div.antennaB.chain)) div.antennaB.chain = [{ ...item }, ...div.antennaB.chain.filter((it) => !isRackItem(it))];
-    } else if (div && div.antennaB && Array.isArray(div.antennaB.chain)) div.antennaB.chain = div.antennaB.chain.filter((it) => !isRackItem(it));
+    const item = splitter ? { ...mk.fromPreset(RACK_SPLITTER[splitter.type] || RACK_SPLITTER.passive, { ports: Math.min(Math.max(used.get(splitter.id) || 2, splitter.ports || 2), 16) }), id: `sp_${l.id.slice(0, 40)}`, rackSplitter: true } : null;
+    const jumper = l.chain; // what is left once the rack items are out: the receiver's own leads
+    l.chain = [...preA, ...(item ? [item] : []), ...jumper];
+    if (div && div.antennaB) {
+      const own = Array.isArray(div.antennaB.chain) ? div.antennaB.chain.filter((it) => !isRackItem(it)) : null;
+      if (antB && (preA.length || preB.length || own)) div.antennaB.chain = [...preB, ...(item ? [{ ...item, id: `spb_${l.id.slice(0, 40)}` }] : []), ...(own || structuredClone(jumper))];
+      else if (own) div.antennaB.chain = own;
+    }
   }
   compileTxRack(scene, rack, links, mk);
   return scene;
@@ -137,6 +144,7 @@ export function validateRack(scene) {
   for (const [k, max] of [['transmitters', RACK_LIMITS.maxTransmitters], ['combiners', RACK_LIMITS.maxCombiners]]) if (rack[k] !== undefined && (!Array.isArray(rack[k]) || rack[k].length > max)) errors.push(`rack.${k} must be an array of at most ${max}`);
   if (errors.length) return errors;
   for (const k of ['splitters', 'combiners']) (rack[k] || []).forEach((x, i) => { if (x.ports !== undefined && !(Number.isInteger(x.ports) && x.ports >= 2 && x.ports <= 16)) errors.push(`rack.${k}[${i}].ports must be a whole number from 2 to 16`); });
+  rack.antennas.forEach((a, i) => { if (a.chain !== undefined && (!Array.isArray(a.chain) || a.chain.length > 8)) errors.push(`rack.antennas[${i}].chain must be an array of at most 8 items`); if (a.zones !== undefined && (!Array.isArray(a.zones) || a.zones.length > 100 || !a.zones.every(safe))) errors.push(`rack.antennas[${i}].zones must be a list of zone ids`); });
   rack.antennas.forEach((a, i) => { if (a.load !== undefined && typeof a.load !== 'boolean') errors.push(`rack.antennas[${i}].load must be true or false`); });
   (rack.combiners || []).forEach((c, i) => { take(c && c.id, `rack.combiners[${i}]`); if (c.type !== 'passive' && c.type !== 'active') errors.push(`rack.combiners[${i}].type must be passive or active`); if (c.cable && !(num(c.cable.lengthM) && c.cable.lengthM >= 0 && safe(c.cable.type))) errors.push(`rack.combiners[${i}].cable invalid`); });
   (rack.transmitters || []).forEach((t, i) => {
@@ -209,6 +217,11 @@ export function rackWarnings(scene) {
   for (const b of rack.combiners || []) {
     const n = (rack.transmitters || []).reduce((k, t) => k + t.channels.filter((c) => c.combinerId === b.id).length, 0);
     if (n && !ant(b.antennaId)) w.push({ key: `combiner:${b.id}`, level: 'warn', text: `${b.name} output has no antenna or load: ${open}.` });
+  }
+  const zones = scene.zones || [], rxAnt = (rack.antennas || []).filter((a) => a.role !== 'tx');
+  if (zones.length && scene.rack) {
+    for (const z of zones) if (!rxAnt.some((a) => (a.zones || []).includes(z.id))) w.push({ key: `zone:${z.id}`, level: 'info', text: `Zone ${z.name || z.id} has no receive antenna serving it.` });
+    for (const a of rxAnt) if (!(a.zones || []).length) w.push({ key: `antenna:${a.id}`, level: 'info', text: `${a.name} serves no zone.` });
   }
   for (const f of freePorts(rack)) w.push({ key: `${f.kind}:${f.id}`, level: 'info', text: `${f.name} has ${f.free} unused ${f.kind === 'combiner' ? 'input' : 'output'}${f.free === 1 ? '' : 's'}: fit a 50 ohm load on ${f.free === 1 ? 'it' : 'each'} (1 W is plenty for an IEM, 2 W gives margin).` });
   return w;

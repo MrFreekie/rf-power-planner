@@ -3,10 +3,14 @@
 import { rackSections, deriveRack, rackWarnings, rackLoads } from '../model/rack.js';
 import { CABLES } from '../model/library.js';
 import { linkCard } from '../model/inventory.js';
+import { inventoryView } from './inventoryUi.js';
+import { addLink } from '../actions.js';
+import { setLinkFocus } from '../view/linkFocus.js';
+import { CHAIN_PRESETS } from '../model/chain-presets.js';
 import { gearPickers } from './gearUi.js';
 import {
   renameRackItem, addRackAntenna, addRackSplitter, setSplitterType, setSplitterInput, connectChannel, moveChannel, removeRackItem, setRackAntenna,
-  addRackCombiner, setCombiner, setSplitterPorts, connectTxChannel, moveTxChannel, removeCombiner,
+  addRackCombiner, setCombiner, setSplitterPorts, addAntennaChainItem, setAntennaChainItem, removeAntennaChainItem, setAntennaZones, connectTxChannel, moveTxChannel, removeCombiner,
 } from '../actionsRack.js';
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
@@ -14,9 +18,10 @@ const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls)
 export function mountRack({ container, store }) {
   container.textContent = '';
   const summary = el('summary', container.tagName === 'DETAILS' ? '' : 'ob-summary', 'Radio items');
-  const body = el('div', 'ob-body'), out = el('div', 'rack-out');
+  const body = el('div', 'ob-body'), out = el('div', 'rack-out'), pack = el('details', 'inv-pack');
   out.setAttribute('aria-live', 'polite');
   container.append(summary, body);
+  if (container.tagName === 'DETAILS') container.open = true;
   const open = new Set(); // expanded item keys survive a redraw
 
   const field = (label, control) => { const l = el('label', 'inv-field'); l.append(el('span', '', label), control); return l; };
@@ -51,6 +56,7 @@ export function mountRack({ container, store }) {
       const d = el('details', 'rack-item'); d.dataset.key = key; d.open = open.has(key);
       d.addEventListener('toggle', () => { if (d.open) open.add(key); else open.delete(key); });
       const ws = warnBy.get(key) || [], sum = el('summary', ws.some((w) => w.level === 'warn') ? 'rack-warn' : '', (ws.length ? (ws.some((w) => w.level === 'warn') ? '⚠ ' : 'ℹ ') : '') + title);
+      if (['mic', 'bodypack', 'receiver', 'transmitter'].includes(key.split(':')[0])) { const lid = key.split(':')[1]; sum.addEventListener('pointerenter', () => setLinkFocus(lid)); sum.addEventListener('pointerleave', () => setLinkFocus(null)); }
       d.append(sum); const b = el('div', 'rack-edit'); for (const w of ws) b.append(el('p', w.level === 'warn' ? 'rack-warn-text' : 'hint', w.text)); fill(b); d.append(b); return d;
     };
     const props = (id, b, idx) => { const c = linkCard(scene, id); if (c) for (const i of idx) if (c.lines[i]) b.append(el('p', 'hint', c.lines[i])); };
@@ -63,7 +69,25 @@ export function mountRack({ container, store }) {
         const a = rack.antennas.find((x) => x.id === it.id);
         b.append(field('Name', text('Antenna name', a.name, (v) => renameRackItem(store, 'antennas', a.id, v))));
         for (const k of ['x', 'y', 'z']) b.append(field(`${k} (m)`, num(`Antenna ${k}`, a.pos[k], (v) => setRackAntenna(store, a.id, { pos: { [k]: v } }), k === 'z' ? 0 : -500, k === 'z' ? 50 : 500)));
-        b.append(el('p', 'hint', `${a.antenna.type}, ${a.antenna.gainDbi} dBi. Antenna type and aim are set in the inspector.`), btn('Remove antenna', () => removeRackItem(store, 'antennas', a.id)));
+        b.append(el('p', 'hint', `${a.antenna.type}, ${a.antenna.gainDbi} dBi. Antenna type and aim are set in the inspector.`));
+        if (a.role !== 'tx') {
+          b.append(el('h5', '', 'Cable run from this antenna'), el('p', 'hint', 'Cable, booster, filter or fibre between the antenna and its splitter or receiver. Every receiver on this antenna shares it, in the order listed.'));
+          (a.chain || []).forEach((c) => {
+            const row = el('div', 'rack-chain'); row.append(el('strong', '', c.presetId && CHAIN_PRESETS[c.presetId] ? CHAIN_PRESETS[c.presetId].label : c.kind));
+            if (c.kind === 'cable') row.append(field('Cable', select('Cable type', Object.entries(CABLES).map(([k, v]) => [k, v.name]), c.cableType, (v) => setAntennaChainItem(store, a.id, c.id, { cableType: v }))), field('Length (m)', num('Cable length', c.lengthM, (v) => setAntennaChainItem(store, a.id, c.id, { lengthM: v }), 0, 500)));
+            else if (c.kind === 'booster') row.append(field('Gain (dB)', num('Gain', c.gainDb, (v) => setAntennaChainItem(store, a.id, c.id, { gainDb: v }), -50, 60)), field('Noise figure (dB)', num('Noise figure', c.nfDb, (v) => setAntennaChainItem(store, a.id, c.id, { nfDb: v }), 0, 30)));
+            else if (c.fibreKm !== undefined) row.append(field('Fibre (km)', num('Fibre length', c.fibreKm, (v) => setAntennaChainItem(store, a.id, c.id, { fibreKm: v }), 0, 20)));
+            else if (c.lossDb !== undefined) row.append(field('Loss (dB)', num('Loss', c.lossDb, (v) => setAntennaChainItem(store, a.id, c.id, { lossDb: v }), 0, 60)));
+            row.append(btn('Remove', () => removeAntennaChainItem(store, a.id, c.id))); b.append(row);
+          });
+          const add = select('Add to the cable run', [['', 'Add to the cable run...'], ['cable', 'Cable'], ...['lna-20', 'booster-12', 'filter-bandpass', 'rof-passive-1km', 'rof-active-lna', 'biastee', 'dcblock'].filter((k) => CHAIN_PRESETS[k]).map((k) => [k, CHAIN_PRESETS[k].label])], '', (v) => { if (v) addAntennaChainItem(store, a.id, v === 'cable' ? { kind: 'cable' } : { presetId: v }); });
+          b.append(add);
+          if ((scene.zones || []).length) {
+            b.append(el('h5', '', 'Zones this antenna serves'), el('p', 'hint', 'A planning note: the list warns about a zone no antenna serves. Coverage results do not use it yet.'));
+            for (const z of scene.zones) { const l = el('label', 'inv-field'), cb = el('input'); cb.type = 'checkbox'; cb.checked = (a.zones || []).includes(z.id); cb.addEventListener('change', () => setAntennaZones(store, a.id, scene.zones.filter((q) => (q.id === z.id ? cb.checked : (a.zones || []).includes(q.id))).map((q) => q.id))); l.append(cb, el('span', '', ` ${z.name || z.id}`)); b.append(l); }
+          }
+        }
+        b.append(btn('Remove antenna', () => removeRackItem(store, 'antennas', a.id)));
       },
       splitter: (it, b) => {
         const s = rack.splitters.find((x) => x.id === it.id);
@@ -116,17 +140,35 @@ export function mountRack({ container, store }) {
       for (const it of sec.items) out.append(details(`${it.kind}:${it.id}`, it.text, (b) => (editors[it.kind] || (() => {}))(it, b)));
     }
     if (!sections.length) out.append(el('p', 'hint', 'No radio items yet.'));
+    const iv = inventoryView(scene, store.getSelection());
+    summary.textContent = `Radio items (${iv.summary})`;
+    pack.textContent = ''; pack.append(el('summary', '', 'What to pack'));
+    const list = (title, items, fmt) => { if (!items.length) return; pack.append(el('h5', '', title)); const ul = el('ul'); for (const it of items) ul.append(el('li', '', fmt(it))); pack.append(ul); };
+    list('Transmitters', iv.totals.transmitters, (x) => `${x.count} x ${x.label}`);
+    list('Receivers and bodypacks', iv.totals.receivers, (x) => `${x.count} x ${x.label}`);
+    list('Antennas (body-worn excluded)', iv.totals.antennas, (x) => `${x.count} x ${x.label}`);
+    if (iv.totals.loads && iv.totals.loads.total) list('Terminations', [iv.totals.loads], (x) => `${x.total} x 50 ohm load, 1 W or more (${x.dummyLoads} dummy load${x.dummyLoads === 1 ? '' : 's'} for transmitters, ${x.freePorts} for unused splitter or combiner ports)`);
+    list('Cables', iv.totals.cables, (x) => `${x.count} x ${x.label}, ${x.lengthM} m in total`);
     const nWarn = warns.filter((w) => w.level === 'warn').length, loads = rackLoads(scene);
     status.textContent = [nWarn ? `⚠ ${nWarn} warning${nWarn === 1 ? '' : 's'}: open the marked items.` : '', loads.total ? `${loads.total} x 50 ohm load to pack.` : ''].filter(Boolean).join(' ');
   }
 
   const status = el('p', 'hint rack-status'); status.setAttribute('role', 'status');
-  const bar = el('div', 'inv-add');
+  const bar = el('div', 'inv-add'), msg = el('p', 'hint inv-msg'); msg.setAttribute('role', 'status');
+  for (const [kind, word] of [['mic', 'microphone'], ['iem', 'in-ear monitor']]) {
+    const b = btn(`Add ${kind === 'mic' ? 'mic' : 'IEM'}`, () => {
+      const id = addLink(store, kind);
+      if (!id) { msg.textContent = 'The link limit has been reached.'; return; }
+      const l = store.getScene().links.find((q) => q.id === id);
+      msg.textContent = `Added ${l.name} at ${l.freqMHz} MHz. Check it against the others in the Coordination panel.`; store.select(l.tx.id);
+    }, `Add another ${word} link at the next free frequency, beside the last one`);
+    bar.append(b);
+  }
   bar.append(
     btn('Add Rx antenna', () => addRackAntenna(store)), btn('Add splitter', () => addRackSplitter(store)),
     btn('Add Tx antenna', () => addRackAntenna(store, { role: 'tx' })), btn('Add combiner', () => addRackCombiner(store)),
   );
-  body.append(el('p', 'hint', 'Every radio item in the show. Open one to see its properties, pick its equipment and change what it is connected to; the link maths follows.'), bar, status, out);
+  body.append(el('p', 'hint', 'Every radio item in the show. Open one to see its properties, pick its equipment and change what it is connected to; the link maths follows.'), bar, msg, status, out, pack);
   let timer = null;
   const queue = () => { clearTimeout(timer); timer = setTimeout(render, 30); };
   const unsub = store.subscribe(queue); render();

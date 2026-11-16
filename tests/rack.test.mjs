@@ -113,3 +113,27 @@ test('warns about an IEM with no antenna, accepts a dummy load, and counts loads
   assert.equal(s.getScene().links.find((l) => l.id === i1.id).chain[0].ports, 4);
   assert.ok(validateScene(s.getScene()).ok, validateScene(s.getScene()).errors.join());
 });
+
+import { addAntennaChainItem, setAntennaChainItem, setAntennaZones } from '../js/actionsRack.js';
+import { createZone } from '../js/model/scene.js';
+
+test('an antenna cable run sits in front of the splitter for every mic on it, and zones are kept only while they exist', () => {
+  const s = mk(); const [a, b] = mics(s); shareRxAntenna(s, b.id, a.id); adoptRack(s);
+  const ant = s.getScene().rack.antennas[0];
+  addAntennaChainItem(s, ant.id, { kind: 'cable' });
+  const it = s.getScene().rack.antennas[0].chain[0];
+  setAntennaChainItem(s, ant.id, it.id, { lengthM: 40 });
+  const [A, B] = mics(s);
+  for (const l of [A, B]) { assert.equal(l.chain[0].kind, 'cable'); assert.equal(l.chain[0].lengthM, 40); assert.equal(l.chain[1].presetId, 'splitter-2'); }
+  const before = solveLink(s.getScene(), A).inputPowerDbm;
+  setAntennaChainItem(s, ant.id, it.id, { lengthM: 80 });
+  assert.ok(solveLink(s.getScene(), mics(s)[0]).inputPowerDbm < before, 'a longer run loses more');
+  assert.ok(validateScene(s.getScene()).ok, validateScene(s.getScene()).errors.join());
+  s.update((d) => { d.zones = [createZone({ name: 'Front' })]; });
+  const z = s.getScene().zones[0].id;
+  assert.ok(rackWarnings(s.getScene()).some((w) => w.key === `zone:${z}`));
+  setAntennaZones(s, ant.id, [z]);
+  assert.ok(!rackWarnings(s.getScene()).some((w) => w.key === `zone:${z}`));
+  s.update((d) => { d.zones = []; });
+  assert.deepEqual(s.getScene().rack.antennas[0].zones, []);
+});

@@ -24,7 +24,6 @@ import { mountWelcome } from './ui/onboarding.js';
 import { mountHelp } from './ui/help.js';
 import { mountScenes } from './ui/scenes.js';
 import { mountCompare } from './ui/compare.js';
-import { mountInventory } from './ui/inventoryUi.js';
 import { mountRack } from './ui/rackUi.js';
 import { mountCoordination } from './ui/coordination.js';
 import { mountGlossary } from './ui/glossary.js';
@@ -496,7 +495,6 @@ for (const [path, name, id] of [
 // ---- onboarding, saved scenes, compare, help, glossary (each optional: a failure must not break the planner) ----
 for (const [name, fn] of [
   ['welcome', () => mountWelcome({ container: $('welcome'), openButton: $('btn-help') })],
-  ['inventory', () => mountInventory({ container: $('inventory'), store })],
   ['rack', () => mountRack({ container: $('rack'), store })],
   ['scenes', () => mountScenes({ container: $('scenes'), getScene: () => store.getScene(), onLoad: loadSavedScene })],
   ['compare', () => mountCompare({ container: $('compare'), store })],

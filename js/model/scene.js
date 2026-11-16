@@ -510,6 +510,7 @@ export function validateScene(scene) {
   if (scene.version !== SCHEMA_VERSION) errors.push(`version must be ${SCHEMA_VERSION}`);
   if (scene.venue !== undefined) errors.push(...validateVenue(scene.venue));
   errors.push(...validateRack(scene));
+  if (scene.rack && Array.isArray(scene.rack.antennas)) scene.rack.antennas.forEach((a, i) => { if (a && Array.isArray(a.chain) && a.chain.length <= 8) a.chain.forEach((c, j) => checkChainItem(c, `rack.antennas[${i}].chain[${j}]`, errors)); });
   if (!isObj(scene.units) || !POWER_UNITS.includes(scene.units.power)) errors.push('units.power invalid');
   if (!isObj(scene.units) || !LENGTH_UNITS.includes(scene.units.length)) errors.push('units.length invalid');
   if (!isObj(scene.stage) || !(scene.stage.width > 0) || !(scene.stage.depth > 0)) {

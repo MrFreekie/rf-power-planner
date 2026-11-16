@@ -1138,3 +1138,5 @@ body.vnalab-open { overflow: hidden; }
 
 .rack-warn { color: #e0a030; }
 .rack-warn-text { margin: 0; color: #e0a030; }
+
+.rack-chain { display: grid; gap: 4px; padding: 4px 0; border-top: 1px solid var(--line, #3a3f4a); }
