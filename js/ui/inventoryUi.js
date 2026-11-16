@@ -1,7 +1,8 @@
 // Inventory panel: every mic and IEM link in the show as a list you can click, a card for the selected link, and the gear to pack.
 // Clicking a row selects that link's transmitter, so the plan highlights it, the side view follows it and the inspector opens its fields.
 // Pure helpers (inventoryView) are tested without a DOM; mountInventory() builds the panel.
-import { inventoryRows, inventoryTotals, linkCard } from '../model/inventory.js';
+import { inventoryRows, inventoryTotals, linkCard, gearOptions, powerChoices } from '../model/inventory.js';
+import { setTxFmPreset, setRxFmPreset, setTxPowerOption } from '../actions.js';
 import { activeLink, solveCached } from '../view/util.js';
 
 const STATUS_WORD = { pass: 'Pass', marginal: 'Marginal', fail: 'Fail' };
@@ -30,6 +31,40 @@ export function mountInventory({ container, store }) {
   const out = el('div', 'inv-out');
   out.setAttribute('aria-live', 'polite');
   body.append(intro, out);
+
+  /** Transmitter model, power and receiver model selects for one link. Each change is one undoable step through the same actions the inspector uses. */
+  function gearPickers(link) {
+    const opts = gearOptions(link), wrap = el('div', 'inv-gear');
+    if (!opts.tx.length && !opts.rx.length) return wrap;
+    const field = (label, current, list, generic, onPick) => {
+      const lab = el('label', 'inv-field'); lab.append(el('span', '', label));
+      const sel = el('select'); sel.setAttribute('aria-label', `${label} for ${link.name}`);
+      if (generic) sel.append(Object.assign(el('option', '', generic), { value: '' }));
+      const groups = [[`Tunes at ${link.freqMHz} MHz`, list.filter((o) => o.tunes)], ['Does not tune at this frequency', list.filter((o) => !o.tunes)]];
+      for (const [title, items] of groups) {
+        if (!items.length) continue;
+        const og = el('optgroup'); og.label = title;
+        for (const o of items) og.append(Object.assign(el('option', '', o.label + (o.assumed ? ' *' : '')), { value: o.id }));
+        sel.append(og);
+      }
+      sel.value = current || '';
+      sel.addEventListener('change', () => onPick(sel.value));
+      lab.append(sel); return lab;
+    };
+    wrap.append(field('Transmitter model', link.tx.fmPreset, opts.tx, 'Generic (no model)', (id) => setTxFmPreset(store, link.id, id)));
+    const pc = powerChoices(link);
+    if (pc.options.length) {
+      const lab = el('label', 'inv-field'); lab.append(el('span', '', 'Transmit power'));
+      const sel = el('select'); sel.setAttribute('aria-label', `Transmit power for ${link.name}`);
+      for (const o of pc.options) sel.append(Object.assign(el('option', '', o.label), { value: o.id }));
+      if (pc.current) sel.value = pc.current;
+      sel.addEventListener('change', () => setTxPowerOption(store, link.id, sel.value));
+      lab.append(sel); wrap.append(lab);
+    }
+    wrap.append(field('Receiver model', link.rx.rxPreset && opts.rx.some((o) => o.id === link.rx.rxPreset) ? link.rx.rxPreset : '', opts.rx, 'Generic (typical)', (id) => { if (id) setRxFmPreset(store, link.id, id); }));
+    wrap.append(el('p', 'hint', 'Class figures from published specifications; * marks a model with some assumed figures. Models are grouped by whether they tune at this link’s frequency.'));
+    return wrap;
+  }
 
   function render() {
     const scene = store.getScene();
@@ -64,6 +99,8 @@ export function mountInventory({ container, store }) {
       const card = el('div', 'inv-card'); card.setAttribute('role', 'group'); card.setAttribute('aria-label', `Selected link: ${v.card.row.name}`);
       card.append(el('h4', '', v.card.row.name));
       for (const line of v.card.lines) card.append(el('p', 'hint', line));
+      const link = scene.links.find((q) => q.id === v.card.row.id);
+      if (link) card.append(gearPickers(link));
       out.append(card);
     }
 

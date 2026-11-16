@@ -4,7 +4,7 @@
 //   inventoryTotals(rows, scene)    -> { mics, iems, other, transmitters, receivers, antennas, cables } where the last four are [{ label, count, ... }]
 //   linkCard(scene, linkId, results?) -> the selected link in words: who, what gear, where, which path, how it ended
 // Equipment names come from the FM preset registry; a link with no preset is named by its kind ("Generic microphone transmitter"). No DOM, no clock.
-import { FM_PRESETS } from './fm-presets.js';
+import { FM_PRESETS, FM_TX_PRESET_IDS, FM_RX_PRESET_IDS, fmTuningCheck } from './fm-presets.js';
 import { RX_PRESETS } from './rx-params.js';
 import { ANTENNAS, CABLES } from './library.js';
 import { chainLossDb, solveLink } from './rf.js';
@@ -20,14 +20,14 @@ const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 /** Device name for the transmitter end: the FM preset label when one is applied, else a generic name for the link kind. */
 export function txDeviceName(link) {
   const id = link && link.tx && link.tx.fmPreset;
-  return (id && FM_PRESETS[id] && FM_PRESETS[id].label) || `Generic ${kindWord(link && link.kind)} transmitter`;
+  return (id && FM_PRESETS[id] && FM_PRESETS[id].label.replace(/ \(FM\)$/, '')) || `Generic ${kindWord(link && link.kind)} transmitter`;
 }
 
 /** Device name for the receiver end (bodypack for an IEM, receiver for a microphone). */
 export function rxDeviceName(link) {
   const id = link && link.rx && link.rx.rxPreset;
   const p = id && RX_PRESETS[id];
-  const label = p && p.label ? String(p.label).replace(/ \(assumed figures\)$/, '') : null;
+  const label = p && p.label ? String(p.label).replace(/ \((assumed figures|FM)\)$/, '').replace(/ \(assumed figures\)$/, '') : null;
   return label || `Generic ${link && link.kind === 'iem' ? 'bodypack' : 'receiver'}`;
 }
 
@@ -108,4 +108,33 @@ export function linkCard(scene, linkId, results) {
   lines.push(r.chainItems ? `Chain: ${r.chainItems} item${r.chainItems === 1 ? '' : 's'}, net ${r.chainLossDb === null ? 'unknown' : `${r.chainLossDb} dB`} loss.` : 'Chain: nothing between the antenna and the receiver.');
   lines.push(r.status ? `Result: ${r.status}, ${r.distanceM} m, ${r.inputPowerDbm} dBm at the input, ${r.marginDb} dB margin.` : 'Result: not solved.');
   return { row: r, lines };
+}
+
+/** Which link kind a preset is for: 'iem' (in-ear transmitter or bodypack receiver) or 'mic'. The registry has no kind field, so the label decides. */
+export function presetKind(id) {
+  const p = FM_PRESETS[id]; if (!p) return null;
+  return p.role === 'tx' ? (/IEM/.test(p.label) ? 'iem' : 'mic') : (/IEM|bodypack receiver/.test(p.label) ? 'iem' : 'mic');
+}
+
+/**
+ * gearOptions(link) -> { tx: [...], rx: [...] } preset choices for the link's kind, models that tune at the link frequency first.
+ * Each option: { id, label, manufacturer, model, tunes (inside a tuning window), onGrid, assumed (any figure not sourced) }. A p2p link gets none.
+ */
+export function gearOptions(link) {
+  const kind = link && link.kind;
+  if (kind !== 'mic' && kind !== 'iem') return { tx: [], rx: [] };
+  const f = link.freqMHz;
+  const build = (ids) => ids.filter((id) => presetKind(id) === kind).map((id) => {
+    const p = FM_PRESETS[id], t = fmTuningCheck(id, f);
+    return { id, label: p.label.replace(/ \(FM\)$/, ''), manufacturer: p.manufacturer, model: p.model, tunes: t.inWindow, onGrid: t.onGrid, assumed: Object.values(p.confidence || {}).some((c) => c !== 'sourced') };
+  }).sort((a, b) => (b.tunes - a.tunes) || a.label.localeCompare(b.label));
+  return { tx: build(FM_TX_PRESET_IDS), rx: build(FM_RX_PRESET_IDS) };
+}
+
+/** Power choices of the link's transmitter preset: [{ id, label }] (empty when no preset or a single option) and the id in use. */
+export function powerChoices(link) {
+  const id = link && link.tx && link.tx.fmPreset, p = id && FM_PRESETS[id];
+  if (!p || p.role !== 'tx' || p.params.powerOptions.length < 2) return { options: [], current: null };
+  const cur = p.params.powerOptions.find((o) => Math.abs(o.powerDbm - link.tx.powerDbm) < 0.01 && !!o.lowIntermod === !!link.tx.lowIntermod) || p.params.powerOptions.find((o) => Math.abs(o.powerDbm - link.tx.powerDbm) < 0.01);
+  return { options: p.params.powerOptions.map((o) => ({ id: o.id, label: o.label })), current: cur ? cur.id : null };
 }

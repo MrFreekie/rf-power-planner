@@ -48,3 +48,38 @@ test('inventoryView marks the link of the selected transmitter as active, and th
 test('every example builds an inventory without throwing', () => {
   for (const e of EXAMPLES) { const sc = buildExample(e.id).scene; assert.doesNotThrow(() => inventoryRows(sc), e.id); }
 });
+
+import { gearOptions, powerChoices, presetKind } from '../js/model/inventory.js';
+import { setTxFmPreset, setRxFmPreset } from '../js/actions.js';
+import { createStore } from '../js/store.js';
+
+test('gear options are split by link kind and models that tune at the link frequency come first', () => {
+  const sc = people(), mic = sc.links.find((l) => l.kind === 'mic'), iem = sc.links.find((l) => l.kind === 'iem');
+  const m = gearOptions(mic), i = gearOptions(iem);
+  assert.ok(m.tx.length && m.rx.length && i.tx.length && i.rx.length);
+  assert.ok(m.tx.every((o) => presetKind(o.id) === 'mic') && i.tx.every((o) => presetKind(o.id) === 'iem'));
+  assert.ok(i.rx.every((o) => /iem|ek|p9ra|p10r/i.test(o.id)));
+  const firstOut = m.tx.findIndex((o) => !o.tunes), lastIn = m.tx.map((o) => o.tunes).lastIndexOf(true);
+  assert.ok(firstOut === -1 || lastIn < firstOut);
+  assert.ok(m.tx.some((o) => o.tunes));
+});
+
+test('a p2p link has no gear options', () => {
+  const l = { kind: 'p2p', freqMHz: 600 };
+  assert.deepEqual(gearOptions(l), { tx: [], rx: [] });
+});
+
+test('picking a model through the actions changes the card and the power choices', () => {
+  const store = createStore(people()), l0 = store.getScene().links.find((l) => l.kind === 'mic');
+  const pick = gearOptions(l0).tx.find((o) => o.tunes && o.id === 'shure-ur2') || gearOptions(l0).tx.find((o) => o.tunes);
+  setTxFmPreset(store, l0.id, pick.id);
+  const l1 = store.getScene().links.find((l) => l.id === l0.id);
+  assert.equal(l1.tx.fmPreset, pick.id);
+  assert.match(txDeviceName(l1), /class/);
+  assert.ok(powerChoices(l1).current);
+  const rx = gearOptions(l1).rx.find((o) => o.tunes);
+  setRxFmPreset(store, l0.id, rx.id);
+  assert.equal(store.getScene().links.find((l) => l.id === l0.id).rx.rxPreset, rx.id);
+  setTxFmPreset(store, l0.id, '');
+  assert.match(txDeviceName(store.getScene().links.find((l) => l.id === l0.id)), /^Generic/);
+});
