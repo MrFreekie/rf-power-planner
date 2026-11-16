@@ -4,7 +4,7 @@ import { rackSections, deriveRack, rackWarnings, rackLoads } from '../model/rack
 import { CABLES } from '../model/library.js';
 import { linkCard } from '../model/inventory.js';
 import { inventoryView } from './inventoryUi.js';
-import { addLink } from '../actions.js';
+import { addLink, assignMic, assignIem, removeExtraMic, peopleLinkOwners } from '../actions.js';
 import { setLinkFocus } from '../view/linkFocus.js';
 import { CHAIN_PRESETS } from '../model/chain-presets.js';
 import { gearPickers } from './gearUi.js';
@@ -60,11 +60,21 @@ export function mountRack({ container, store }) {
       d.append(sum); const b = el('div', 'rack-edit'); for (const w of ws) b.append(el('p', w.level === 'warn' ? 'rack-warn-text' : 'hint', w.text)); fill(b); d.append(b); return d;
     };
     const props = (id, b, idx) => { const c = linkCard(scene, id); if (c) for (const i of idx) if (c.lines[i]) b.append(el('p', 'hint', c.lines[i])); };
+    const owner = (id, b, which) => { // who wears or holds this link: choosing someone moves the pack onto them (the link takes their name)
+      const people = scene.people || [], o = peopleLinkOwners(scene).get(id), cur = o ? o.personId : '';
+      if (!people.length) { b.append(el('p', 'hint', 'No people in the show yet. Add one in the People section, then assign this link here.')); return; }
+      const has = (p) => (which === 'mic' ? p.micLinkId : p.iemLinkId);
+      const opts = [['', 'No one'], ...people.map((p) => [p.id, has(p) && has(p) !== id ? `${p.name} (replaces ${(scene.links.find((l) => l.id === has(p)) || {}).name || 'their link'})` : p.name])];
+      b.append(field(which === 'mic' ? 'Worn or held by' : 'Worn by', select('Person for ' + linkName(id), opts, cur, (v) => {
+        if (!v) { if (o && o.extra) removeExtraMic(store, o.personId, id); else if (o) (which === 'mic' ? assignMic : assignIem)(store, o.personId, null); return; }
+        (which === 'mic' ? assignMic : assignIem)(store, v, id, { swap: !!o && o.personId !== v });
+      })));
+    };
     const gear = (id, b, part) => { const l = scene.links.find((q) => q.id === id); if (l) b.append(gearPickers(store, l, part)); };
     const show = (id, b) => b.append(btn('Show this link', () => { const l = scene.links.find((q) => q.id === id); if (l) store.select(l.tx.id); }, 'Highlight it in the plan and open it in the inspector'));
     const editors = {
-      mic: (it, b) => { props(it.id, b, [0, 1]); gear(it.id, b, 'tx'); show(it.id, b); },
-      bodypack: (it, b) => { props(it.id, b, [2]); gear(it.id, b, 'rx'); show(it.id, b); },
+      mic: (it, b) => { props(it.id, b, [0, 1]); owner(it.id, b, 'mic'); gear(it.id, b, 'tx'); show(it.id, b); },
+      bodypack: (it, b) => { props(it.id, b, [2]); owner(it.id, b, 'iem'); gear(it.id, b, 'rx'); show(it.id, b); },
       antenna: (it, b) => {
         const a = rack.antennas.find((x) => x.id === it.id);
         b.append(field('Name', text('Antenna name', a.name, (v) => renameRackItem(store, 'antennas', a.id, v))));
@@ -110,7 +120,7 @@ export function mountRack({ container, store }) {
       },
       transmitter: (it, b) => {
         const m = find.transmitter(it.id); if (!m) return;
-        props(it.id, b, [0, 1]); gear(it.id, b, 'tx');
+        props(it.id, b, [0, 1]); owner(it.id, b, 'iem'); gear(it.id, b, 'tx');
         const opts = [...rack.transmitters.map((r) => [r.id, r.name]), ['new', 'A new transmitter']];
         b.append(field('Transmitter', select('Transmitter for ' + linkName(it.id), opts, m.r.id, (v) => moveTxChannel(store, it.id, v))),
           field('Transmitter name', text('Transmitter name', m.r.name, (v) => renameRackItem(store, 'transmitters', m.r.id, v))),

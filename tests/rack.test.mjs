@@ -137,3 +137,14 @@ test('an antenna cable run sits in front of the splitter for every mic on it, an
   s.update((d) => { d.zones = []; });
   assert.deepEqual(s.getScene().rack.antennas[0].zones, []);
 });
+
+import { assignMic, assignIem, peopleLinkOwners } from '../js/actions.js';
+test('a mic and an IEM link can be given to another person and taken off them', () => {
+  const s = mk(), sc = s.getScene(), [p1, p2] = sc.people, m1 = p1.micLinkId, i2 = p2.iemLinkId;
+  assert.ok(assignMic(s, p2.id, m1, { swap: true }));
+  assert.equal(peopleLinkOwners(s.getScene()).get(m1).personId, p2.id);
+  assert.ok(assignIem(s, p1.id, i2, { swap: true }));
+  assert.equal(peopleLinkOwners(s.getScene()).get(i2).personId, p1.id);
+  assert.ok(assignMic(s, p2.id, null));
+  assert.equal(peopleLinkOwners(s.getScene()).has(m1), false);
+});
