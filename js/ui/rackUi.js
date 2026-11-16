@@ -2,7 +2,7 @@
 // each item expandable to show its details and edit its connections. Edits go through js/actionsRack.js (one undo step each).
 import { rackSections, deriveRack, rackWarnings, rackLoads, channelRoute } from '../model/rack.js';
 import { solveCached } from '../view/util.js';
-import { CABLES } from '../model/library.js';
+import { CABLES, ANTENNAS } from '../model/library.js';
 import { linkCard, txFormFactor } from '../model/inventory.js';
 import { inventoryView } from './inventoryUi.js';
 import { addLink, assignMic, assignIem, removeExtraMic, peopleLinkOwners } from '../actions.js';
@@ -11,7 +11,7 @@ import { CHAIN_PRESETS } from '../model/chain-presets.js';
 import { gearPickers } from './gearUi.js';
 import {
   renameRackItem, addRackAntenna, addRackSplitter, setSplitterType, setSplitterInput, connectChannel, moveChannel, removeRackItem, setRackAntenna,
-  addRackCombiner, setCombiner, setSplitterPorts, setRxBias, addAntennaChainItem, setAntennaChainItem, removeAntennaChainItem, setAntennaZones, connectTxChannel, moveTxChannel, removeCombiner,
+  addRackCombiner, setCombiner, setSplitterPorts, setRxBias, setRackAntennaType, setRackAntennaAim, addAntennaChainItem, setAntennaChainItem, removeAntennaChainItem, setAntennaZones, connectTxChannel, moveTxChannel, removeCombiner,
 } from '../actionsRack.js';
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
@@ -87,7 +87,12 @@ export function mountRack({ container, store }) {
         const a = rack.antennas.find((x) => x.id === it.id);
         b.append(field('Name', text('Antenna name', a.name, (v) => renameRackItem(store, 'antennas', a.id, v))));
         for (const k of ['x', 'y', 'z']) b.append(field(`${k} (m)`, num(`Antenna ${k}`, a.pos[k], (v) => setRackAntenna(store, a.id, { pos: { [k]: v } }), k === 'z' ? 0 : -500, k === 'z' ? 50 : 500)));
-        b.append(el('p', 'hint', `${a.antenna.type}, ${a.antenna.gainDbi} dBi. Antenna type and aim are set in the inspector.`));
+        const types = Object.entries(ANTENNAS).filter(([k]) => k !== 'body' || a.antenna.type === 'body').map(([k, v]) => [k, v.name]), o = a.antenna.orientation || { az: 0, el: 0 };
+        b.append(field('Antenna', select('Antenna type for ' + a.name, types, a.antenna.type, (v) => setRackAntennaType(store, a.id, v))),
+          field('Gain (dBi)', num('Gain', a.antenna.gainDbi, (v) => setRackAntennaAim(store, a.id, { gainDbi: v }), -30, 40)),
+          field('Aim: azimuth (degrees)', num('Azimuth', o.az, (v) => setRackAntennaAim(store, a.id, { az: v }), 0, 360)),
+          field('Aim: elevation (degrees)', num('Elevation', o.el, (v) => setRackAntennaAim(store, a.id, { el: v }), -90, 90)),
+          el('p', 'hint', 'Polarisation, tilt and the other antenna details are in the inspector. Every link fed by this antenna follows.'));
         if (a.role !== 'tx') {
           b.append(el('h5', '', 'Cable run from this antenna'), el('p', 'hint', 'Cable, booster, filter or fibre between the antenna and its splitter or receiver. Every receiver on this antenna shares it, in the order listed.'));
           (a.chain || []).forEach((c) => {

@@ -172,3 +172,14 @@ test('microphones are split by form factor when a model is chosen', () => {
   assert.ok(keys.includes('mics-handheld') && keys.includes('mics-plug-on'));
   assert.ok(rackSections(s.getScene()).some((x) => x.key === 'mics'));
 });
+
+import { setRackAntennaType, setRackAntennaAim } from '../js/actionsRack.js';
+test('changing a rack antenna model or aim reaches every link it feeds', () => {
+  const s = mk(), [a, b] = mics(s); shareRxAntenna(s, b.id, a.id); adoptRack(s);
+  const ant = s.getScene().rack.antennas[0];
+  setRackAntennaType(s, ant.id, 'yagi'); setRackAntennaAim(s, ant.id, { az: 90, el: 10 });
+  for (const l of mics(s).slice(0, 2)) { assert.equal(l.rx.antenna.type, 'yagi'); assert.equal(l.rx.antenna.gainDbi, 10); assert.equal(l.rx.antenna.orientation.az, 90); }
+  const tx = s.getScene().rack.antennas.find((x) => x.role === 'tx'); setRackAntennaType(s, tx.id, 'paddle');
+  assert.equal(s.getScene().links.find((l) => l.kind === 'iem').tx.antenna.type, 'paddle');
+  assert.ok(validateScene(s.getScene()).ok, validateScene(s.getScene()).errors.join());
+});

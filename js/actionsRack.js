@@ -1,6 +1,7 @@
 // Receive rack edits (antennas, splitters, receivers and their connections). Each runs as one undo step through store.update.
 // The first edit adopts the links as they are into scene.rack (deriveRack); from then on the rack drives each mic link's receive path.
 import { deriveRack, RACK_LIMITS } from './model/rack.js';
+import { ANTENNAS, allowedPolarisations, defaultPolarisation } from './model/library.js';
 import { newId, createChainItem, createChainItemFromPreset } from './model/scene.js';
 
 const LEGACY_SPLIT = (it) => !!it && (it.presetId === 'splitter-2' || it.presetId === 'active-splitter-4') && !it.rackSplitter;
@@ -202,5 +203,26 @@ export function setRxBias(store, linkId, { on, volts, ma } = {}) {
     const v = Number.isFinite(Number(volts)) && Number(volts) > 0 ? Math.min(Number(volts), 48) : (l.rx.antennaBiasV > 0 ? l.rx.antennaBiasV : 12);
     if (on !== undefined) l.rx.antennaBiasV = on ? v : 0; else if (volts !== undefined && l.rx.antennaBiasV > 0) l.rx.antennaBiasV = v;
     if (ma !== undefined) { const m = Math.max(0, Math.min(1000, Number(ma) || 0)); if (m > 0) l.rx.antennaBiasMa = m; else delete l.rx.antennaBiasMa; }
+  });
+}
+
+/** setRackAntennaType(store, id, type): change the antenna model; its gain returns to the library figure and the polarisation is kept only if the new type allows it. Aim, groundplane and the rest stay. */
+export function setRackAntennaType(store, id, type) {
+  return store.update((d) => {
+    const a = adopt(d).antennas.find((x) => x.id === id), lib = ANTENNAS[type]; if (!a || !lib) return;
+    a.antenna.type = type; a.antenna.gainDbi = lib.gainDbi;
+    if (!allowedPolarisations(type).includes(a.antenna.polarisation)) a.antenna.polarisation = defaultPolarisation(type);
+  });
+}
+
+/** setRackAntennaAim(store, id, { az?, el?, gainDbi? }): where the antenna points (degrees) and its gain. */
+export function setRackAntennaAim(store, id, { az, el, gainDbi } = {}) {
+  return store.update((d) => {
+    const a = adopt(d).antennas.find((x) => x.id === id); if (!a) return;
+    const o = a.antenna.orientation || { az: 0, el: 0 };
+    if (Number.isFinite(az)) o.az = ((az % 360) + 360) % 360;
+    if (Number.isFinite(el)) o.el = Math.max(-90, Math.min(90, el));
+    a.antenna.orientation = o;
+    if (Number.isFinite(gainDbi)) a.antenna.gainDbi = Math.max(-30, Math.min(40, gainDbi));
   });
 }
