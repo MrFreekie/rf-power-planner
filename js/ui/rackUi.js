@@ -1,10 +1,10 @@
 // Radio items panel: every mic, receive antenna, splitter, receiver, IEM transmitter, combiner and transmit antenna in categories,
 // each item expandable to show its details and edit its connections. Edits go through js/actionsRack.js (one undo step each).
-import { rackSections, deriveRack } from '../model/rack.js';
+import { rackSections, deriveRack, rackWarnings, rackLoads } from '../model/rack.js';
 import { CABLES } from '../model/library.js';
 import {
   renameRackItem, addRackAntenna, addRackSplitter, setSplitterType, setSplitterInput, connectChannel, moveChannel, removeRackItem, setRackAntenna,
-  addRackCombiner, setCombiner, connectTxChannel, moveTxChannel, removeCombiner,
+  addRackCombiner, setCombiner, setSplitterPorts, connectTxChannel, moveTxChannel, removeCombiner,
 } from '../actionsRack.js';
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
@@ -36,6 +36,9 @@ export function mountRack({ container, store }) {
   function render() {
     const scene = store.getScene(), rack = scene.rack || deriveRack(scene), sections = rackSections(scene);
     out.textContent = '';
+    const warns = rackWarnings(scene), warnBy = new Map();
+    for (const w of warns) warnBy.set(w.key, [...(warnBy.get(w.key) || []), w]);
+    const portOpts = [['', 'As many as used'], ...[2, 3, 4, 5, 6, 8, 12, 16].map((n) => [String(n), `${n} ports`])];
     const antOpts = (role) => [['', 'No antenna'], ...rack.antennas.filter((a) => (a.role === 'tx') === (role === 'tx')).map((a) => [a.id, a.name])];
     const linkName = (id) => { const l = scene.links.find((q) => q.id === id); return l ? l.name : id; };
     const find = {
@@ -45,7 +48,8 @@ export function mountRack({ container, store }) {
     const details = (key, title, fill) => {
       const d = el('details', 'rack-item'); d.dataset.key = key; d.open = open.has(key);
       d.addEventListener('toggle', () => { if (d.open) open.add(key); else open.delete(key); });
-      d.append(el('summary', '', title)); const b = el('div', 'rack-edit'); fill(b); d.append(b); return d;
+      const ws = warnBy.get(key) || [], sum = el('summary', ws.some((w) => w.level === 'warn') ? 'rack-warn' : '', (ws.length ? (ws.some((w) => w.level === 'warn') ? '⚠ ' : 'ℹ ') : '') + title);
+      d.append(sum); const b = el('div', 'rack-edit'); for (const w of ws) b.append(el('p', w.level === 'warn' ? 'rack-warn-text' : 'hint', w.text)); fill(b); d.append(b); return d;
     };
     const editors = {
       mic: (it, b) => { b.append(el('p', 'hint', 'Frequency, gear and receive antenna are in the link card above; its receiver and antennas are listed below.'), btn('Show this link', () => { const l = scene.links.find((q) => q.id === it.id); if (l) store.select(l.tx.id); })); },
@@ -59,6 +63,7 @@ export function mountRack({ container, store }) {
         const s = rack.splitters.find((x) => x.id === it.id);
         b.append(field('Name', text('Splitter name', s.name, (v) => renameRackItem(store, 'splitters', s.id, v))),
           field('Type', select('Splitter type', [['passive', 'Passive'], ['active', 'Active (powers the antennas)']], s.type, (v) => setSplitterType(store, s.id, v))),
+          field('Ports', select('Splitter ports', portOpts, s.ports ? String(s.ports) : '', (v) => setSplitterPorts(store, s.id, v || null))),
           field('Input A', select('Splitter input A', antOpts('rx'), s.antA, (v) => setSplitterInput(store, s.id, 'A', v))),
           field('Input B', select('Splitter input B', antOpts('rx'), s.antB, (v) => setSplitterInput(store, s.id, 'B', v))),
           btn('Remove splitter', () => removeRackItem(store, 'splitters', s.id), 'Receivers on it connect straight to its antennas'));
@@ -85,26 +90,35 @@ export function mountRack({ container, store }) {
         const c = rack.combiners.find((x) => x.id === it.id);
         b.append(field('Name', text('Combiner name', c.name, (v) => renameRackItem(store, 'combiners', c.id, v))),
           field('Type', select('Combiner type', [['passive', 'Passive'], ['active', 'Active']], c.type, (v) => setCombiner(store, c.id, { type: v }))),
+          field('Ports', select('Combiner ports', portOpts, c.ports ? String(c.ports) : '', (v) => setCombiner(store, c.id, { ports: v || null }))),
           field('Transmit antenna', select('Antenna for ' + c.name, antOpts('tx'), c.antennaId, (v) => setCombiner(store, c.id, { antennaId: v }))),
           field('Cable to antenna (m)', num('Cable length for ' + c.name, c.cable ? c.cable.lengthM : 0, (v) => setCombiner(store, c.id, { cableM: v }), 0, 500)),
           field('Cable type', select('Cable type for ' + c.name, Object.entries(CABLES).map(([k, v]) => [k, v.name]), c.cable ? c.cable.type : 'rg58', (v) => setCombiner(store, c.id, { cableType: v }))),
           btn('Remove combiner', () => removeCombiner(store, c.id), 'Its channels go straight to the antenna'));
       },
-      txantenna: (it, b) => editors.antenna(it, b),
+      txantenna: (it, b) => {
+        editors.antenna(it, b);
+        const a = rack.antennas.find((x) => x.id === it.id), cb = el('input'); cb.type = 'checkbox'; cb.checked = !!a.load; cb.setAttribute('aria-label', 'Dummy load');
+        cb.addEventListener('change', () => setRackAntenna(store, a.id, { load: cb.checked }));
+        const l = el('label', 'inv-field'); l.append(cb, el('span', '', ' This is a 50 ohm dummy load: nothing is radiated (1 W is plenty for an IEM)')); b.prepend(l);
+      },
     };
     for (const sec of sections) {
       const h = el('h3', 'rack-cat', sec.title); out.append(h);
       for (const it of sec.items) out.append(details(`${it.kind}:${it.id}`, it.text, (b) => (editors[it.kind] || (() => {}))(it, b)));
     }
     if (!sections.length) out.append(el('p', 'hint', 'No radio items yet.'));
+    const nWarn = warns.filter((w) => w.level === 'warn').length, loads = rackLoads(scene);
+    status.textContent = [nWarn ? `⚠ ${nWarn} warning${nWarn === 1 ? '' : 's'}: open the marked items.` : '', loads.total ? `${loads.total} x 50 ohm load to pack.` : ''].filter(Boolean).join(' ');
   }
 
+  const status = el('p', 'hint rack-status'); status.setAttribute('role', 'status');
   const bar = el('div', 'inv-add');
   bar.append(
     btn('Add Rx antenna', () => addRackAntenna(store)), btn('Add splitter', () => addRackSplitter(store)),
     btn('Add Tx antenna', () => addRackAntenna(store, { role: 'tx' })), btn('Add combiner', () => addRackCombiner(store)),
   );
-  body.append(el('p', 'hint', 'Every radio item in the show. Open one to see its details and change what it is connected to; the link maths follows.'), bar, out);
+  body.append(el('p', 'hint', 'Every radio item in the show. Open one to see its details and change what it is connected to; the link maths follows.'), bar, status, out);
   let timer = null;
   const queue = () => { clearTimeout(timer); timer = setTimeout(render, 30); };
   const unsub = store.subscribe(queue); render();

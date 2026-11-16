@@ -1135,3 +1135,6 @@ body.vnalab-open { overflow: hidden; }
 .rack-item > summary { padding: 4px 6px; cursor: pointer; }
 .rack-edit { display: grid; gap: 6px; padding: 6px; }
 .rack-edit input[type=text], .rack-edit input[type=number], .rack-edit select { width: 100%; font: inherit; box-sizing: border-box; }
+
+.rack-warn { color: #e0a030; }
+.rack-warn-text { margin: 0; color: #e0a030; }

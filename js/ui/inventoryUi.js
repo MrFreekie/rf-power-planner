@@ -149,6 +149,7 @@ export function mountInventory({ container, store }) {
     list('Transmitters', v.totals.transmitters, (x) => `${x.count} x ${x.label}`);
     list('Receivers and bodypacks', v.totals.receivers, (x) => `${x.count} x ${x.label}`);
     list('Antennas (body-worn excluded)', v.totals.antennas, (x) => `${x.count} x ${x.label}`);
+    if (v.totals.loads && v.totals.loads.total) list('Terminations', [v.totals.loads], (x) => `${x.total} x 50 ohm load, 1 W or more (${x.dummyLoads} dummy load${x.dummyLoads === 1 ? '' : 's'} for transmitters, ${x.freePorts} for unused splitter or combiner ports)`);
     list('Cables', v.totals.cables, (x) => `${x.count} x ${x.label}, ${x.lengthM} m in total`);
     out.append(pack);
   }

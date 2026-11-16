@@ -10,6 +10,7 @@ import { ANTENNAS, CABLES } from './library.js';
 import { chainLossDb, solveLink } from './rf.js';
 import { linkOwners } from './people.js';
 import { resultAt } from './assumptions-in-use.js';
+import { rackLoads } from './rack.js';
 
 const KIND_WORD = { mic: 'microphone', iem: 'in-ear', p2p: 'point-to-point' };
 const kindWord = (k) => KIND_WORD[k] || String(k || 'link');
@@ -93,7 +94,7 @@ export function inventoryTotals(rows, scene) {
   return {
     mics: rows.filter((r) => r.kind === 'mic').length, iems: rows.filter((r) => r.kind === 'iem').length, other: rows.filter((r) => r.kind !== 'mic' && r.kind !== 'iem').length,
     transmitters: tally(rows, (r) => r.txItem), receivers: tally(rows, (r) => r.rxItem), antennas: tally(antennas, (a) => a),
-    cables: [...cableMap.values()].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)),
+    loads: rackLoads(scene), cables: [...cableMap.values()].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)),
   };
 }
 

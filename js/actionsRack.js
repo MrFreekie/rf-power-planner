@@ -105,7 +105,7 @@ export function removeRackItem(store, kind, id) {
 
 /** setRackAntenna(store, id, { pos?, antenna? }): move or change an antenna; every link it feeds follows. */
 export function setRackAntenna(store, id, patch) {
-  return store.update((d) => { const a = adopt(d).antennas.find((x) => x.id === id); if (!a) return; if (patch.pos) a.pos = { ...a.pos, ...patch.pos }; if (patch.antenna) a.antenna = { ...a.antenna, ...patch.antenna }; });
+  return store.update((d) => { const a = adopt(d).antennas.find((x) => x.id === id); if (!a) return; if (patch.pos) a.pos = { ...a.pos, ...patch.pos }; if (patch.antenna) a.antenna = { ...a.antenna, ...patch.antenna }; if (patch.load !== undefined) { if (patch.load) a.load = true; else delete a.load; } });
 }
 
 const txChan = (rack, linkId) => { for (const t of rack.transmitters) for (const c of t.channels) if (c.linkId === linkId) return { r: t, c }; return null; };
@@ -126,6 +126,7 @@ export function setCombiner(store, id, patch) {
   return store.update((d) => {
     const rack = adopt(d), c = rack.combiners.find((x) => x.id === id); if (!c) return;
     if (patch.type === 'passive' || patch.type === 'active') c.type = patch.type;
+    if (patch.ports !== undefined) { const n = Math.round(Number(patch.ports)); if (n >= 2 && n <= 16) c.ports = n; else delete c.ports; }
     if (patch.antennaId !== undefined && (!patch.antennaId || rack.antennas.some((a) => a.id === patch.antennaId))) c.antennaId = patch.antennaId || null;
     if (patch.cableM !== undefined) { const m = Math.max(0, Math.min(500, Number(patch.cableM) || 0)); c.cable = m > 0 ? { type: patch.cableType || (c.cable && c.cable.type) || 'rg58', lengthM: m } : null; }
     else if (patch.cableType && c.cable) c.cable.type = patch.cableType;
@@ -163,3 +164,6 @@ export function removeCombiner(store, id) {
     rack.combiners = rack.combiners.filter((x) => x !== cb);
   });
 }
+
+/** setSplitterPorts(store, id, ports | null): the physical outputs of a splitter (null = as many as are used). Unused ones are reported as needing a 50 ohm load. */
+export const setSplitterPorts = (store, id, ports) => store.update((d) => { const s = adopt(d).splitters.find((x) => x.id === id); if (!s) return; const n = Math.round(Number(ports)); if (n >= 2 && n <= 16) s.ports = n; else delete s.ports; });

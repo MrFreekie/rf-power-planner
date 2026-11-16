@@ -90,3 +90,26 @@ test('rackSections writes the connections in words, before and after adopting', 
   assert.ok(txt.some((t) => /^IEM Tx 1 Channel 1/.test(t)));
   assert.ok(txt.some((t) => /Rx Antenna A connected to Split 1 A/.test(t)));
 });
+
+import { rackWarnings, rackLoads } from '../js/model/rack.js';
+import { setRackAntenna, setSplitterPorts } from '../js/actionsRack.js';
+
+test('warns about an IEM with no antenna, accepts a dummy load, and counts loads for unused ports', () => {
+  const s = mk(); adoptRack(s);
+  const i1 = s.getScene().links.find((l) => l.kind === 'iem');
+  connectTxChannel(s, i1.id, { antennaId: null });
+  s.update((d) => { d.rack.transmitters[0].channels[0].antennaId = null; });
+  assert.ok(rackWarnings(s.getScene()).some((w) => w.level === 'warn' && w.key === `transmitter:${i1.id}`));
+  const txa = s.getScene().rack.antennas.find((a) => a.role === 'tx');
+  setRackAntenna(s, txa.id, { load: true }); connectTxChannel(s, i1.id, { antennaId: txa.id });
+  assert.ok(!rackWarnings(s.getScene()).some((w) => w.level === 'warn'));
+  assert.equal(s.getScene().links.find((l) => l.id === i1.id).tx.antenna.gainDbi, -60);
+  assert.equal(rackLoads(s.getScene()).dummyLoads, 1);
+  const cb = addRackCombiner(s); setCombiner(s, cb, { ports: 4, antennaId: txa.id });
+  connectTxChannel(s, i1.id, { combinerId: cb });
+  const f = rackWarnings(s.getScene()).find((w) => w.key === `combiner:${cb}`);
+  assert.ok(f && f.level === 'info' && /3 unused inputs/.test(f.text));
+  assert.equal(rackLoads(s.getScene()).freePorts, 3);
+  assert.equal(s.getScene().links.find((l) => l.id === i1.id).chain[0].ports, 4);
+  assert.ok(validateScene(s.getScene()).ok, validateScene(s.getScene()).errors.join());
+});
