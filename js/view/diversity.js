@@ -57,7 +57,7 @@ export function mountDiversity({ container, store }) {
     link = activeLink(scene, store.getSelection());
     const on = !!(link && link.rx.diversity && link.rx.diversity.enabled);
     msg.hidden = on; body.hidden = !on;
-    msg.textContent = link ? 'Diversity is off for this link. Enable it in the inspector (Receiver section) to see antenna A and B.' : 'No link selected.';
+    msg.textContent = link ? 'Diversity is off for this link. Enable it in the receiver radio item (Diversity setting) to see antenna A and B.' : 'No link selected.';
     if (!on) return;
     const g = rxState.get(link.id);
     last = g && g.diversity;

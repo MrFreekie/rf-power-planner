@@ -1140,3 +1140,9 @@ body.vnalab-open { overflow: hidden; }
 .rack-warn-text { margin: 0; color: #e0a030; }
 
 .rack-chain { display: grid; gap: 4px; padding: 4px 0; border-top: 1px solid var(--line, #3a3f4a); }
+
+/* Saved scenes + A/B compare pop-out (top bar) */
+.scenes-dialog { width: min(640px, 94vw); max-height: 86vh; overflow: auto; padding: 10px 14px; border: 1px solid var(--ink); background: var(--bg, #fff); color: inherit; }
+.scenes-dialog::backdrop { background: rgba(0, 0, 0, 0.4); }
+.scenes-dialog-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.refl-walls { display: flex; gap: 6px; margin: 6px 0; flex-wrap: wrap; }

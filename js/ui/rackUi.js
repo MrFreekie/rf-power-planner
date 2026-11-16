@@ -19,6 +19,8 @@ import {
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 
 // Which of the selected link's inspector sections each kind of item hosts.
+// Live panels built once at start-up (view/diversity.js, view/telemetry.js); they are moved into the open item of the active link.
+const LIVE_FOR = { mic: ['telemetry'], receiver: ['diversity'] };
 const DOCK_FOR = { mic: ['link', 'tx'], transmitter: ['link', 'tx', 'chain'], receiver: ['rx', 'chain', 'chainB'], bodypack: ['rx', 'rxchain'] };
 
 export function mountRack({ container, store }) {
@@ -55,6 +57,7 @@ export function mountRack({ container, store }) {
       if (l0) for (const k of (l0.tx.id === selNow ? ['mic', 'transmitter'] : ['receiver', 'bodypack'])) open.add(`${k}:${l0.id}`);
     }
     const scene = store.getScene(), rack = scene.rack || deriveRack(scene), sections = rackSections(scene, txFormFactor);
+    { const hold = document.getElementById('live-holder'); if (hold) for (const id of ['diversity', 'telemetry']) { const n = document.getElementById(id); if (n && out.contains(n)) hold.append(n); } } // park the live panels before the list is rebuilt
     out.textContent = '';
     const linkName = (id) => { const l = scene.links.find((q) => q.id === id); return l ? l.name : id; };
     const warns = rackWarnings(scene), warnBy = new Map();
@@ -82,7 +85,7 @@ export function mountRack({ container, store }) {
       d.append(sum); const b = el('div', 'rack-edit'); for (const w of ws) b.append(el('p', w.level === 'warn' ? 'rack-warn-text' : 'hint', w.text)); fill(b);
       if (lk && DOCK_FOR[kind] && d.open) { // the selected link's Link, Transmitter, Receiver and cable sections live here
         const dock = getLinkDock(), act = activeLink(scene, store.getSelection());
-        if (dock && act && act.id === lid) { const host = el('div', 'rack-docked'); for (const n of DOCK_FOR[kind]) if (dock[n]) host.append(dock[n]); b.append(host); }
+        if (dock && act && act.id === lid) { const host = el('div', 'rack-docked'); for (const n of DOCK_FOR[kind]) if (dock[n]) host.append(dock[n]); for (const id of LIVE_FOR[kind] || []) { const n = document.getElementById(id); if (n) host.append(n); } b.append(host); }
       }
       d.append(b); return d;
     };
@@ -110,7 +113,7 @@ export function mountRack({ container, store }) {
           field('Gain (dBi)', num('Gain', a.antenna.gainDbi, (v) => setRackAntennaAim(store, a.id, { gainDbi: v }), -30, 40)),
           field('Aim: azimuth (degrees)', num('Azimuth', o.az, (v) => setRackAntennaAim(store, a.id, { az: v }), 0, 360)),
           field('Aim: elevation (degrees)', num('Elevation', o.el, (v) => setRackAntennaAim(store, a.id, { el: v }), -90, 90)),
-          el('p', 'hint', 'Polarisation, tilt and the other antenna details are in the inspector. Every link fed by this antenna follows.'));
+          el('p', 'hint', 'Polarisation, tilt and the other antenna details are in the receiver radio item. Every link fed by this antenna follows.'));
         if (a.role !== 'tx') {
           b.append(el('h5', '', 'Cable run from this antenna'), el('p', 'hint', 'Cable, booster, filter or fibre between the antenna and its splitter or receiver. Every receiver on this antenna shares it, in the order listed.'));
           (a.chain || []).forEach((c) => {

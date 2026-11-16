@@ -52,7 +52,7 @@ export function mountTelemetry({ container, store }) {
     const link = activeLink(store.getScene(), store.getSelection());
     const on = !!(link && link.telemetry && link.telemetry.enabled);
     msg.hidden = on; body.hidden = !on;
-    msg.textContent = link ? 'Telemetry is off for this link. Enable it in the inspector to see battery and data-link status.' : 'No link selected.';
+    msg.textContent = link ? 'Telemetry is off for this link. Enable it in the transmitter radio item to see battery and data-link status.' : 'No link selected.';
     if (!on) return;
     const st = telemetry.get(link.id);
     if (!st) return;

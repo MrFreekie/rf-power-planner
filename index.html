@@ -63,12 +63,13 @@
   <button type="button" id="btn-map" aria-haspopup="dialog" aria-expanded="false" title="Open the spectrum map: bands, TV channels, Wi-Fi and your project frequencies">Spectrum map</button>
   <button type="button" id="btn-lab" aria-haspopup="dialog" aria-expanded="false" title="Open the coordination lab: drag channels and watch intermod products land">Coordination lab</button>
   <button type="button" id="btn-meas" aria-haspopup="dialog" aria-expanded="false" title="Walk-test readings: compare measured levels with the model and calibrate">Measurements</button>
+  <button type="button" id="btn-scenes" aria-haspopup="dialog" aria-expanded="false" title="Saved scenes and the A/B scenario compare">Scenes</button>
   <button type="button" id="btn-compare" aria-haspopup="dialog" aria-expanded="false" title="Compare snapshots of the scene: what changed and what it did to each link">Compare</button>
   <button type="button" id="btn-plan-export" aria-haspopup="dialog" aria-expanded="false" title="Export the frequency plan as a table, text or CSV">Export plan</button>
   <button type="button" id="btn-venue" aria-haspopup="dialog" title="Import a venue drawing as a grey underlay">Venue</button>
   <div class="group panels-group" role="group" aria-label="Panels">
     <button type="button" id="btn-panel-left" data-toggle="left" aria-expanded="true" aria-controls="leftpanel-body" title="Show or hide the budgets panel on the left (key B)">Left</button>
-    <button type="button" id="btn-panel-right" data-toggle="right" aria-expanded="true" aria-controls="sidebar-body" title="Show or hide the inspector panel on the right (key I)">Right</button>
+    <button type="button" id="btn-panel-right" data-toggle="right" aria-expanded="true" aria-controls="sidebar-body" title="Show or hide the radio items and builders on the right (key I)">Right</button>
     <button type="button" id="btn-panel-bottom" data-toggle="bottom" aria-expanded="true" aria-controls="bottombar-body" title="Show or hide the meters, timeline and spectra (key M)">Bottom</button>
     <button type="button" id="btn-focus" aria-pressed="false" title="Hide all three panels for the biggest plan and side views (key F)">Focus</button>
   </div>
@@ -145,14 +146,16 @@
   <div id="sidebar-body" class="panel-body">
   <details id="rack" class="ob-details"></details>
   <details id="venue-builder" class="ob-details"></details>
-  <details id="scenes" class="ob-details"></details>
-  <details id="compare" class="ob-details"></details>
+  <details id="people-panel" class="ob-details"></details>
+  <details id="p2p-panel" class="ob-details"></details>
   <details id="coordination" class="ob-details"></details>
-  <section id="diversity" aria-label="Antenna diversity"></section>
-  <section id="telemetry" aria-label="Telemetry"></section>
+  <div id="live-holder" hidden><!-- diversity and telemetry live inside the active link's radio items; parked here when none is open -->
+    <section id="diversity" aria-label="Antenna diversity"></section>
+    <section id="telemetry" aria-label="Telemetry"></section>
+  </div>
   <section id="coverage" aria-label="Coverage zones"></section>
   <section id="imd" aria-label="Intermodulation"></section>
-  <section id="inspector" aria-label="Inspector"></section>
+  <section id="inspector" aria-label="Form engine" hidden></section>
   </div>
   </div>
 </main>
@@ -172,5 +175,10 @@
 </div>
 
 <script type="module" src="js/app.js"></script>
+<dialog id="scenes-dialog" class="scenes-dialog" aria-label="Saved scenes and A/B compare">
+  <div class="scenes-dialog-head"><strong>Saved scenes and A/B compare</strong> <button type="button" id="scenes-close" aria-label="Close">Close</button></div>
+  <details id="scenes" class="ob-details" open></details>
+  <details id="compare" class="ob-details" open></details>
+</dialog>
 </body>
 </html>

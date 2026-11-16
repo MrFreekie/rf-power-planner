@@ -21,7 +21,7 @@ export function modeText(state) {
 export function mpxMessage(link) {
   if (!link) return 'No link selected.';
   if (link.kind !== 'iem') return 'Microphone links carry mono audio, so there is no stereo multiplex to show. Switch to an in-ear monitor link with MPX stereo enabled.';
-  if (!link.mpx || !link.mpx.enabled) return 'MPX stereo is off for this link. Enable it in the inspector to see the stereo multiplex.';
+  if (!link.mpx || !link.mpx.enabled) return 'MPX stereo is off for this link. Enable it in the transmitter radio item to see the stereo multiplex.';
   return '';
 }
 

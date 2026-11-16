@@ -473,6 +473,8 @@ try {
 
 for (const [path, name, id] of [
   ['./ui/inspector.js', 'mountInspector', 'inspector'],
+  ['./ui/sectionPanelsUi.js', 'mountPeoplePanel', 'people-panel'],
+  ['./ui/sectionPanelsUi.js', 'mountP2pPanel', 'p2p-panel'],
   ['./view/waterfall.js', 'mountWaterfall', 'waterfall'],
   ['./view/meters.js', 'mountMeters', 'meters'],
   ['./view/mpx.js', 'mountMpx', 'mpx'],
@@ -481,6 +483,7 @@ for (const [path, name, id] of [
   ['./view/digital.js', 'mountDigital', 'digital'],
   ['./view/coverage.js', 'mountCoverage', 'coverage'],
   ['./view/imd.js', 'mountImd', 'imd'],
+  ['./ui/sectionPanelsUi.js', 'mountImdForm', 'imd'],
   ['./view/timeline.js', 'mountTimeline', 'timeline'],
   ['./view/spectra.js', 'mountSpectra', 'spectra'],
 ]) {
@@ -537,6 +540,14 @@ try {
     ...exampleItems(EXAMPLES, (id) => { applyExample(id); }),
   ] });
 } catch (err) { console.error('command palette', err); $('btn-cmd').hidden = true; }
+{
+  const dlg = $('scenes-dialog'), btn = $('btn-scenes');
+  const close = () => { if (dlg.open) dlg.close(); };
+  btn.addEventListener('click', () => { if (dlg.open) close(); else { dlg.showModal(); btn.setAttribute('aria-expanded', 'true'); } });
+  $('scenes-close').addEventListener('click', close);
+  dlg.addEventListener('close', () => { btn.setAttribute('aria-expanded', 'false'); btn.focus(); });
+  dlg.addEventListener('click', (e) => { if (e.target === dlg) close(); });
+}
 try {
   const { mountCompare } = await import('./view/compareDialog.js');
   mountCompare({ button: $('btn-compare'), store });

@@ -168,6 +168,26 @@ export function addReflector(store, reflector = {}) {
   return ok ? r.id : null;
 }
 
+/**
+ * Add the four walls of a rectangular room as reflectors: back (behind the stage), front (past the audience), left and right.
+ * The box is centred on x = 0 and runs from the back of the stage (y = -stage depth) to `depthM` in front of it. Skips the lot when it would pass the reflector limit.
+ * Returns the new ids ([] when nothing was added).
+ */
+export function addRoomWalls(store, { material = 'concrete', widthM, depthM, heightM = 8, thicknessM = 0.2 } = {}) {
+  const ids = [];
+  store.update((d) => {
+    if (d.reflectors.length + 4 > SCENE_LIMITS.maxReflectors) return;
+    const st = d.stage || {}, back = -(Number.isFinite(st.depth) ? st.depth : 0);
+    const w = Number.isFinite(widthM) ? widthM : Math.max(20, (Number.isFinite(st.width) ? st.width : 0) + 10);
+    const front = Number.isFinite(depthM) ? depthM : 25, x = w / 2;
+    const base = { material, zMin: 0, zMax: heightM, thicknessM };
+    for (const [name, p1, p2] of [['Back wall', { x: -x, y: back }, { x, y: back }], ['Front wall', { x: -x, y: front }, { x, y: front }], ['Left wall', { x: -x, y: back }, { x: -x, y: front }], ['Right wall', { x, y: back }, { x, y: front }]]) {
+      const r = createReflector({ ...base, name, p1, p2 }); d.reflectors.push(r); ids.push(r.id);
+    }
+  });
+  return ids;
+}
+
 export function removeReflector(store, id) {
   return store.update((d) => {
     const i = d.reflectors.findIndex((r) => r.id === id);

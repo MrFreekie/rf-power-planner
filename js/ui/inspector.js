@@ -53,7 +53,7 @@ import { setTxFmPreset, setTxPowerOption, setTxLowIntermod, setRxFmPreset, setIm
 import { noiseOptions, noiseValue, noiseFromChoice, noiseHint, interferenceApplies, interferenceOptions, interferenceValue, interferenceHint, rxPresetOffer } from './noise.js';
 import {
   setPath, setLinkField, setLinkKind, addChainItem, removeChainItem, moveChainItem,
-  addReflector, removeReflector,
+  addReflector, removeReflector, addRoomWalls,
 } from '../actions.js';
 import {
   clamp, parseNumber, formatNumber, lengthToUi, lengthFromUi, powerFieldRange, powerUiToDbm,
@@ -652,9 +652,9 @@ export function mountInspector({ container, store }) {
     if (p2pb) buildP2p(p2pb);
     const secs = ['stage', 'plats', ...(p2pb ? ['p2p'] : []), 'ppl', 'noise', 'aud', 'crowd', 'ovh', 'link', 'tx', 'rx', 'env', 'chain', ...(refs.chainB ? ['chainB'] : []), 'refl'];
     if (c.scene.imd && c.scene.imd.enabled) { buildImd(section('imd', 'Intermod demo'), c); secs.unshift('imd'); }
-    // A mic or IEM link's own sections are shown inside its radio items (ui/rackUi.js); a point-to-point link has no item, so it keeps them here.
-    const docked = link.kind === 'p2p' ? [] : LINK_DOCK_SECTIONS.filter((n) => refs[n]);
-    const venueDocked = VENUE_DOCK_SECTIONS.filter((n) => refs[n]);
+    // This element is a hidden form engine now: every section is handed to its panel (radio items, Venue builder, People, Point-to-point, Intermodulation).
+    const docked = LINK_DOCK_SECTIONS.filter((n) => refs[n]);
+    const venueDocked = [...VENUE_DOCK_SECTIONS, 'ppl', 'imd'].filter((n) => refs[n]);
     container.append(...secs.filter((n) => !docked.includes(n) && !venueDocked.includes(n)).map((n) => refs[n].details));
     { const vmap = {}; for (const n of venueDocked) vmap[n] = refs[n].details; setVenueDock(vmap); } // shown in the Venue builder panel (ui/venueBuilderUi.js)
     if (docked.length) { const map = {}; for (const n of docked) { refs[n].details.open = true; map[n] = refs[n].details; } setLinkDock(map); } else setLinkDock(null);
@@ -1499,6 +1499,17 @@ export function mountInspector({ container, store }) {
     body.append(button('Add reflector', 'refl-add', (e) => {
       addOrLimit(store, e && e.currentTarget, 'reflector', () => addReflector(store));
     }));
+
+    const wallMat = el('select', 'wall-mat'); wallMat.setAttribute('aria-label', 'Wall material');
+    for (const [id, m] of Object.entries(MATERIALS)) { const o = el('option', null, m.name); o.value = id; wallMat.append(o); }
+    wallMat.value = 'concrete';
+    const wallsRow = el('div', 'refl-walls');
+    wallsRow.append(wallMat, button('Add room walls', 'refl-walls-add', (e) => {
+      const ids = addRoomWalls(store, { material: wallMat.value });
+      if (!ids.length) addOrLimit(store, e && e.currentTarget, 'reflector', () => null);
+      else store.select(ids[0]);
+    }, { label: 'Add four walls (back, front, left, right) around the stage and audience as reflectors' }));
+    body.append(wallsRow);
 
     const idx = c.found?.type === 'reflector' ? c.scene.reflectors.findIndex((r) => r.id === c.found.item.id) : -1;
     if (idx < 0) return;
