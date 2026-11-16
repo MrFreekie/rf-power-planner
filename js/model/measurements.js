@@ -5,17 +5,19 @@
 //   predictAt(scene, linkId, point)        -> the solver's level at the receiver input with the receiver moved to the point (dBm), or null for an unknown link
 //   compareMeasurements(scene)             -> { points: [{ id, linkId, x, y, z, predictedDbm, measuredDbm, deltaDb }], n, skipped, meanDb, rmsDb, worst }
 //                                             deltaDb = measured - predicted (positive: the real link is stronger than the model says)
-//   suggestCalibration(scene)              -> { n, before, candidates, best, cautions, needed } (see below)
+//   suggestCalibration(scene)              -> { n, before, candidates, best, cautions, notes, needed } (see below)
 //   importMeasurementsCsv(text, opts)      -> { points: [{ linkId?, x, y, z?, rxDbm, note?, t? }], errors: [string], lines: [file line of each point] }
 //
 // suggestCalibration fits ONE offset at a time, each by least squares with bounds, and reports which one leaves the smallest residual:
 //   body-loss      environment.bodyLossDb        shifts every point by the same dB (body loss is a plain loss), fitted in closed form: new = old - mean(delta), 0..30 dB
 //   wall-loss      environment.wallLossAdjustDb  extra dB per wall crossed on the direct path: closed form from the crossing counts, -10..30 dB
-//   cross-polar    environment.xpdDb              the cross-polar floor (dB), 5..30, found by a bounded 1-D search (the effect is not linear)
+//   wall-loss-by-material  environment.wallLossAdjustByMaterialDb  { material: dB }: one adjustment per wall material, only when the readings span paths crossing different
+//                  materials (see MIN_READINGS_PER_MATERIAL); otherwise not applicable and the single wall-loss figure stands. Never suggested unless it beats the single figure.
+//   cross-polar    environment.xpdDb             the cross-polar floor (dB), 5..30, found by a bounded 1-D search (the effect is not linear)
 // Every candidate is verified by solving the scene again with the fitted value, so afterRmsDb is the real residual, not the linearised one.
 // Honest limits: with too few points, or points at nearly the same distance, a constant offset can be explained by any of the three; the cautions say so.
 import { solveLink, DEFAULT_XPD_DB } from './rf.js';
-import { MEASUREMENT_LIMITS, CALIBRATION_FIELDS } from './measurement-schema.js';
+import { MEASUREMENT_LIMITS, CALIBRATION_FIELDS, WALL_ADJUST_BY_MATERIAL } from './measurement-schema.js';
 
 export { MEASUREMENT_LIMITS, CALIBRATION_FIELDS };
 export const MIN_POINTS_FOR_FIT = 5;      // fewer points than this: a fit is shown with a caution
@@ -23,6 +25,8 @@ export const NEEDED_RMS_DB = 1.0;         // a model already within this rms of 
 export const MATCH_RMS_DB = 3;            // the model "matches" the readings only when the rms error is within this ...
 export const MATCH_WORST_DB = 6;          // ... and no single reading is worse than this
 export const NEEDED_IMPROVEMENT_DB = 0.5; // a fit that improves the rms by less than this is not suggested
+export const MIN_READINGS_PER_MATERIAL = 3;      // a wall material gets its own figure only when at least this many readings cross it (and at least 2 materials qualify)
+export const CONFIDENT_READINGS_PER_MATERIAL = 5; // below this many readings per material the per-material figures are flagged low confidence
 const AMBIGUOUS_RATIO = 1.15;             // two candidates within 15 percent of the best residual cannot be told apart
 
 const finite = (v) => typeof v === 'number' && Number.isFinite(v);
@@ -78,6 +82,27 @@ function directCrossings(res) {
   return Array.isArray(d.crossedWalls) ? d.crossedWalls.length : 0;
 }
 
+// Materials of the walls the direct path crosses, one entry per crossing.
+function directMaterials(res) {
+  const d = (res.paths || []).find((p) => !p.reflections || p.reflections.length === 0) || (res.paths || [])[0] || {};
+  return Array.isArray(d.wallLossDetail) ? d.wallLossDetail.map((w) => String(w.material)) : [];
+}
+
+// Solve the small normal-equation system A x = b by Gaussian elimination with partial pivoting; null when near-singular (walls always crossed together).
+function solveSmall(A, b) {
+  const n = b.length, M = A.map((r, i) => [...r, b[i]]), scale = A.map((r, i) => r[i]);
+  for (let c = 0; c < n; c++) {
+    let piv = c;
+    for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[piv][c])) piv = r;
+    if (Math.abs(M[piv][c]) < 0.05 * scale[c]) return null; // the material is almost a combination of the others: cannot be told apart
+    [M[c], M[piv]] = [M[piv], M[c]];
+    for (let r = c + 1; r < n; r++) { const f = M[r][c] / M[c][c]; for (let k = c; k <= n; k++) M[r][k] -= f * M[c][k]; }
+  }
+  const x = new Array(n).fill(0);
+  for (let r = n - 1; r >= 0; r--) { let v = M[r][n]; for (let k = r + 1; k < n; k++) v -= M[r][k] * x[k]; x[r] = v / M[r][r]; }
+  return x;
+}
+
 // Minimise f over [lo, hi]: a coarse grid, then golden-section refinement around the best grid cell.
 function minimise(f, lo, hi, grid = 11) {
   let bestX = lo, bestF = Infinity;
@@ -106,7 +131,7 @@ function minimise(f, lo, hi, grid = 11) {
  */
 export function suggestCalibration(scene) {
   const base = compareMeasurements(scene);
-  const out = { n: base.n, before: { rmsDb: base.rmsDb, meanDb: base.meanDb }, candidates: [], best: null, needed: false, cautions: [], matches: false, headline: '' };
+  const out = { n: base.n, before: { rmsDb: base.rmsDb, meanDb: base.meanDb }, candidates: [], best: null, needed: false, cautions: [], notes: [], matches: false, headline: '' };
   if (base.n === 0) { out.cautions.push('There are no usable measurements: add readings taken at known receiver positions.'); return out; }
   const env = scene.environment || {};
 
@@ -133,6 +158,51 @@ export function suggestCalibration(scene) {
     const kr = crossings.reduce((a, k, i) => a + k * (base.points[i].deltaDb), 0);
     cand('wall-loss', 'Extra loss per wall crossed', 'environment.wallLossAdjustDb', adjNow, adjNow - kr / k2, true);
   } else cand('wall-loss', 'Extra loss per wall crossed', 'environment.wallLossAdjustDb', adjNow, adjNow, false, 'no measured path crosses a wall');
+
+  // 2b) wall loss per wall material: only when enough readings cross each of at least two materials, and they are not always crossed together
+  const byMatNow = env.wallLossAdjustByMaterialDb && typeof env.wallLossAdjustByMaterialDb === 'object' ? env.wallLossAdjustByMaterialDb : {};
+  const matCounts = base.points.map((p) => { const c = {}; for (const m of directMaterials(solveAt(scene, linkOf(scene, p.linkId), p))) c[m] = (c[m] || 0) + 1; return c; });
+  const readingsBy = {};
+  matCounts.forEach((c) => { for (const m of Object.keys(c)) readingsBy[m] = (readingsBy[m] || 0) + 1; });
+  const eligible = Object.keys(readingsBy).filter((m) => readingsBy[m] >= MIN_READINGS_PER_MATERIAL).sort();
+  const WM = WALL_ADJUST_BY_MATERIAL;
+  const wmId = 'wall-loss-by-material', wmLabel = 'Extra loss per wall, by wall material', wmField = 'environment.wallLossAdjustByMaterialDb';
+  const wmNo = (reason) => out.candidates.push({ id: wmId, label: wmLabel, field: wmField, current: { ...byMatNow }, fitted: { ...byMatNow }, afterRmsDb: base.rmsDb, improvementDb: 0, applicable: false, reason });
+  let wmFit = null, wmReason = '';
+  if (Object.keys(readingsBy).length < 2) wmReason = 'the measured paths cross walls of fewer than two different materials';
+  else if (eligible.length < 2) wmReason = `fewer than two wall materials are crossed by at least ${MIN_READINGS_PER_MATERIAL} readings each`;
+  else {
+    // points that cross a material without enough readings are left out of this fit (that wall would be unconstrained)
+    const used = base.points.map((_, i) => i).filter((i) => Object.keys(matCounts[i]).length > 0 && Object.keys(matCounts[i]).every((m) => eligible.includes(m)));
+    const n = eligible.length, A = eligible.map(() => new Array(n).fill(0)), bv = new Array(n).fill(0);
+    for (const i of used) eligible.forEach((m, r) => { const kr = matCounts[i][m] || 0; if (!kr) return; bv[r] += kr * base.points[i].deltaDb; eligible.forEach((m2, c) => { A[r][c] += kr * (matCounts[i][m2] || 0); }); });
+    const perUsed = {};
+    used.forEach((i) => { for (const m of Object.keys(matCounts[i])) perUsed[m] = (perUsed[m] || 0) + 1; });
+    if (eligible.some((m) => (perUsed[m] || 0) < MIN_READINGS_PER_MATERIAL)) wmReason = `too few readings cross only well-measured materials: at least ${MIN_READINGS_PER_MATERIAL} per material are needed`;
+    else {
+      const x = solveSmall(A, bv);
+      if (!x) wmReason = 'the walls of different materials are always crossed together, so their losses cannot be told apart';
+      else wmFit = { x, perUsed, dropped: base.n - used.length };
+    }
+  }
+  if (wmFit) {
+    const fitted = {}, rows = [];
+    eligible.forEach((m, r) => {
+      const cur = finite(byMatNow[m]) ? byMatNow[m] : adjNow, v = Math.min(WM.max, Math.max(WM.min, cur - wmFit.x[r]));
+      fitted[m] = r2(v); rows.push({ material: m, current: r2(cur), fitted: r2(v), readings: wmFit.perUsed[m] });
+    });
+    const merged = { ...byMatNow, ...fitted };
+    const after = rmsOf(withEnv(scene, 'wallLossAdjustByMaterialDb', merged)).rmsDb; // verified by solving again
+    const single = out.candidates.find((c) => c.id === 'wall-loss');
+    const gain = (single && single.applicable ? single.afterRmsDb : base.rmsDb) - after; // must beat the single figure, or it is overfitting
+    if (gain < NEEDED_IMPROVEMENT_DB) wmNo('no better than one figure for all walls, so the single figure is kept (a per-material fit would overfit)');
+    else {
+      const low = rows.some((r) => r.readings < CONFIDENT_READINGS_PER_MATERIAL);
+      out.candidates.push({ id: wmId, label: wmLabel, field: wmField, current: { ...byMatNow }, fitted: merged, byMaterial: rows, afterRmsDb: after, improvementDb: base.rmsDb - after, applicable: true, confidence: low ? 'low' : 'ok', readingsPerMaterial: wmFit.perUsed, ignoredReadings: wmFit.dropped });
+      if (low) out.cautions.push(`Per-material wall figures rest on few readings (under ${CONFIDENT_READINGS_PER_MATERIAL} per material): treat them as low confidence and walk more paths through each wall type.`);
+      if (wmFit.dropped > 0) out.cautions.push(`${wmFit.dropped} reading${wmFit.dropped === 1 ? '' : 's'} (no wall crossed, or a wall material with under ${MIN_READINGS_PER_MATERIAL} readings) left out of the per-material fit.`);
+    }
+  } else wmNo(wmReason);
 
   // 3) cross-polar floor: only matters where the antennas are cross-polarised
   const xpdNow = finite(env.xpdDb) ? env.xpdDb : DEFAULT_XPD_DB;
@@ -162,7 +232,22 @@ export function suggestCalibration(scene) {
     if (out.matches) out.cautions.push('The model already matches the readings: no calibration is needed.');
     else out.cautions.push(`The model does not match these readings (rms ${r2(base.rmsDb)} dB, worst ${r2(worstDb)} dB) and no single calibration figure explains them: look for fades (multipath), polarisation, a wall or an obstruction, or a wrong reading position.`);
   }
-  out.headline = out.best ? `Best fit: ${out.best.label} (${r2(out.best.current)} to ${r2(out.best.fitted)} dB).`
+  // notes: where a fitted single number could really be something else (body loss, another wall, polarisation); for the UI to say so
+  const bestId = out.best && out.best.id;
+  const nonWall = base.points.map((p, i) => (crossings[i] === 0 ? p.deltaDb : null)).filter((v) => v !== null);
+  if (bestId === 'wall-loss' || bestId === 'wall-loss-by-material') {
+    out.notes.push('A wall-loss figure can also be absorbing body loss (the person holding the receiver), antenna orientation or a fade: it is only a wall if readings that cross no wall already match.');
+    if (nonWall.length >= 2) {
+      const m = nonWall.reduce((a2, b2) => a2 + b2, 0) / nonWall.length;
+      if (Math.abs(m) >= 2) out.notes.push(`Readings that cross no wall are also ${r2(Math.abs(m))} dB ${m < 0 ? 'below' : 'above'} the model, so the wall figure alone does not explain the error: body loss or another cause is likely involved.`);
+    } else out.notes.push('No reading is taken in clear line of sight, so body loss cannot be separated from wall loss: add readings with no wall in the way.');
+  } else if (bestId === 'body-loss') {
+    out.notes.push('A body-loss figure is a constant offset: it can also be an unmodelled wall, an obstruction, polarisation or antenna orientation.');
+  } else if (bestId === 'cross-polar') {
+    out.notes.push('A cross-polar floor only explains readings where the antennas are cross-polarised: a constant offset from body loss would look different.');
+  }
+  const fmtCand = (c) => (c.byMaterial ? c.byMaterial.map((r) => `${r.material} ${r2(r.fitted)} dB`).join(', ') : `${r2(c.current)} to ${r2(c.fitted)} dB`);
+  out.headline = out.best ? `Best fit: ${out.best.label} (${fmtCand(out.best)})${out.best.confidence === 'low' ? ', low confidence' : ''}.${out.notes.length ? ' This may also be body loss or another cause.' : ''}`
     : out.matches ? 'The model already matches these readings; no calibration is needed.'
     : 'The model does not match these readings and no single calibration value explains them: the readings need explaining (fades, polarisation, a wall).';
   return out;

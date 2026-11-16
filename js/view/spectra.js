@@ -20,6 +20,7 @@ import { toneSetup, toneProducts, drawBasebandLines, drawRfLines, lineRows } fro
 import { resolveAudioSource, resolveToneHz, AUDIO_SOURCE_LABELS } from '../model/audio-source.js';
 import { tone as toneState } from '../ui/toneState.js';
 import { buildToneSliders, mountSourceBar } from '../ui/sourceBar.js';
+import { noiseBursts, noiseClockNow } from './noiseWaves.js';
 import { drawMonoMpx, isStereoMpx, monoInputs, monoSummary, monoNotes, rfSubcarriers } from './spectraMono.js';
 export { drawMonoMpx, isStereoMpx, monoInputs, monoSummary, monoNotes, rfSubcarriers };
 
@@ -146,6 +147,7 @@ export function rfSummary(s, inp) {
   const bw = fin(s.bwKhz) ? `${Math.round(s.bwKhz)} kHz` : '-';
   let t = `RF spectrum of this link's carrier only (${inp.mode === 'digital' ? 'digital, flat-topped' : 'analogue FM'}): received level ${sgn(inp.rxLevelDbm)} dBm, ${sgn(s.marginToNoiseDb)} dB above the receiver channel noise floor ${sgn(inp.noiseFloorDbm, 0)} dBm (the plot shows power per ${fin(s.rbwKhz) ? Math.round(s.rbwKhz) : '-'} kHz resolution bandwidth, so the noise trace sits lower), occupied bandwidth ${bw} in a ${Math.round(inp.channelBwKhz)} kHz receiver channel.`;
   if (s.clipsAtFilter) t += ' The signal is wider than the receiver filter and is clipped by it.';
+  if (inp.noise && inp.noise.any) t += inp.noise.riseDb >= 0.3 ? ` A noise source is transmitting now and raises the floor by ${inp.noise.riseDb.toFixed(1)} dB; it follows the same on and off timing as the plan rings.` : ' A noise source that reaches this receiver is off at this moment; the floor rises when it transmits.';
   if (inp.subcarriers && inp.subcarriers.length) t += ` Control subcarriers marked at plus and minus their offset: ${inp.subcarriers.map((c) => `${c.name} ${+c.offsetKhz.toFixed(1)} kilohertz`).join(', ')}; levels illustrative.`;
   if (inp.mode === 'digital') t += ' Digital signal shown as a flat-topped block.';
   return t;
@@ -246,6 +248,23 @@ export const RF_SPECTRUM_TOP_DBM = -20, RF_SPECTRUM_BOTTOM_DBM = -120;
 /** Label of the centre line: the link carrier in MHz. */
 export function rfCentreLabel(inp) { return fin(inp && inp.carrierMHz) ? `fc ${+inp.carrierMHz.toFixed(3)} MHz` : 'fc'; }
 
+/**
+ * Noise-source trace on the RF spectrum: the floor jumps up by the rise the sources make while they transmit (the same on/off timing as the plan rings:
+ * a speedlight or trigger flashes, PTT and DECT key on and off) and drops back in the gaps. inp.noise comes from noiseBursts(); nothing is drawn without it.
+ */
+export function drawNoiseBurst(ctx, th, f, s, inp, xMin, xMax) {
+  const nb = inp && inp.noise;
+  if (!nb || !nb.any) return;
+  const rise = fin(nb.riseDb) ? nb.riseDb : 0, on = rise >= 0.3;
+  const lvl = s.noiseDbm + rise;
+  if (on) {
+    ctx.save(); ctx.globalAlpha = 0.18; ctx.fillStyle = th.warnText; ctx.fillRect(f.L, f.Y(lvl), f.pw, Math.max(0, f.Y(s.noiseDbm) - f.Y(lvl))); ctx.restore();
+    curve(ctx, f, [xMin, xMax], [lvl, lvl], { stroke: th.warnText });
+  }
+  const names = nb.sources.filter((x) => x.activity > 0.05).map((x) => x.name).slice(0, 2).join(', ');
+  haloText(ctx, th, on ? `noise source on: +${rise.toFixed(rise < 10 ? 1 : 0)} dB${names ? ` (${names})` : ''}` : 'noise source off', f.L + f.pw - 4, on ? f.Y(lvl) - 4 : f.Y(s.noiseDbm) + 13, { align: 'right', px: 11, color: th.warnText });
+}
+
 /** RF spectrum panel. s = rfSpectrum result, inp = the arguments it was made from. */
 export function drawRf(ctx, w, h, th, s, inp, hoverX) {
   if (!s || !s.freqsMHz || !s.freqsMHz.length) { note(ctx, w, h, th, 'No received level for this link, so there is no RF spectrum to show.'); return; }
@@ -280,6 +299,7 @@ export function drawRf(ctx, w, h, th, s, inp, hoverX) {
     drawProductMarker(ctx, th, x, f.Y(Math.max(sc.levelDbm, yMin + 2)), sign > 0 ? `${sc.name} ${+sc.offsetKhz.toFixed(1)} kHz` : '', { color: th.blue });
   }
   if (inp.mode === 'digital') haloText(ctx, th, `digital block ${fin(s.bwKhz) ? Math.round(s.bwKhz) : '-'} kHz`, f.L + f.pw / 2, f.Y(s.carrierLevelDbm ?? inp.rxLevelDbm) + 16, { align: 'center', px: 11, color: th.inkSoft });
+  drawNoiseBurst(ctx, th, f, s, inp, xMin, xMax);
   curve(ctx, f, [xMin, xMax], [s.noiseDbm, s.noiseDbm], { stroke: th.fail, dash: [5, 3] });
   haloText(ctx, th, `noise in RBW ${sgn(s.noiseDbm, 0)} dBm`, f.L + f.pw - 4, f.Y(s.noiseDbm) - 4, { align: 'right', px: 11, color: th.fail });
   haloText(ctx, th, `rx ${sgn(inp.rxLevelDbm)} dBm  margin ${sgn(s.marginToNoiseDb)} dB  BW ${fin(s.bwKhz) ? Math.round(s.bwKhz) : '-'} kHz`, f.L + 4, f.T + 12, { px: 11, weight: '600' });
@@ -426,9 +446,11 @@ export function mountSpectra({ container, store, now = () => performance.now() }
   const head = el('div', 'spectra-head');
   const h2 = el('h2', null, 'Spectra');
   const tabs = el('div', 'spectra-tabs group', null, { role: 'tablist', 'aria-label': 'Spectrum views' });
-  const pauseBtn = el('button', null, reduce ? 'Play' : 'Pause', { type: 'button', 'aria-pressed': String(reduce), title: 'Freeze or run the simulated signals' });
-  head.append(h2, tabs, pauseBtn);
+  const pauseLabel = (on) => (on ? 'Pause spectra' : 'Play spectra');
+  const pauseBtn = el('button', null, pauseLabel(!reduce), { type: 'button', id: 'btn-spectra-pause', 'aria-pressed': String(reduce), title: 'Freeze or run the simulated signals in the Audio, MPX and RF spectra' });
+  head.append(h2, tabs);
   const sourceBar = (() => { const tb = document.getElementById('toolbar'); return tb ? mountSourceBar({ host: tb, before: document.getElementById('btn-modlab'), store, tone: toneState }) : mountSourceBar({ host: head, store, tone: toneState }); })(); // top toolbar so it is reachable without the bottom panel
+  { const tb = document.getElementById('toolbar'); if (tb) tb.insertBefore(pauseBtn, document.getElementById('btn-modlab') || null); else head.append(pauseBtn); } // top toolbar, beside the audio source, so it is reachable without the bottom panel
   const grid = el('div', 'spectra-grid');
   container.append(head, grid);
 
@@ -523,6 +545,7 @@ export function mountSpectra({ container, store, now = () => performance.now() }
         const inp = rfInputs(scene, link, r, t, Math.max(120, Math.min(400, Math.round(w - 52))));
         if (inp && dist) inp.distortion = dist;
         if (inp && tp) inp.toneProducts = tp;
+        if (inp) { try { const nb = noiseBursts(scene, r, noiseClockNow()); if (nb.any) inp.noise = nb; } catch (e) { console.warn(e); } } // noise sources in this channel, on or off right now
         let s = null; if (inp) { try { s = model.rfSpectrum(inp); } catch (e) { console.warn(e); } }
         if (inp && s && inp.mode !== 'digital' && model.monoBasebandSpectrum) { // tone key, data subcarrier and pilot ride on the carrier
           try {
@@ -573,7 +596,7 @@ export function mountSpectra({ container, store, now = () => performance.now() }
     };
     const notes = {
       audio: ['Standard or illustrative: the signal is simulated, not real audio. Levels are illustrative.', 'Frequency is on a logarithmic axis because hearing works in ratios: each octave is a doubling of frequency (31.5, 63, 125 Hz and so on up to 16 kHz, the standard ISO octave band centres), so the low notes get as much room as the high ones.', ...((c.audio && c.audio.a && c.audio.a.notes) || [])],
-      rf: ["Only the selected link's own carrier is simulated: no other devices, intermodulation or interference.", 'The received level and the channel noise floor are the planner numbers; the carrier shape is illustrative.', ...((c.rf && c.rf.s && c.rf.s.notes) || [])],
+      rf: ["Only the selected link's own carrier is simulated: no other links or intermodulation. Noise sources that reach this receiver raise the floor in time with the plan rings (on and off, or a flash for pulse sources); that timing is a visual convention taken from each source's schedule.", 'The received level and the channel noise floor are the planner numbers; the carrier shape is illustrative.', ...((c.rf && c.rf.s && c.rf.s.notes) || [])],
       mpx: c.mpx && c.mpx.inp ? monoNotes(c.mpx.m) : ['Standard: the 19 kHz pilot, 38 kHz stereo subcarrier and 57 kHz RDS positions are FM broadcast practice. Levels are illustrative.'],
     };
     for (const id of Object.keys(texts)) { const nt = notes[id].join(' '); if (nt !== panels[id].aboutBody.textContent) panels[id].aboutBody.textContent = nt; }
@@ -624,7 +647,7 @@ export function mountSpectra({ container, store, now = () => performance.now() }
   }
   function setRunning(on) {
     running = on; lastNow = now();
-    pauseBtn.textContent = on ? 'Pause' : 'Play'; pauseBtn.setAttribute('aria-pressed', String(!on));
+    pauseBtn.textContent = pauseLabel(on); pauseBtn.setAttribute('aria-pressed', String(!on));
     if (on && !loop && !document.hidden) loop = requestAnimationFrame(tick);
     if (!on && loop) { cancelAnimationFrame(loop); loop = 0; }
     invalidateAll();
@@ -644,6 +667,6 @@ export function mountSpectra({ container, store, now = () => performance.now() }
   if (running) loop = requestAnimationFrame(tick);
   return {
     setRunning, invalidate: invalidateAll, panels, zoom, openZoom,
-    destroy() { running = false; if (loop) cancelAnimationFrame(loop); document.removeEventListener('visibilitychange', onVis); if (ro) ro.disconnect(); unsub.forEach((u) => u && u()); zoom.destroy(); zoomSliders.destroy(); sourceBar.destroy(); for (const sp of SPECTRA) panels[sp.id].host.destroy(); container.textContent = ''; },
+    destroy() { running = false; if (loop) cancelAnimationFrame(loop); document.removeEventListener('visibilitychange', onVis); if (ro) ro.disconnect(); unsub.forEach((u) => u && u()); zoom.destroy(); zoomSliders.destroy(); sourceBar.destroy(); pauseBtn.remove(); for (const sp of SPECTRA) panels[sp.id].host.destroy(); container.textContent = ''; },
   };
 }

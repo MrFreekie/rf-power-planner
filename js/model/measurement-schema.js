@@ -25,3 +25,6 @@ export const CALIBRATION_FIELDS = Object.freeze({
   'environment.xpdDb': Object.freeze({ min: 5, max: 30 }),
   'environment.wallLossAdjustDb': Object.freeze({ min: -10, max: 30 }),
 });
+
+/** Optional environment.wallLossAdjustByMaterialDb = { material: dB } (a walk-test fit per wall material; replaces the single wallLossAdjustDb for that material). Same dB range as the single figure. */
+export const WALL_ADJUST_BY_MATERIAL = Object.freeze({ min: -10, max: 30, maxMaterials: 32 });

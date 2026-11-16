@@ -498,7 +498,10 @@ export function pathWallLoss(scene, points, freqMHz) {
       if (w.riser) continue; // a riser face's through-loss is the platform obstruction (chord loss below), not counted twice
       const info = wallTransmissionInfo(w, freqMHz);
       // optional calibration: environment.wallLossAdjustDb is added to every wall crossed (a walk-test fit), never taking one below 0 dB
-      const adj = scene.environment && Number.isFinite(scene.environment.wallLossAdjustDb) ? scene.environment.wallLossAdjustDb : 0;
+      // optional environment.wallLossAdjustByMaterialDb = { material: dB }: a fitted figure for that wall material replaces the single figure for walls of that material
+      const byMat = scene.environment && scene.environment.wallLossAdjustByMaterialDb;
+      const own = byMat && typeof byMat === 'object' && Object.prototype.hasOwnProperty.call(byMat, w.material) ? byMat[w.material] : undefined;
+      const adj = Number.isFinite(own) ? own : scene.environment && Number.isFinite(scene.environment.wallLossAdjustDb) ? scene.environment.wallLossAdjustDb : 0;
       if (adj) info.lossDb = Math.max(0, info.lossDb + adj);
       lossDb += info.lossDb;
       crossed.push(w.id);

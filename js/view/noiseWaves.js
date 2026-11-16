@@ -153,15 +153,70 @@ export function quietSources(result) {
   for (const x of ns.sources) if (x && x.id != null && Number.isFinite(x.averageDbm) && x.averageDbm < floor - QUIET_BELOW_FLOOR_DB) out.add(x.id);
   return out;
 }
+// The wave clock is shared with the RF spectrum so the spectrum pulses exactly when the rings are born. It keeps running (or stays paused) with the
+// plan's ripple setting even when the rings themselves are not drawn.
+let clockPaused = false;
+function syncClock(paused) {
+  const tNow = now();
+  if (paused && clock.last) clock.held += tNow - clock.last;
+  clock.last = tNow;
+  clock.t = tNow - clock.held;
+  clockPaused = !!paused;
+  return clock.t;
+}
+/** noiseClockNow() -> the wave clock in seconds, advanced to this instant (same clock the plan rings use). */
+export function noiseClockNow() { return syncClock(clockPaused); }
+
+export const NOISE_FLASH_S = 0.35;
+/**
+ * noiseActivity(cfg, id, t) -> 0..1 how strongly the source is transmitting at wave time t: steady and faint sources 1; a keyed source 1 while on, 0 in its gap;
+ * a pulse or occasional source flashes to 1 as each ring is born and falls to 0 over NOISE_FLASH_S. Same schedule as the rings.
+ */
+export function noiseActivity(cfg, id, t) {
+  if (!cfg) return 0;
+  if (cfg.mode === 'keyed') return keyedState(cfg, id, t).on ? 1 : 0;
+  if (cfg.mode === 'pulse' || cfg.mode === 'occasional') {
+    const rings = waveRings(cfg, id, t);
+    if (!rings.length) return 0;
+    const youngest = Math.min(...rings.map((r) => r.age));
+    return Math.max(0, 1 - youngest / NOISE_FLASH_S);
+  }
+  return 1;
+}
+
+/**
+ * noiseBursts(scene, result, t) -> { sources: [{ id, name, activity, peakDbm }], addedDbm, riseDb, floorDbm, any }
+ * The noise sources that reach the selected receiver (result.noiseSources, peak levels already include the receiver selectivity) with their on/off state at wave time t. addedDbm is the power sum of
+ * peak x activity, riseDb the floor rise over the quiet channel floor it makes right now. any is true when at least one in-channel source exists.
+ */
+export function noiseBursts(scene, result, t) {
+  const ns = result && result.noiseSources, out = { sources: [], addedDbm: -Infinity, riseDb: 0, floorDbm: NaN, any: false };
+  if (!ns || !Array.isArray(ns.sources) || !scene || !Array.isArray(scene.noiseSources)) return out;
+  const floor = Number.isFinite(ns.floorBeforeDbm) ? ns.floorBeforeDbm : result.cascade && result.cascade.noiseFloorDbm;
+  if (!Number.isFinite(floor)) return out;
+  out.floorDbm = floor;
+  const byId = new Map(scene.noiseSources.map((s) => [s && s.id, s]));
+  let mw = 0;
+  for (const x of ns.sources) {
+    const src = byId.get(x && x.id);
+    if (!src || src.enabled === false || !Number.isFinite(x.peakDbm) || x.averageDbm < floor - QUIET_BELOW_FLOOR_DB) continue;
+    const cfg = classifyNoiseWave(src);
+    if (!cfg) continue;
+    const activity = noiseActivity(cfg, src.id, t);
+    out.sources.push({ id: src.id, name: src.name || src.kind, activity, peakDbm: x.peakDbm });
+    mw += Math.pow(10, x.peakDbm / 10) * activity;
+  }
+  out.any = out.sources.length > 0;
+  if (mw > 0) { out.addedDbm = 10 * Math.log10(mw); out.riseDb = 10 * Math.log10(1 + Math.pow(10, (out.addedDbm - floor) / 10)); }
+  return out;
+}
+
 export function drawNoiseWaves(ctx, th, vp, scene, w, h, rip, result = null) {
   const st = rip && rip.settings;
+  if (st) syncClock(!!st.paused);
   if (!st || !st.on || st.field) return 0;
   const list = Array.isArray(scene.noiseSources) ? scene.noiseSources : [];
   if (!list.length) return 0;
-  const tNow = now();
-  if (st.paused && clock.last) clock.held += tNow - clock.last;
-  clock.last = tNow;
-  clock.t = tNow - clock.held;
   const reduced = reducedMotion();
   const refl = reflectorMap(scene.reflectors);
   const quiet = quietSources(result);

@@ -206,8 +206,29 @@ export function simulatedNoiseFloor({ environment = 'quiet', bwKHz = 200, freqsM
  */
 export const TV_BLOCK_DBM = -75;
 export const TV_OCCUPIED_MHZ = Object.freeze({ 6: 5.38, 8: 7.6 });
-/** tvBlockLevelDbm(n) -> assumed total in-block level (dBm) of TV channel n at the receiver: TV_BLOCK_DBM +- 3 dB, deterministic. */
-export const tvBlockLevelDbm = (n) => TV_BLOCK_DBM + (((Math.imul(Math.round(n) + 7, 2654435761) >>> 0) % 601) / 100 - 3);
+/** Limits of the optional per-channel override scene.tvBlockLevelsDbm = { "<channel>": dBm }: channel 2..69, level -120..-10 dBm, at most TV_BLOCK_LEVELS_MAX entries. */
+export const TV_BLOCK_LEVEL_LIMITS = Object.freeze({ channel: [2, 69], dbm: [-120, -10], maxEntries: 70 });
+const isBlockLevel = (v) => typeof v === 'number' && Number.isFinite(v) && v >= TV_BLOCK_LEVEL_LIMITS.dbm[0] && v <= TV_BLOCK_LEVEL_LIMITS.dbm[1];
+/** tvBlockLevelsOf(scene) -> the valid entries of scene.tvBlockLevelsDbm as a plain { channel: dBm } object ({} when absent). Invalid entries are ignored (validateScene reports them). */
+export function tvBlockLevelsOf(scene) {
+  const o = scene && scene.tvBlockLevelsDbm, out = {};
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return out;
+  for (const k of Object.keys(o).slice(0, TV_BLOCK_LEVEL_LIMITS.maxEntries)) {
+    const n = Number(k);
+    if (Number.isInteger(n) && String(n) === k && n >= TV_BLOCK_LEVEL_LIMITS.channel[0] && n <= TV_BLOCK_LEVEL_LIMITS.channel[1] && isBlockLevel(o[k])) out[k] = o[k];
+  }
+  return out;
+}
+/**
+ * tvBlockLevelDbm(n, overrides?) -> total in-block level (dBm) of TV channel n at the receiver. Default: the ASSUMED TV_BLOCK_DBM +- 3 dB, deterministic.
+ * overrides = scene.tvBlockLevelsDbm (or tvBlockLevelsOf(scene)): a user-entered level for that channel replaces the assumption (still illustrative unless it was measured).
+ */
+export const tvBlockLevelDbm = (n, overrides) => {
+  const o = overrides && typeof overrides === 'object' ? overrides[String(Math.round(n))] : undefined;
+  return isBlockLevel(o) ? o : TV_BLOCK_DBM + (((Math.imul(Math.round(n) + 7, 2654435761) >>> 0) % 601) / 100 - 3);
+};
+/** tvBlockLevelIsAssumed(n, overrides?) -> true when the level for channel n is the built-in assumption (the UI should say so), false when the user supplied it. */
+export const tvBlockLevelIsAssumed = (n, overrides) => !(overrides && typeof overrides === 'object' && isBlockLevel(overrides[String(Math.round(n))]));
 /** tvInBandDbm(blockDbm, widthMHz, bwKHz = 200) -> the part of the block that falls in the measurement window (dBm). */
 export const tvInBandDbm = (blockDbm, widthMHz = DEFAULT_TV_WIDTH_MHZ, bwKHz = 200) => blockDbm - 10 * Math.log10(((TV_OCCUPIED_MHZ[widthMHz] || TV_OCCUPIED_MHZ[8]) * 1000) / bwKHz);
 /** powerSumDb(a, b) -> 10 log10(10^(a/10) + 10^(b/10)). */
@@ -217,16 +238,16 @@ export const powerSumDb = (a, b) => 10 * Math.log10(10 ** (a / 10) + 10 ** (b / 
  */
 export const tvNoiseRiseDb = (floorDbm, blockDbm, widthMHz = DEFAULT_TV_WIDTH_MHZ, bwKHz = 200) => powerSumDb(floorDbm, tvInBandDbm(blockDbm, widthMHz, bwKHz)) - floorDbm;
 /**
- * applyTvNoiseRise(points, channels, { widthMHz, bwKHz }) -> a new point list: points inside an occupied channel (lo inclusive, hi exclusive; the full
+ * applyTvNoiseRise(points, channels, { widthMHz, bwKHz, blockLevelsDbm }) -> a new point list: points inside an occupied channel (lo inclusive, hi exclusive; the full
  * 6 or 8 MHz block) get dbm raised and { tvChannel, riseDb, floorDbm }. points are { freqMHz, dbm, ... }; channels are { n, loMHz, hiMHz, occupied }.
  */
-export function applyTvNoiseRise(points, channels, { widthMHz = DEFAULT_TV_WIDTH_MHZ, bwKHz = 200 } = {}) {
+export function applyTvNoiseRise(points, channels, { widthMHz = DEFAULT_TV_WIDTH_MHZ, bwKHz = 200, blockLevelsDbm } = {}) {
   const occ = (channels || []).filter((c) => c && c.occupied);
   return points.map((p) => {
     const c = occ.find((q) => p.freqMHz >= q.loMHz && p.freqMHz < q.hiMHz);
     if (!c) return p;
-    const rise = tvNoiseRiseDb(p.dbm, tvBlockLevelDbm(c.n), widthMHz, bwKHz);
-    return { ...p, floorDbm: p.dbm, dbm: p.dbm + rise, riseDb: rise, tvChannel: c.n };
+    const rise = tvNoiseRiseDb(p.dbm, tvBlockLevelDbm(c.n, blockLevelsDbm), widthMHz, bwKHz);
+    return { ...p, floorDbm: p.dbm, dbm: p.dbm + rise, riseDb: rise, tvChannel: c.n, ...(tvBlockLevelIsAssumed(c.n, blockLevelsDbm) ? {} : { blockUserSet: true }) };
   });
 }
 

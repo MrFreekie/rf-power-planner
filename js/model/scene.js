@@ -34,7 +34,8 @@ import { validatePerson, prunePeople, PEOPLE_LIMITS, linkOwners } from './people
 import { validateNoiseSource, wallNoiseSourcesFromReflectors, NOISE_SOURCE_LIMITS } from './noise-sources.js';
 import { AUDIENCE_KINDS, AUDIENCE_DENSITY_LIMITS, AUDIENCE_MAX } from './audience.js';
 import { ANTENNA_BANDS } from './antenna-band.js';
-import { MEASUREMENT_LIMITS, validateMeasurement, CALIBRATION_FIELDS } from './measurement-schema.js';
+import { TV_BLOCK_LEVEL_LIMITS } from './spectrum-map.js';
+import { MEASUREMENT_LIMITS, validateMeasurement, CALIBRATION_FIELDS, WALL_ADJUST_BY_MATERIAL } from './measurement-schema.js';
 
 // Stage and platform limits. Item pos.z everywhere stays the height above the LOCAL floor (deck or platform top).
 export const STAGE_LIMITS = Object.freeze({ size: [0.5, 500], heightM: [0, 20] });
@@ -327,7 +328,7 @@ const inRange = (v, lo, hi) => isNum(v) && v >= lo && v <= hi;
 export const SCENE_LIMITS = Object.freeze({
   maxText: 4 * 1024 * 1024, // characters of scene JSON that deserialize() will parse
   maxDepth: 24, maxNodes: 200000, maxString: 1000, // generic shape guard (the venue underlay is checked on its own)
-  maxLinks: 64, maxPeople: 64, maxReflectors: 500, maxZones: 100, maxZonePoints: 500, maxImdTransmitters: 16, maxImdGroups: 8, maxChain: 32, maxBranches: 16,
+  maxLinks: 64, maxPeople: 64, maxReflectors: 500, maxZones: 100, maxZonePoints: 500, maxImdTransmitters: 16, maxImdGroups: 8, maxChain: 32, maxBranches: 16, maxTvBlockLevels: 70, maxWallAdjustMaterials: 32,
   coordM: 10000, zoneCoordM: 2000, zM: 1000, maxFreqMHz: 1e6, maxDb: 1000, maxIdChars: 64,
 });
 const SL = SCENE_LIMITS;
@@ -510,6 +511,15 @@ export function validateScene(scene) {
     for (const [f, lim] of [['xpdDb', CALIBRATION_FIELDS['environment.xpdDb']], ['wallLossAdjustDb', CALIBRATION_FIELDS['environment.wallLossAdjustDb']]]) {
       if (env[f] !== undefined && !(isNum(env[f]) && env[f] >= lim.min && env[f] <= lim.max)) errors.push(`environment.${f} must be between ${lim.min} and ${lim.max}`);
     }
+    if (env.wallLossAdjustByMaterialDb !== undefined) {
+      const o = env.wallLossAdjustByMaterialDb, W = WALL_ADJUST_BY_MATERIAL;
+      if (!isObj(o)) errors.push('environment.wallLossAdjustByMaterialDb must be an object of material to dB');
+      else if (Object.keys(o).length > SL.maxWallAdjustMaterials) errors.push(`environment.wallLossAdjustByMaterialDb has more than ${SL.maxWallAdjustMaterials} materials`);
+      else for (const [k, v] of Object.entries(o)) {
+        if (!isSafeId(k)) errors.push(`environment.wallLossAdjustByMaterialDb has a material name that is not a short plain string`);
+        else if (!(isNum(v) && v >= W.min && v <= W.max)) errors.push(`environment.wallLossAdjustByMaterialDb.${k} must be between ${W.min} and ${W.max}`);
+      }
+    }
     const xn = env.externalNoise;
     if (xn !== undefined && !(typeof xn === 'string' && Object.prototype.hasOwnProperty.call(EXTERNAL_NOISE_FIGURE_600MHZ_DB, xn)) && !(isNum(xn) && xn >= 0)) errors.push('environment.externalNoise must be a preset name or a number >= 0');
     const itf = env.interference;
@@ -562,6 +572,16 @@ export function validateScene(scene) {
     });
   }
   if (scene.tvChannelWidthMHz !== undefined && scene.tvChannelWidthMHz !== 6 && scene.tvChannelWidthMHz !== 8) errors.push('tvChannelWidthMHz must be 6 or 8');
+  if (scene.tvBlockLevelsDbm !== undefined) { // optional per-channel TV in-block level override (spectrum-map.js), dBm at the receiver
+    const L = TV_BLOCK_LEVEL_LIMITS, o = scene.tvBlockLevelsDbm;
+    if (!isObj(o)) errors.push('tvBlockLevelsDbm must be an object of channel number to dBm');
+    else if (Object.keys(o).length > SL.maxTvBlockLevels) errors.push(`tvBlockLevelsDbm has more than ${SL.maxTvBlockLevels} channels`);
+    else for (const [k, v] of Object.entries(o)) {
+      const n = Number(k);
+      if (!(Number.isInteger(n) && String(n) === k && n >= L.channel[0] && n <= L.channel[1])) errors.push(`tvBlockLevelsDbm key ${k.slice(0, 20)} must be a TV channel number ${L.channel[0]} to ${L.channel[1]}`);
+      else if (!(isNum(v) && v >= L.dbm[0] && v <= L.dbm[1])) errors.push(`tvBlockLevelsDbm.${k} must be between ${L.dbm[0]} and ${L.dbm[1]} dBm`);
+    }
+  }
   if (scene.people !== undefined) {
     if (!Array.isArray(scene.people)) errors.push('people must be an array');
     else if (scene.people.length > PEOPLE_LIMITS.max) errors.push(`at most ${PEOPLE_LIMITS.max} people are supported`);

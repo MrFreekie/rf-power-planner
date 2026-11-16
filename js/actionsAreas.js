@@ -6,7 +6,7 @@ import { CEILING_MATERIALS, CEILING_LIMITS } from './model/ceiling.js';
 import { ANTENNA_BANDS } from './model/antenna-band.js';
 import { antennaOf } from './actions.js';
 import { WALL_CONSTRUCTIONS, WALL_NOISE_LIMITS } from './model/ledwall.js';
-import { MEASUREMENT_LIMITS, CALIBRATION_FIELDS } from './model/measurement-schema.js';
+import { MEASUREMENT_LIMITS, CALIBRATION_FIELDS, WALL_ADJUST_BY_MATERIAL } from './model/measurement-schema.js';
 import { importMeasurementsCsv } from './model/measurements.js';
 import { NOISE_CATALOGUE, NOISE_SOURCE_LIMITS, createNoiseSource, engCrewSources } from './model/noise-sources.js';
 
@@ -478,6 +478,11 @@ export function importMeasurements(store, text, { linkId, replace = false } = {}
  */
 export function applyCalibration(store, suggestion) {
   const c = suggestion && suggestion.field ? suggestion : suggestion && suggestion.best;
+  if (c && c.field === 'environment.wallLossAdjustByMaterialDb' && c.applicable !== false && c.fitted && typeof c.fitted === 'object') { // per-material figures: { material: dB }, each clamped
+    const W = WALL_ADJUST_BY_MATERIAL, entries = Object.entries(c.fitted).filter(([k, v]) => /^[A-Za-z0-9_.:-]{1,64}$/.test(k) && k !== '__proto__' && fin(v)).slice(0, W.maxMaterials);
+    if (!entries.length) return false;
+    return store.update((d) => { d.environment = d.environment || {}; d.environment.wallLossAdjustByMaterialDb = Object.fromEntries(entries.map(([k, v]) => [k, round2(Math.min(W.max, Math.max(W.min, v)))])); });
+  }
   if (!c || typeof c.field !== 'string' || !Object.prototype.hasOwnProperty.call(CALIBRATION_FIELDS, c.field) || !fin(c.fitted) || c.applicable === false) return false;
   const lim = CALIBRATION_FIELDS[c.field], key = c.field.split('.')[1];
   return store.update((d) => { d.environment = d.environment || {}; d.environment[key] = round2(Math.min(lim.max, Math.max(lim.min, c.fitted))); });
