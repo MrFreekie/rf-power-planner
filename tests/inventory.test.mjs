@@ -117,3 +117,49 @@ test('addLink on a one-link scene starts from the defaults and stops at the link
   assert.equal(store.getScene().links.length, 64);
   assert.equal(addLink(store, 'mic'), null);
 });
+
+import { shareRxAntenna, unshareRxAntenna } from '../js/actions.js';
+import { solveLink, chainLossDb } from '../js/model/rf.js';
+
+const mics = (st) => st.getScene().links.filter((l) => l.kind === 'mic');
+
+test('sharing a receive antenna copies it, adds a splitter to both chains, and the follower tracks the source', () => {
+  const store = createStore(people()), [a, b] = mics(store);
+  const chainBefore = chainLossDb(b.chain, b.freqMHz);
+  assert.ok(shareRxAntenna(store, b.id, a.id));
+  let [A, B] = mics(store);
+  assert.equal(B.rx.sharedAntennaOf, A.id);
+  assert.deepEqual(B.rx.pos, A.rx.pos);
+  assert.equal(A.chain[0].presetId, 'splitter-2'); assert.equal(B.chain[0].presetId, 'splitter-2');
+  assert.ok(Math.abs(chainLossDb(B.chain, B.freqMHz) - chainBefore - 3.51) < 0.05, 'a 2-way splitter adds 3 dB split plus 0.5 dB excess loss');
+  assert.ok(Number.isFinite(solveLink(store.getScene(), B).inputPowerDbm));
+  store.update((d) => { d.links.find((l) => l.id === a.id).rx.pos.x += 1; });
+  [A, B] = mics(store);
+  assert.equal(B.rx.pos.x, A.rx.pos.x);
+  assert.deepEqual(validateScene(store.getScene()).errors || [], []);
+  const inv = inventoryRows(store.getScene()).find((r) => r.id === b.id);
+  assert.equal(inv.sharesAntennaWith, A.name);
+});
+
+test('a third link sharing resizes the splitter; unsharing and removing a source clean up', () => {
+  const store = createStore(people()), [a, b, c] = mics(store);
+  shareRxAntenna(store, b.id, a.id); shareRxAntenna(store, c.id, a.id);
+  assert.equal(mics(store)[0].chain[0].ports, 3); assert.equal(mics(store)[2].chain[0].ports, 3);
+  assert.ok(unshareRxAntenna(store, c.id));
+  assert.equal(mics(store)[2].rx.sharedAntennaOf, undefined);
+  assert.ok(!mics(store)[2].chain.some((i) => i.presetId === 'splitter-2'));
+  assert.equal(mics(store)[0].chain[0].ports, 2);
+  assert.ok(removeLink(store, a.id));
+  const B = mics(store).find((l) => l.id === b.id);
+  assert.equal(B.rx.sharedAntennaOf, undefined);
+  assert.ok(!B.chain.some((i) => i.presetId === 'splitter-2'));
+});
+
+test('sharing refuses IEM links, itself, and chained shares', () => {
+  const store = createStore(people()), [a, b, c] = mics(store), iem = store.getScene().links.find((l) => l.kind === 'iem');
+  assert.equal(shareRxAntenna(store, iem.id, a.id), false);
+  assert.equal(shareRxAntenna(store, a.id, a.id), false);
+  shareRxAntenna(store, b.id, a.id);
+  assert.equal(shareRxAntenna(store, c.id, b.id), false);
+  assert.equal(shareRxAntenna(store, a.id, c.id), false);
+});

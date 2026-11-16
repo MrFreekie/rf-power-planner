@@ -64,6 +64,7 @@ export function inventoryRows(scene, results) {
       id: l.id, name: String(l.name || ''), kind: l.kind, freqMHz: l.freqMHz,
       person: person ? person.name : null, personId: person ? person.id : null,
       txItem: txDeviceName(l), txPowerMw: sig3(Math.pow(10, l.tx.powerDbm / 10)), txAntenna: antennaName(l.tx.antenna),
+      sharesAntennaWith: (() => { const src = l.rx.sharedAntennaOf && links.find((q) => q.id === l.rx.sharedAntennaOf); return src ? String(src.name || src.id) : null; })(),
       rxItem: rxDeviceName(l), rxAntenna: antennaName(l.rx.antenna), antennaB: hasB ? antennaName(div.antennaB.antenna || l.rx.antenna) : null,
       chainItems: chainSummary(l).items, chainLossDb: loss,
       distanceM: res ? r1(res.distanceM) : null, inputPowerDbm: r1(res && res.inputPowerDbm), marginDb: r1(res && res.marginDb), status: res ? res.status : null,
@@ -83,7 +84,7 @@ export function inventoryTotals(rows, scene) {
   const antennas = [];
   for (const l of links) {
     if (l.tx.antenna && l.tx.antenna.type !== 'body') antennas.push(antennaName(l.tx.antenna));
-    if (l.rx.antenna && l.rx.antenna.type !== 'body') antennas.push(antennaName(l.rx.antenna));
+    if (l.rx.antenna && l.rx.antenna.type !== 'body' && !l.rx.sharedAntennaOf) antennas.push(antennaName(l.rx.antenna)); // a shared antenna is packed once, with its first link
     const div = l.rx.diversity;
     if (div && div.enabled && div.antennaB) antennas.push(antennaName(div.antennaB.antenna || l.rx.antenna));
   }
@@ -104,7 +105,7 @@ export function linkCard(scene, linkId, results) {
   const lines = [];
   lines.push(`${cap(kindWord(r.kind))} link at ${r.freqMHz} MHz${r.person ? `, worn or held by ${r.person}` : ', not assigned to a person'}.`);
   lines.push(`Transmitter: ${r.txItem}, ${r.txPowerMw} mW, ${r.txAntenna} antenna, at x ${r1(l.tx.pos.x)} m, y ${r1(l.tx.pos.y)} m, height ${r1(l.tx.pos.z)} m.`);
-  lines.push(`Receiver: ${r.rxItem}, ${r.rxAntenna} antenna${r.antennaB ? ` plus ${r.antennaB} on antenna B` : ''}, at x ${r1(l.rx.pos.x)} m, y ${r1(l.rx.pos.y)} m, height ${r1(l.rx.pos.z)} m.`);
+  lines.push(`Receiver: ${r.rxItem}, ${r.rxAntenna} antenna${r.antennaB ? ` plus ${r.antennaB} on antenna B` : ''}${r.sharesAntennaWith ? ` shared with ${r.sharesAntennaWith} through a splitter` : ''}, at x ${r1(l.rx.pos.x)} m, y ${r1(l.rx.pos.y)} m, height ${r1(l.rx.pos.z)} m.`);
   lines.push(r.chainItems ? `Chain: ${r.chainItems} item${r.chainItems === 1 ? '' : 's'}, net ${r.chainLossDb === null ? 'unknown' : `${r.chainLossDb} dB`} loss.` : 'Chain: nothing between the antenna and the receiver.');
   lines.push(r.status ? `Result: ${r.status}, ${r.distanceM} m, ${r.inputPowerDbm} dBm at the input, ${r.marginDb} dB margin.` : 'Result: not solved.');
   return { row: r, lines };

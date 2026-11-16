@@ -5,7 +5,7 @@ import { buildExample } from './examples.js';
 import { IMD_PRESETS, COMBINER_PRESETS } from './model/imd-params.js';
 import { startWalk, stopWalk } from './walk.js';
 import { effectiveAntennaB } from './model/diversity.js';
-import { migrateScene, validateScene, createDefaultScene, createDefaultLink, syncBranches, createChainItem, createReflector, createBranch, createZone, createPlatform, STAGE_LIMITS, PLATFORM_LIMITS, PLATFORM_MATERIALS, createImdTransmitter, defaultImdTransmitters, newId, SCENE_LIMITS } from './model/scene.js';
+import { migrateScene, validateScene, createDefaultScene, createDefaultLink, syncBranches, createChainItem, createChainItemFromPreset, createReflector, createBranch, createZone, createPlatform, STAGE_LIMITS, PLATFORM_LIMITS, PLATFORM_MATERIALS, createImdTransmitter, defaultImdTransmitters, newId, SCENE_LIMITS } from './model/scene.js';
 import { applyFmPreset } from './model/fm-presets.js';
 import { DEFAULT_MIC_OFFSET, DEFAULT_IEM_OFFSET, PEOPLE_LIMITS, PERSON_ROLES, PERSON_COLOURS, createPerson, personLinkName, extraLinkName, personPackPositions, offsetFromPack, linkOwners, prunePeople } from './model/people.js';
 import { validateVenue } from './model/venue-underlay.js';
@@ -1015,13 +1015,58 @@ export function addLink(store, kind, partial = {}) {
   return id;
 }
 
+const SHARE_PRESETS = Object.freeze({ passive: 'splitter-2', active: 'active-splitter-4' });
+const isShareItem = (it) => !!it && (it.presetId === 'splitter-2' || it.presetId === 'active-splitter-4');
+
+/** Put one splitter (ports = group size) at the antenna end of every link that shares the receive antenna of `rootId`, and take it off links that no longer share. */
+function rebalanceShare(d, rootId, part = 'passive') {
+  const root = d.links.find((l) => l.id === rootId); if (!root) return;
+  const group = [root, ...d.links.filter((l) => l.rx.sharedAntennaOf === rootId)];
+  const existing = (root.chain || []).find(isShareItem);
+  const preset = group.length > 1 && existing ? existing.presetId : SHARE_PRESETS[part] || SHARE_PRESETS.passive;
+  for (const l of group) {
+    l.chain = (l.chain || []).filter((it) => !isShareItem(it));
+    if (group.length > 1 && l.chain.length < SCENE_LIMITS.maxChain) l.chain.unshift(createChainItemFromPreset(preset, { ports: Math.min(Math.max(group.length, 2), 16) }));
+  }
+}
+
+/**
+ * shareRxAntenna(store, linkId, sourceId, { splitter: 'passive' | 'active' }) -> true when done. Both links must be microphone links and the source must not itself share.
+ * The link takes the source's receive position and antenna (kept in step by the store) and each receiver in the group gets a splitter at the antenna end, sized to the group.
+ */
+export function shareRxAntenna(store, linkId, sourceId, { splitter = 'passive' } = {}) {
+  return store.update((d) => {
+    const l = d.links.find((q) => q.id === linkId), src = d.links.find((q) => q.id === sourceId);
+    if (!l || !src || l === src || l.kind !== 'mic' || src.kind !== 'mic' || src.rx.sharedAntennaOf !== undefined) return;
+    if (d.links.some((q) => q.rx.sharedAntennaOf === linkId)) return; // this link is already someone's source: unshare those first
+    const old = l.rx.sharedAntennaOf;
+    l.rx.sharedAntennaOf = sourceId;
+    if (old && old !== sourceId) rebalanceShare(d, old);
+    rebalanceShare(d, sourceId, splitter);
+  });
+}
+
+/** unshareRxAntenna(store, linkId) -> true when the link had a shared antenna. It keeps its own copy of the antenna and loses the splitter (the others are resized). */
+export function unshareRxAntenna(store, linkId) {
+  return store.update((d) => {
+    const l = d.links.find((q) => q.id === linkId); if (!l || l.rx.sharedAntennaOf === undefined) return;
+    const root = l.rx.sharedAntennaOf;
+    delete l.rx.sharedAntennaOf;
+    l.chain = (l.chain || []).filter((it) => !isShareItem(it));
+    rebalanceShare(d, root);
+  });
+}
+
 /** removeLink(store, linkId) -> true when removed. The last link cannot be removed. People lose their reference to it and its walk-test readings are deleted, in one undo step. */
 export function removeLink(store, linkId) {
   return store.update((d) => {
     if (!Array.isArray(d.links) || d.links.length < 2) return;
     const i = d.links.findIndex((l) => l.id === linkId);
     if (i < 0) return;
+    const gone = d.links[i];
     d.links.splice(i, 1);
+    for (const q of d.links) if (q.rx.sharedAntennaOf === linkId) { delete q.rx.sharedAntennaOf; q.chain = (q.chain || []).filter((it) => !isShareItem(it)); } // the source went: followers keep their own copy, minus the splitter
+    if (gone.rx.sharedAntennaOf) rebalanceShare(d, gone.rx.sharedAntennaOf); // a follower went: resize the splitter for the rest
     if (Array.isArray(d.people)) prunePeople(d);
     pruneMeasurements(d);
   });

@@ -207,9 +207,27 @@ export function syncBranches(link) {
   return link;
 }
 
-/** Run syncBranches over every link of a scene (in place). */
+/**
+ * Shared receive antenna (mic links only): a link with rx.sharedAntennaOf = <another link id> uses that link's receive antenna, through a splitter.
+ * The follower's rx.pos and rx.antenna are copied from the source on every store.update (the source wins; move the source receiver to move both).
+ * A dangling, self, chained or non-mic reference is dropped. Run in place; called by syncScene.
+ */
+export function syncSharedAntennas(scene) {
+  const links = scene && Array.isArray(scene.links) ? scene.links : [];
+  for (const l of links) {
+    if (!l || !l.rx || l.rx.sharedAntennaOf === undefined) continue;
+    const src = links.find((q) => q && q.id === l.rx.sharedAntennaOf);
+    if (!src || src === l || l.kind !== 'mic' || src.kind !== 'mic' || (src.rx && src.rx.sharedAntennaOf !== undefined)) { delete l.rx.sharedAntennaOf; continue; }
+    l.rx.pos = structuredClone(src.rx.pos);
+    l.rx.antenna = structuredClone(src.rx.antenna);
+  }
+  return scene;
+}
+
+/** Run syncBranches over every link of a scene (in place), then the shared receive antennas. */
 export function syncScene(scene) {
   if (scene && Array.isArray(scene.links)) for (const l of scene.links) syncBranches(l);
+  syncSharedAntennas(scene);
   return scene;
 }
 
@@ -825,6 +843,7 @@ export function validateScene(scene) {
         }
       }
       if (l.rx.rxPreset !== undefined && !RX_PRESET_IDS.includes(l.rx.rxPreset)) errors.push(`${p}.rx.rxPreset invalid`);
+      if (l.rx.sharedAntennaOf !== undefined && !(isSafeId(l.rx.sharedAntennaOf) && l.rx.sharedAntennaOf !== l.id)) errors.push(`${p}.rx.sharedAntennaOf must be the id of another link`);
       if (l.rx.overload !== undefined) {
         const o = l.rx.overload;
         if (!isObj(o) || (o.maxInputDbm !== undefined && !isNum(o.maxInputDbm)) || (o.p1dBDbm !== undefined && !isNum(o.p1dBDbm))) {

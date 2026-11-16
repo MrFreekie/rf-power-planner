@@ -2,7 +2,7 @@
 // Clicking a row selects that link's transmitter, so the plan highlights it, the side view follows it and the inspector opens its fields.
 // Pure helpers (inventoryView) are tested without a DOM; mountInventory() builds the panel.
 import { inventoryRows, inventoryTotals, linkCard, gearOptions, powerChoices } from '../model/inventory.js';
-import { setTxFmPreset, setRxFmPreset, setTxPowerOption, setModulation, addLink } from '../actions.js';
+import { setTxFmPreset, setRxFmPreset, setTxPowerOption, setModulation, addLink, shareRxAntenna, unshareRxAntenna } from '../actions.js';
 import { DIGITAL_PRESETS } from '../model/digital-params.js';
 import { activeLink, solveCached } from '../view/util.js';
 import { getLinkFocus, setLinkFocus, subscribeLinkFocus } from '../view/linkFocus.js';
@@ -63,6 +63,14 @@ export function mountInventory({ container, store }) {
     if (mod.type === 'digital') {
       wrap.append(pick('Digital preset', Object.entries(DIGITAL_PRESETS).map(([id, p]) => [id, p.label || id]), (mod.digital && mod.digital.preset) || '', (v) => setModulation(store, link.id, { preset: v, fixedOrder: null })));
       wrap.append(pick('Digital order', [['', 'Adaptive'], ['2', 'BPSK'], ['4', 'QPSK'], ['16', '16-QAM'], ['64', '64-QAM'], ['256', '256-QAM']], mod.digital && mod.digital.fixedOrder ? String(mod.digital.fixedOrder) : '', (v) => setModulation(store, link.id, { fixedOrder: v ? Number(v) : null })));
+    }
+    if (link.kind === 'mic') {
+      const all = store.getScene().links, hasFollowers = all.some((q) => q.rx.sharedAntennaOf === link.id);
+      const sources = all.filter((q) => q.kind === 'mic' && q.id !== link.id && q.rx.sharedAntennaOf === undefined);
+      const f = pick('Receive antenna', [['', 'Its own antenna'], ...sources.map((q) => [q.id, `Shared with ${q.name} (splitter)`])], link.rx.sharedAntennaOf || '', (v) => { if (v) shareRxAntenna(store, link.id, v); else unshareRxAntenna(store, link.id); });
+      if (hasFollowers) { f.querySelector('select').disabled = true; f.append(el('small', 'hint', 'Other links share this antenna. Move this receiver to move all of them.')); }
+      else if (link.rx.sharedAntennaOf) f.append(el('small', 'hint', 'Position and antenna follow the other link; a splitter at the antenna end costs each receiver its share of the signal.'));
+      wrap.append(f);
     }
     if (!opts.tx.length && !opts.rx.length) return wrap;
     const field = (label, current, list, generic, onPick) => {
