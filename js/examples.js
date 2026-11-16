@@ -8,6 +8,8 @@ import { modeReport } from './model/digital-link.js';
 import { sweepLink } from './model/diversity.js';
 import { confidenceSummary } from './model/assumptions-in-use.js';
 import { squelchState } from './model/squelch.js';
+import { mpxState } from './model/mpx.js';
+import { suggestCalibration } from './model/measurements.js';
 import { RX_PRESETS } from './model/rx-params.js';
 import { imdSummary, evenOrderImd } from './model/imd.js';
 import { toneMpxReport } from './model/tone-mpx.js';
@@ -703,6 +705,22 @@ export function noiseSourceScene(id, opts = {}) {
       base(s, l); l.name = '1.9 GHz mic at FOH'; l.freqMHz = 1893; l.tx.powerDbm = 10;
       s.noiseSources = [at('dect-comms', { x: 22, y: 14, z: 1.2 }, { name: 'Crew DECT intercom beltpack' })];
     });
+    case 'flash-trigger-24': return make('mic', (s, l) => { // a 2.4 GHz mic on the same channel as a camera radio flash trigger 8 m from the receive antenna
+      base(s, l); l.name = '2.4 GHz mic at FOH'; l.freqMHz = 2440; l.tx.powerDbm = 10;
+      s.noiseSources = [at('flash-trigger-radio', { x: 28, y: 14, z: 1.5 }, { name: 'Camera radio flash trigger' })];
+    });
+    case 'keyed-vs-continuous': return make('mic', (s, l) => { // a keyed PTT radio 3 m away and an LED light placed to give the same average floor rise
+      base(s, l); l.name = 'Mic at FOH';
+      s.noiseSources = [at('ptt-business-uhf', { x: 25, y: 10, z: 1.2 }, { name: 'Crew PTT radio' }), at('led-camera-light', { x: 16, y: 18.6, z: 1.5 }, { name: 'LED camera light' })];
+    });
+    case 'hoist-vs-led': return make('mic', (s, l) => { // mic transmitter off between songs; a hoist motor and an LED wall light with the same average level
+      base(s, l); l.name = 'Mic at FOH (transmitter off)'; l.tx.powerDbm = -60; l.rx.squelch = { enabled: true, thresholdDbm: -90, hysteresisDb: 3 };
+      s.noiseSources = [at('motor-hoist', { x: 28, y: 18, z: 1.5 }, { name: 'Chain hoist motor' }), at('led-light-pwm', { x: 17, y: 20, z: 1.5 }, { name: 'LED wall light' })];
+    });
+    case 'generator-van': return make('mic', (s, l) => { // a tour power generator beside the FOH position, 8 m from the receive antenna
+      base(s, l); l.name = 'Mic at FOH';
+      s.noiseSources = [at('generator-inverter', { x: 22, y: 18, z: 1.0 }, { name: 'Tour generator' })];
+    });
     case 'pyro-trigger-433': return make('mic', (s, l) => { // a licence-free 433 MHz mic and the pyro cue trigger 0.8 MHz above it, on the stage
       base(s, l); l.name = '433 MHz mic at FOH'; l.freqMHz = 433.1; l.tx.powerDbm = 10;
       s.noiseSources = [at('pyro-trigger', { x: 3, y: 12, z: 1.2 }, { name: 'Pyro cue trigger' })];
@@ -765,7 +783,7 @@ export function boosterOverloadScene(variant = 'overloaded') {
     l.chain = [];
     if (variant === 'filtered') l.chain.push(createChainItemFromPreset('filter-bandpass', { passLoMHz: 600, passHiMHz: 612, dcMode: 'pass', noDc: false })); // a DC-passing filter, so the bias reaches the booster behind it
     if (variant === 'padded') l.chain.push(createChainItem('attenuator', { lossDb: 10 })); // a 10 dB pad ahead of the booster
-    if (variant !== 'plain') { l.chain.push(createChainItemFromPreset('booster-12')); l.rx.antennaBiasV = 12; } // the receiver supplies the 12 V the booster needs over the cable (no bias warning); no extra loss
+    if (variant !== 'plain') { l.chain.push(createChainItemFromPreset('booster-12', variant === 'high-p1db' ? { op1dBDbm: 20 } : {})); l.rx.antennaBiasV = 12; } // the receiver supplies the 12 V the booster needs over the cable (no bias warning); no extra loss
     l.chain.push(createChainItem('cable', { cableType: 'lmr-240', lengthM: 20 }));
     s.noiseSources = [createNoiseSource('ptt-business-uhf', { name: 'Crew radio 1 m from the antenna', pos: { x: 140, y: 11, z: 1.5 } })];
   });
@@ -998,6 +1016,126 @@ export function coordScene(which) {
     s.stage = { width: 14, depth: 10 }; s.environment.floor = 'wood';
     l.rx.pos = { x: 11, y: 4, z: 1.2 }; l.rx.diversity.antennaB.pos = { x: 11, y: 3.4, z: 1.2 };
     s.imd.rxAntennaPos = { ...l.rx.pos };
+  });
+}
+
+/**
+ * Walk test through walls (measurements.js): wallWalkScene({ walls, truthDb, xs, fit }) -> a 606.1 MHz mic link in free space with 3 dB of body loss (right) and walls across the
+ * walk (each a full-width vertical wall at x). The 'truth' is the same scene with truthDb extra dB per wall material (what the real walls cost beyond the table value); the 14 or
+ * 13 readings are SYNTHETIC: solved with the truth plus the deterministic scatter of up to +-0.4 dB. fit = true applies the best per-material fit the walk suggests (the scene after
+ * the dialog's Apply).
+ */
+export const TWO_WALLS = Object.freeze([{ name: 'Brick wall', material: 'brick', x: 15 }, { name: 'Plasterboard partition', material: 'drywall', x: 30 }]);
+export const TWO_WALLS_TRUTH_DB = Object.freeze({ brick: 8, drywall: 3 }); // extra loss beyond the table value (assumed for the example)
+export const TWO_WALLS_X = Object.freeze([6, 10, 13, 18, 21, 24, 27, 33, 38, 43, 48, 53, 58, 63]); // 3 clear, 4 behind the brick only, 7 behind both
+export const ONE_WALL = Object.freeze([{ name: 'Brick wall', material: 'brick', x: 30 }]);
+export const ONE_WALL_TRUTH_DB = Object.freeze({ brick: 9 });
+export const ONE_WALL_X = Object.freeze([8, 12, 16, 20, 24, 27, 33, 38, 43, 48, 53, 58, 63]); // 6 clear, 7 behind the wall
+function wallWalkScene({ walls, truthDb, xs, fit = false }) {
+  const sc = make('mic', (s, l) => {
+    s.stage = { width: 80, depth: 20 }; s.environment.floor = 'wood'; s.environment.model = 'free-space'; s.environment.bodyLossDb = 3;
+    l.name = 'Bodypack walk test'; l.freqMHz = 606.1; l.tx.powerDbm = 10;
+    l.tx.pos = { x: 3, y: 10, z: 1.2 }; l.tx.antenna = omni(); l.rx.antenna = omni(); l.rx.pos = { x: 40, y: 10, z: 1.5 }; l.rx.diversity.antennaB.pos = { x: 40, y: 9.4, z: 1.5 };
+    s.reflectors = walls.map((w) => createReflector({ name: w.name, material: w.material, p1: { x: w.x, y: 0 }, p2: { x: w.x, y: 20 }, zMin: 0, zMax: 4 }));
+  });
+  const truthScene = { ...sc, environment: { ...sc.environment, wallLossAdjustByMaterialDb: { ...truthDb } } }, l = sc.links[0];
+  sc.measurements = xs.map((x, i) => {
+    const copy = JSON.parse(JSON.stringify(l)); copy.rx.pos = { x, y: 10, z: 1.5 };
+    const dbm = solveLink(truthScene, copy).inputPowerDbm + measScatter(i);
+    return { id: `meas${i + 1}`, linkId: l.id, x, y: 10, rxDbm: Math.round(dbm * 100) / 100 };
+  });
+  if (fit) { const g = suggestCalibration(sc); if (g.best) sc.environment[g.best.field.split('.')[1]] = g.best.fitted; }
+  return sc;
+}
+/** twoWallsScene(variant): 'uncalibrated' = brick and plasterboard walls with table losses (readings are lower), 'calibrated' = the same after applying the per-material fit; 'one-wall' = a single brick wall (the readings step at it). */
+export function twoWallsScene(variant = 'uncalibrated') {
+  if (variant === 'one-wall') return wallWalkScene({ walls: ONE_WALL, truthDb: ONE_WALL_TRUTH_DB, xs: ONE_WALL_X });
+  return wallWalkScene({ walls: TWO_WALLS, truthDb: TWO_WALLS_TRUTH_DB, xs: TWO_WALLS_X, fit: variant === 'calibrated' });
+}
+
+/**
+ * Per-channel TV block levels (spectrum-map.js tvBlockLevelsDbm): tvLevelsScene(withLevels) -> two mics on UK channels 33 (570.4 MHz) and 30 (546.4 MHz), no TV noise source, and
+ * (withLevels) scene.tvBlockLevelsDbm = { 30: -108, 33: -85, 34: -52 }: stand-ins for levels measured at the receive antenna with an analyser. The levels only drive the spectrum map's
+ * noise-rise strip (they never reach the link budget), so the link margins are the same with or without them.
+ */
+export const TV_LEVELS_DBM = Object.freeze({ 30: -108, 33: -85, 34: -52 });
+export function tvLevelsScene(withLevels = true) {
+  const s = make('mic', (sc, l) => {
+    sc.stage = { width: 30, depth: 20 }; sc.environment.floor = 'wood'; sc.environment.model = 'free-space';
+    l.name = 'Mic 1 on channel 33'; l.freqMHz = WEAK_TV_FREQ_MHZ.ch33; l.tx.pos = { x: 3, y: 10, z: 1.5 }; l.tx.antenna = omni(); l.rx.antenna = omni();
+    l.rx.pos = { x: 22, y: 10, z: 1.2 }; l.rx.diversity.antennaB.pos = { x: 22, y: 9.4, z: 1.2 };
+    l.chain = [createChainItem('cable', { cableType: 'lmr-240', lengthM: 5 })];
+  });
+  const a = s.links[0], b = createDefaultLink('mic');
+  b.name = 'Mic 2 on channel 30'; b.freqMHz = WEAK_TV_FREQ_MHZ.ch30; b.tx.pos = { x: 3, y: 12, z: 1.5 }; b.tx.antenna = structuredClone(a.tx.antenna); b.rx.antenna = structuredClone(a.rx.antenna);
+  b.rx.pos = { x: 22, y: 11, z: 1.2 }; b.rx.diversity.antennaB.pos = { x: 22, y: 10.4, z: 1.2 }; b.chain = structuredClone(a.chain);
+  s.links.push(b);
+  if (withLevels) s.tvBlockLevelsDbm = { ...TV_LEVELS_DBM };
+  return syncScene(s);
+}
+
+/**
+ * Squelch with a pilot (squelch.js, mpx.js): squelchPilotScene() -> the geometry of squelchBurstScene as an IEM link (transmitter off, a speedlight 21.9 m from the pack, carrier squelch -90 dBm)
+ * with pilot squelch switched on. A flash carries no 19 kHz pilot, so the pilot never locks and the gate stays shut at the flash peak, where the carrier squelch alone opens.
+ */
+export function squelchPilotScene() {
+  return make('iem', (s, l) => {
+    s.stage = { width: 30, depth: 20 }; s.environment.floor = 'wood'; s.environment.model = 'free-space';
+    l.name = 'IEM pack (transmitter off)'; l.freqMHz = 606.1; l.tx.pos = { x: 3, y: 10, z: 1.5 }; l.tx.powerDbm = -60; l.tx.antenna = omni(); l.rx.antenna = omni();
+    l.rx.pos = { x: 22, y: 10, z: 1.2 }; l.rx.diversity.antennaB.pos = { x: 22, y: 9.4, z: 1.2 };
+    l.chain = [];
+    l.rx.squelch = { enabled: true, thresholdDbm: -90, hysteresisDb: 3 };
+    l.mpx.pilotSquelch = true;
+    s.noiseSources = [createNoiseSource('speedlight-flash', { name: 'Photographer speedlight', pos: { x: 0.5, y: 14, z: 1.5 } })];
+  });
+}
+/** squelchPilotReport() -> the flash peak and average at the pack, and the gate with carrier squelch alone and with the pilot required (the flash has no pilot: pilotPresent false). */
+export function squelchPilotReport() {
+  const sc = squelchPilotScene(), l = sc.links[0], r = solveLink(sc, l), n = r.noiseSources, src = n.sources[0];
+  const floor = n.floorBeforeDbm, sum = (a, b) => 10 * Math.log10(Math.pow(10, a / 10) + Math.pow(10, b / 10)), burst = sum(floor, src.peakDbm), idle = sum(floor, src.averageDbm);
+  const locked = mpxState(burst, { pilotSquelchEnabled: true }, null, { pilotPresent: false }).pilotLocked;
+  const carrierOnly = squelchState(false, burst, l.rx.squelch), withPilot = squelchState(false, burst, l.rx.squelch, { pilotRequired: !!l.mpx.pilotSquelch, pilotLocked: locked });
+  return { scene: sc, floorDbm: floor, peakDbm: src.peakDbm, avgDbm: src.averageDbm, burstLevelDbm: burst, idleLevelDbm: idle, thresholdDbm: l.rx.squelch.thresholdDbm, pilotLocked: locked, carrierOnly, withPilot, events: noiseEvents(sc.noiseSources[0], 10).length };
+}
+
+/**
+ * Four-piece band with a spare bodypack (people.js assignMic): bandSwapScene(assigned) -> bandPeopleScene() where Dev has no mic: his bodypack link ("Spare bodypack", 608.9 MHz) lies in the
+ * case at the back of the stage, 8.5 m from him. assigned = true is the scene after assigning it to Dev in the people panel (the same rule as actions.assignMic): the pack jumps to his
+ * belt at the standard offset, keeping its height, and the link takes his name ("Dev mic").
+ */
+export const BAND_SPARE_PACK_POS = Object.freeze({ x: 14, y: 9, z: 1.0 });
+export function bandSwapScene(assigned = false) {
+  const s = bandPeopleScene(), dev = s.people.find((p) => p.name === 'Dev'), link = s.links.find((l) => l.id === dev.micLinkId);
+  link.tx.pos = { ...BAND_SPARE_PACK_POS };
+  if (!assigned) { delete dev.micLinkId; delete dev.micOffset; link.name = 'Spare bodypack'; return s; }
+  dev.micOffset = { dx: DEFAULT_MIC_OFFSET.bodypack.dx, dy: DEFAULT_MIC_OFFSET.bodypack.dy, dz: BAND_SPARE_PACK_POS.z };
+  link.tx.pos = personPackPositions(dev).mic;
+  return s;
+}
+
+/**
+ * Sennheiser SR 2050 IEM on a legacy range (fm-presets.js): sr2050Scene(powerOptionId) -> an IEM link at 826.0 MHz, inside the Dw 790-865 MHz range that only the 2019 sheet lists (the 10/2023
+ * sheet has Aw+, Gw, Gw1, GBw, Bw), transmitter 'sennheiser-sr2050iem' at 'std-30mw' (default) or 'high-50mw', receiver 'sennheiser-ek2000iem', 25 m across a 40 x 20 m hall.
+ */
+export const SR2050_LEGACY_MHZ = 826.0;
+export function sr2050Scene(powerOptionId = 'std-30mw') {
+  return make('iem', (s, l) => {
+    s.stage = { width: 40, depth: 20 }; s.environment.floor = 'wood'; s.environment.model = 'free-space';
+    l.name = 'SR 2050 IEM, Dw range'; l.freqMHz = SR2050_LEGACY_MHZ;
+    l.tx.pos = { x: 3, y: 10, z: 2.0 }; l.tx.antenna = omni(); l.rx.antenna = omni(); l.rx.pos = { x: 28, y: 10, z: 1.2 }; l.rx.diversity.antennaB.pos = { x: 28, y: 9.4, z: 1.2 };
+    l.chain = [];
+    Object.assign(l, applyFmPreset(l, 'sennheiser-sr2050iem', { powerOptionId }));
+    Object.assign(l, applyFmPreset(l, 'sennheiser-ek2000iem'));
+  });
+}
+
+/** Compare with one change: compareChangeScene(lmr) -> a 606.1 MHz mic 19 m from the receiver with 60 m of RG58 on the receive side; lmr = true swaps the one cable for LMR-400 (the only difference between the two scenes). */
+export function compareChangeScene(lmr = false) {
+  return make('mic', (s, l) => {
+    s.stage = { width: 30, depth: 20 }; s.environment.floor = 'wood'; s.environment.model = 'free-space';
+    l.name = 'Mic with a long receive cable'; l.freqMHz = 606.1; l.tx.pos = { x: 3, y: 10, z: 1.5 }; l.tx.antenna = omni(); l.rx.antenna = omni();
+    l.rx.pos = { x: 22, y: 10, z: 1.2 }; l.rx.diversity.antennaB.pos = { x: 22, y: 9.4, z: 1.2 };
+    l.chain = [createChainItem('cable', { cableType: lmr ? 'lmr-400' : 'rg58', lengthM: 60 })];
   });
 }
 
@@ -2063,6 +2201,84 @@ export const EXAMPLES = [
     note: 'Less ideal: a 10 dB pad ahead of the booster cuts the keyed crew radio at the booster output from 13.9 dBm to 3.9 dBm, so the compression falls from 3.5 dB to 0.1 dB and the keyed margin rises from 4.1 dB to 7.5 dB. The pad costs the wanted mic 10 dB all the time, so with the radio off the margin is 27.5 dB instead of 37.5 dB. A bandpass filter (booster-filtered-before-radio) gives 7.6 dB keyed and 36.0 dB unkeyed, so a pad is a blunt cure (figures assumed).',
     build: () => ({ scene: boosterOverloadScene('padded') }),
   },
+  {
+    id: 'measurements-two-walls-per-material',
+    title: 'Walk test: a brick wall and a plasterboard wall, a fit for each',
+    note: 'Problem: fourteen synthetic readings along a 63 m walk are 7.7 dB weaker than the model on average (8.8 dB rms), because the path crosses a brick wall at 15 m and a plasterboard partition at 30 m and the table losses are too low. The per-material fit adds 8.1 dB for brick and 2.8 dB for plasterboard and leaves 0.2 dB rms, against 1.3 dB for one figure on every wall and 4.2 dB for body loss; eleven readings cross the brick and seven the plasterboard, so the fit is not marked low confidence. The three readings in clear line of sight already match to 0.4 dB, which is why the walls and not the body loss are blamed, but a wall figure can also hide a fade or a pack in a different place. Apply the fit, then walk it again (readings synthetic, true wall losses assumed).',
+    build: () => ({ scene: twoWallsScene('uncalibrated') }),
+  },
+  {
+    id: 'measurements-calibrated',
+    title: 'Walk test: the per-material fit applied',
+    note: 'Best practice: the same walk after applying the per-material fit (brick +8.1 dB, plasterboard +2.8 dB, stored in the scene): the readings now agree with the model to 0.2 dB rms instead of 8.8 dB, the worst single reading is 0.4 dB off, and asking for a fit again suggests nothing. The margin at the receiver behind both walls falls from 28.1 dB to 17.2 dB, which is the truer figure, so calibrating moved the plan toward the venue. The figures belong to these two walls, this transmitter and this body position: a new venue or another performer needs a new walk (readings synthetic).',
+    build: () => ({ scene: twoWallsScene('calibrated') }),
+  },
+  {
+    id: 'measurements-wall-explains-offset',
+    title: 'Walk test: the step at a wall is the wall, not the body',
+    note: 'Problem: thirteen synthetic readings are 4.8 dB weaker than the model on average (6.6 dB rms), but the six taken before a brick wall at 30 m match it to 0.4 dB and the seven behind it are about 9 dB low. The fit names the wall: an extra 8.9 dB per wall crossed leaves 0.2 dB rms, where changing the body loss would still leave 4.5 dB. Because the clear-path readings agree, a wall is the likelier cause than the body, though the fit still warns that a wall figure can absorb body loss or a fade. Apply it and re-check the margin behind the wall (readings synthetic, wall loss assumed).',
+    build: () => ({ scene: twoWallsScene('one-wall') }),
+  },
+  {
+    id: 'tv-per-channel-levels',
+    title: 'TV block levels set per channel from measurements',
+    note: 'Best practice: three TV channels carry levels set by you instead of the assumed -75 dBm: channel 30 empty at -108 dBm, channel 33 weak at -85 dBm and channel 34 strong at -52 dBm (stand-ins for analyser readings at the antenna). Over the -112.0 dBm floor of this receiver a 200 kHz mic channel in each block sees a rise of 0.3, 11.5 and 44.2 dB, where the assumed level would have said about 21 dB on all three, flagging the empty channel and understating the strong one. Mic 1 on channel 33 keeps 54.9 dB of margin and mic 2 on channel 30 keeps 55.2 dB: the levels drive only the noise-rise strip of the spectrum map, never the link budget, so use the TV level controls under the map to set or clear one. This source does not pulse: the floor is a steady line in the RF spectrum.',
+    build: () => ({ scene: tvLevelsScene(true) }),
+  },
+  {
+    id: 'noise-keyed-vs-continuous-spectrum',
+    title: 'Noise: a keyed PTT radio against a steady LED light',
+    note: 'Compare: a business UHF PTT radio keyed 3.0 m from the receive antenna and an LED camera light 10.5 m away lift the floor by almost the same average amount, 16.1 dB and 15.9 dB (-96.0 and -96.2 dBm in the channel), and together by 19.0 dB, leaving 35.4 dB of margin. They are not the same noise: the radio is keyed 30 percent of the time and reaches -90.8 dBm while keyed, 5.2 dB over its average, while the light is a steady -96.2 dBm. In the RF spectrum the floor steps up and down with each key-up while the part from the light is a flat line under it, in time with the plan rings. Mute either source to see its own effect; the average margin hides the steps (figures assumed).',
+    build: () => ({ scene: noiseSourceScene('keyed-vs-continuous') }),
+  },
+  {
+    id: 'squelch-pilot-vs-flash',
+    title: 'Squelch: pilot squelch ignores the flash',
+    note: 'Best practice: the geometry of squelch-noise-burst as an IEM pack (transmitter off, speedlight 21.9 m away, carrier squelch at -90 dBm) with pilot squelch switched on. Each flash still reaches -70.5 dBm at its peak, 19.5 dB over the threshold, which would open a carrier squelch 30 times in 10 s, but the gate also needs a locked 19 kHz pilot, a flash has none, and so it stays shut. Keep pilot squelch on for IEM packs wherever cameras or radios are around; it does nothing for a mic link, which has no pilot. The RF spectrum floor still pulses with each flash because the noise is unchanged, but the gate ignores it (levels assumed).',
+    build: () => ({ scene: squelchPilotScene() }),
+  },
+  {
+    id: 'band-four-piece-swap-person',
+    title: 'Four-piece band: a spare pack assigned to a person',
+    note: 'Best practice: the bodypack on 608.9 MHz is lying in a case at stage right, 8.5 m from the drummer, and is still called Spare bodypack with 31.8 dB of margin. Assign it to Dev in the people panel as his mic: the pack jumps to his belt (0.15 m to his right, 0.05 m behind, height kept at 1.0 m), is renamed Dev mic and shows 45.4 dB of margin, because it is now 2.4 m from the receive antenna instead of 10.2 m. The other seven links do not change. Assign every pack before checking the plan, so each figure is for where the pack is worn and not where it was left (positions illustrative).',
+    build: () => ({ scene: bandSwapScene(false) }),
+  },
+  {
+    id: 'iem-sr2050-legacy-range',
+    title: 'SR 2050 IEM tuned in a legacy range',
+    note: 'Less ideal: an SR 2050 IEM transmitter at 826.0 MHz, in the Dw range of 790 to 865 MHz that only the 2019 sheet lists (the 10/2023 sheet shows Aw+, Gw, Gw1, GBw and Bw), feeds an EK 2000 IEM pack 25.0 m away. At the standard 30 mW (14.8 dBm) the margin is 51.0 dB and at 50 mW it is 53.2 dB, so the extra 2.2 dB is not needed on a clear path. The weakness is the range: a unit bought today may not cover it, and what 826 MHz may be used for differs by country, so check the range printed on the unit and the local rules (frequency illustrative, power options from the data sheet).',
+    build: () => ({ scene: sr2050Scene('std-30mw') }),
+  },
+  {
+    id: 'noise-flash-trigger-24',
+    title: 'Noise: a 2.4 GHz flash trigger on the channel of a 2.4 GHz mic',
+    note: 'Problem: a camera radio flash trigger (10 dBm ERP, 2 percent duty, assumed) 7.2 m from the receive antenna sits on the same 2440.0 MHz channel as a 2.4 GHz mic 19 m away. In the 200 kHz channel each packet reaches -57.4 dBm, 0.6 dB stronger than the mic at -57.9 dBm, and the average of -74.3 dBm lifts the floor by 36.5 dB and leaves 0.6 dB of margin. A 2.4 GHz mic shares its band with every trigger, Wi-Fi access point and phone in the building, which UHF does not: move the mic or the trigger channel, and compare wifi-busy-2g4. In the RF spectrum the floor pulses with each packet, in time with the plan rings; the margin quoted is the average.',
+    build: () => ({ scene: noiseSourceScene('flash-trigger-24') }),
+  },
+  {
+    id: 'noise-motor-hoist-vs-led-wall-light',
+    title: 'Noise: a chain hoist motor against an LED wall light',
+    note: 'Compare: with the mic transmitter off, a brushed chain hoist motor 10.0 m from the antenna (1000 clicks a second, duty 5 percent) and an LED wall light 11.2 m away have the same average, -96.8 and -96.7 dBm, and lift the floor by 15.3 and 15.4 dB. The clicks of the hoist reach -83.8 dBm, 6.2 dB over the -90 dBm squelch, so a carrier squelch chatters open while it runs, but the steady light never gets there (idle -96.6 dBm, 6.6 dB under). The light does something else: it lifts the floor by 15.4 dB for every mic that is on, all the time. In the RF spectrum the floor of the hoist flickers between average and peak in time with the plan rings while the light is a flat line; mute one source to see the other (figures assumed).',
+    build: () => ({ scene: noiseSourceScene('hoist-vs-led') }),
+  },
+  {
+    id: 'compare-single-change',
+    title: 'Compare: one change, the receive cable',
+    note: 'Compare: a mic 19 m from the receiver with 60 m of RG58 on the receive side has 29.7 dB of margin. Take a snapshot, change only the cable to LMR-400 and Compare shows 48.8 dB, 19.2 dB more, and credits it to the cable alone, since nothing else differs. The cable is the first stage of the receive chain, so its loss goes straight into the noise floor (-87.3 dBm against -106.5 dBm). Change one thing at a time and the comparison can name its cause (figures assumed).',
+    build: () => ({ scene: compareChangeScene(false) }),
+  },
+  {
+    id: 'generator-inverter-van',
+    title: 'Noise: a tour generator beside the FOH position',
+    note: 'Problem: a tour generator 8.0 m from the FOH receive antenna is continuous broadband noise, 41.5 dBuV/m at 10 m at 606 MHz (a 45 dBuV/m class source that falls away above 500 MHz, assumed). It puts -90.2 dBm in the 200 kHz channel, lifts the floor by 21.8 dB and takes the margin from 54.3 dB to 32.5 dB. It is strongest at VHF, so a VHF mic would suffer more. Park it as far away as the cable allows and out of line of sight of the antenna. This source does not pulse: the floor is a steady line in the RF spectrum.',
+    build: () => ({ scene: noiseSourceScene('generator-van') }),
+  },
+  {
+    id: 'booster-higher-p1db',
+    title: 'Booster with a higher P1dB: the radio compresses it far less',
+    note: 'Less ideal: the same unfiltered booster with a 20.0 dBm output 1 dB point (assumed) instead of 10.4 dBm. The keyed crew radio still reaches its output at 13.9 dBm but the booster now compresses only 0.1 dB, so the keyed margin is 7.6 dB instead of 4.1 dB and 37.5 dB with the radio off. The model still warns that the stage is being driven toward its 1 dB point, and a second radio or a closer one brings the compression back. A bandpass filter (booster-filtered-before-radio) removes the radio instead of tolerating it.',
+    build: () => ({ scene: boosterOverloadScene('high-p1db') }),
+  },
 ];
 
 // Search keywords for the command palette: every entry carries `keywords` (a plain lower-case string, never shown), so 'measure', 'measurement', 'walk' and 'noise'
@@ -2072,7 +2288,13 @@ export function exampleKeywords(ex) {
   const k = [];
   if (WALK_IDS.has(ex.id)) k.push('walk walking path moving');
   if (/^measurements-/.test(ex.id)) k.push('measure measurement measurements readings walk walk-test calibrate calibration fit wall material fit');
-  if (/^noise-|^video-wall|^squelch-noise|^external-noise|^tv-|radio$|^stray-carrier|^wifi-busy|^even-/.test(ex.id)) k.push('noise interference');
+  if (/^noise-|^video-wall|^squelch-noise|^squelch-pilot|^generator-|^external-noise|^tv-|radio$|^stray-carrier|^wifi-busy|^even-/.test(ex.id)) k.push('noise interference');
+  if (/^generator-/.test(ex.id)) k.push('generator inverter power continuous');
+  if (/^squelch-pilot/.test(ex.id)) k.push('squelch pilot gate flash pulse flicker');
+  if (/^booster-/.test(ex.id)) k.push('booster compression p1db overload');
+  if (/^iem-sr2050/.test(ex.id)) k.push('sennheiser sr 2050 ek 2000 iem legacy range power');
+  if (/^band-four-piece-swap/.test(ex.id)) k.push('people person assign spare pack jump');
+  if (/^compare-/.test(ex.id)) k.push('compare snapshot diff change');
   if (/^noise-/.test(ex.id)) k.push('noise source emitter timing pulse flicker');
   if (/^squelch-noise/.test(ex.id)) k.push('pulse flicker');
   if (/^tv-/.test(ex.id)) k.push('tv level channel per channel');
