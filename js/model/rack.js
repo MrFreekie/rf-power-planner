@@ -181,6 +181,8 @@ export function rackSections(scene) {
     const path = b ? `${b.name}${b.cable ? ` > ${b.cable.lengthM} m cable` : ''} > ${an(b.antennaId)}` : an(c.antennaId);
     return { id: c.linkId, kind: 'transmitter', text: `${t.name} Channel ${i + 1} (${nameOf(c.linkId)}) > ${path}` };
   })) });
+  const iemLinks = links.filter((l) => l.kind === 'iem');
+  if (iemLinks.length) sections.push({ key: 'bodypacks', title: 'In-ear bodypacks', items: iemLinks.map((l) => ({ id: l.id, kind: 'bodypack', text: `${l.name || l.id} bodypack` })) });
   if ((rack.combiners || []).length) sections.push({ key: 'combiners', title: 'Combiners', items: rack.combiners.map((b) => ({ id: b.id, kind: 'combiner', text: `${b.name} (${b.type}) > ${b.cable ? `${b.cable.lengthM} m cable > ` : ''}${an(b.antennaId)}` })) });
   if (txAnts.length) sections.push({ key: 'txant', title: 'Transmit antennas', items: txAnts.map((a) => ({ id: a.id, kind: 'txantenna', text: a.load ? `${a.name} (50 ohm dummy load)` : a.name })) });
   return sections;

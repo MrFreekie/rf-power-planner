@@ -1,9 +1,8 @@
-// Inventory panel: every mic and IEM link in the show as a list you can click, a card for the selected link, and the gear to pack.
+// Inventory panel: every mic and IEM link in the show as a list you can click, and the gear to pack. Gear pickers and link properties live in the Radio items list.
 // Clicking a row selects that link's transmitter, so the plan highlights it, the side view follows it and the inspector opens its fields.
 // Pure helpers (inventoryView) are tested without a DOM; mountInventory() builds the panel.
-import { inventoryRows, inventoryTotals, linkCard, gearOptions, powerChoices } from '../model/inventory.js';
-import { setTxFmPreset, setRxFmPreset, setTxPowerOption, setModulation, addLink, shareRxAntenna, unshareRxAntenna } from '../actions.js';
-import { DIGITAL_PRESETS } from '../model/digital-params.js';
+import { inventoryRows, inventoryTotals, linkCard } from '../model/inventory.js';
+import { addLink } from '../actions.js';
 import { activeLink, solveCached } from '../view/util.js';
 import { getLinkFocus, setLinkFocus, subscribeLinkFocus } from '../view/linkFocus.js';
 
@@ -49,60 +48,6 @@ export function mountInventory({ container, store }) {
   }
   body.append(intro, bar, msg, out);
 
-  /** Transmitter model, power and receiver model selects for one link. Each change is one undoable step through the same actions the inspector uses. */
-  function gearPickers(link) {
-    const opts = gearOptions(link), wrap = el('div', 'inv-gear');
-    const mod = link.modulation || { type: 'analog-fm', digital: {} };
-    const pick = (label, items, current, onPick) => {
-      const lab = el('label', 'inv-field'); lab.append(el('span', '', label));
-      const sel = el('select'); sel.setAttribute('aria-label', `${label} for ${link.name}`);
-      for (const [v, t] of items) sel.append(Object.assign(el('option', '', t), { value: v }));
-      sel.value = current; sel.addEventListener('change', () => onPick(sel.value)); lab.append(sel); return lab;
-    };
-    wrap.append(pick('Modulation', [['analog-fm', 'Analog FM'], ['digital', 'Digital']], mod.type, (v) => setModulation(store, link.id, { type: v })));
-    if (mod.type === 'digital') {
-      wrap.append(pick('Digital preset', Object.entries(DIGITAL_PRESETS).map(([id, p]) => [id, p.label || id]), (mod.digital && mod.digital.preset) || '', (v) => setModulation(store, link.id, { preset: v, fixedOrder: null })));
-      wrap.append(pick('Digital order', [['', 'Adaptive'], ['2', 'BPSK'], ['4', 'QPSK'], ['16', '16-QAM'], ['64', '64-QAM'], ['256', '256-QAM']], mod.digital && mod.digital.fixedOrder ? String(mod.digital.fixedOrder) : '', (v) => setModulation(store, link.id, { fixedOrder: v ? Number(v) : null })));
-    }
-    if (link.kind === 'mic') {
-      const all = store.getScene().links, hasFollowers = all.some((q) => q.rx.sharedAntennaOf === link.id);
-      const sources = all.filter((q) => q.kind === 'mic' && q.id !== link.id && q.rx.sharedAntennaOf === undefined);
-      const f = pick('Receive antenna', [['', 'Its own antenna'], ...sources.map((q) => [q.id, `Shared with ${q.name} (splitter)`])], link.rx.sharedAntennaOf || '', (v) => { if (v) shareRxAntenna(store, link.id, v); else unshareRxAntenna(store, link.id); });
-      if (hasFollowers) { f.querySelector('select').disabled = true; f.append(el('small', 'hint', 'Other links share this antenna. Move this receiver to move all of them.')); }
-      else if (link.rx.sharedAntennaOf) f.append(el('small', 'hint', 'Position and antenna follow the other link; a splitter at the antenna end costs each receiver its share of the signal.'));
-      wrap.append(f);
-    }
-    if (!opts.tx.length && !opts.rx.length) return wrap;
-    const field = (label, current, list, generic, onPick) => {
-      const lab = el('label', 'inv-field'); lab.append(el('span', '', label));
-      const sel = el('select'); sel.setAttribute('aria-label', `${label} for ${link.name}`);
-      if (generic) sel.append(Object.assign(el('option', '', generic), { value: '' }));
-      const groups = [[`Tunes at ${link.freqMHz} MHz`, list.filter((o) => o.tunes)], ['Does not tune at this frequency', list.filter((o) => !o.tunes)]];
-      for (const [title, items] of groups) {
-        if (!items.length) continue;
-        const og = el('optgroup'); og.label = title;
-        for (const o of items) og.append(Object.assign(el('option', '', o.label + (o.assumed ? ' *' : '')), { value: o.id }));
-        sel.append(og);
-      }
-      sel.value = current || '';
-      sel.addEventListener('change', () => onPick(sel.value));
-      lab.append(sel); return lab;
-    };
-    wrap.append(field('Transmitter model', link.tx.fmPreset, opts.tx, 'Generic (no model)', (id) => setTxFmPreset(store, link.id, id)));
-    const pc = powerChoices(link);
-    if (pc.options.length) {
-      const lab = el('label', 'inv-field'); lab.append(el('span', '', 'Transmit power'));
-      const sel = el('select'); sel.setAttribute('aria-label', `Transmit power for ${link.name}`);
-      for (const o of pc.options) sel.append(Object.assign(el('option', '', o.label), { value: o.id }));
-      if (pc.current) sel.value = pc.current;
-      sel.addEventListener('change', () => setTxPowerOption(store, link.id, sel.value));
-      lab.append(sel); wrap.append(lab);
-    }
-    wrap.append(field('Receiver model', link.rx.rxPreset && opts.rx.some((o) => o.id === link.rx.rxPreset) ? link.rx.rxPreset : '', opts.rx, 'Generic (typical)', (id) => { if (id) setRxFmPreset(store, link.id, id); }));
-    wrap.append(el('p', 'hint', 'Class figures from published specifications; * marks a model with some assumed figures. Models are grouped by whether they tune at this link’s frequency.'));
-    return wrap;
-  }
-
   function render() {
     const scene = store.getScene();
     const results = scene.links.map((l) => solveCached(scene, l));
@@ -134,15 +79,6 @@ export function mountInventory({ container, store }) {
     }
     table.append(head, tb);
     out.append(table);
-
-    if (v.card) {
-      const card = el('div', 'inv-card'); card.setAttribute('role', 'group'); card.setAttribute('aria-label', `Selected link: ${v.card.row.name}`);
-      card.append(el('h4', '', v.card.row.name));
-      for (const line of v.card.lines) card.append(el('p', 'hint', line));
-      const link = scene.links.find((q) => q.id === v.card.row.id);
-      if (link) card.append(gearPickers(link));
-      out.append(card);
-    }
 
     const pack = el('details', 'inv-pack'); pack.append(el('summary', '', 'What to pack'));
     const list = (title, items, fmt) => { if (!items.length) return; pack.append(el('h5', '', title)); const ul = el('ul'); for (const it of items) ul.append(el('li', '', fmt(it))); pack.append(ul); };

@@ -2,6 +2,8 @@
 // each item expandable to show its details and edit its connections. Edits go through js/actionsRack.js (one undo step each).
 import { rackSections, deriveRack, rackWarnings, rackLoads } from '../model/rack.js';
 import { CABLES } from '../model/library.js';
+import { linkCard } from '../model/inventory.js';
+import { gearPickers } from './gearUi.js';
 import {
   renameRackItem, addRackAntenna, addRackSplitter, setSplitterType, setSplitterInput, connectChannel, moveChannel, removeRackItem, setRackAntenna,
   addRackCombiner, setCombiner, setSplitterPorts, connectTxChannel, moveTxChannel, removeCombiner,
@@ -51,8 +53,12 @@ export function mountRack({ container, store }) {
       const ws = warnBy.get(key) || [], sum = el('summary', ws.some((w) => w.level === 'warn') ? 'rack-warn' : '', (ws.length ? (ws.some((w) => w.level === 'warn') ? '⚠ ' : 'ℹ ') : '') + title);
       d.append(sum); const b = el('div', 'rack-edit'); for (const w of ws) b.append(el('p', w.level === 'warn' ? 'rack-warn-text' : 'hint', w.text)); fill(b); d.append(b); return d;
     };
+    const props = (id, b, idx) => { const c = linkCard(scene, id); if (c) for (const i of idx) if (c.lines[i]) b.append(el('p', 'hint', c.lines[i])); };
+    const gear = (id, b, part) => { const l = scene.links.find((q) => q.id === id); if (l) b.append(gearPickers(store, l, part)); };
+    const show = (id, b) => b.append(btn('Show this link', () => { const l = scene.links.find((q) => q.id === id); if (l) store.select(l.tx.id); }, 'Highlight it in the plan and open it in the inspector'));
     const editors = {
-      mic: (it, b) => { b.append(el('p', 'hint', 'Frequency, gear and receive antenna are in the link card above; its receiver and antennas are listed below.'), btn('Show this link', () => { const l = scene.links.find((q) => q.id === it.id); if (l) store.select(l.tx.id); })); },
+      mic: (it, b) => { props(it.id, b, [0, 1]); gear(it.id, b, 'tx'); show(it.id, b); },
+      bodypack: (it, b) => { props(it.id, b, [2]); gear(it.id, b, 'rx'); show(it.id, b); },
       antenna: (it, b) => {
         const a = rack.antennas.find((x) => x.id === it.id);
         b.append(field('Name', text('Antenna name', a.name, (v) => renameRackItem(store, 'antennas', a.id, v))));
@@ -70,6 +76,7 @@ export function mountRack({ container, store }) {
       },
       receiver: (it, b) => {
         const m = find.receiver(it.id); if (!m) return;
+        props(it.id, b, [2, 3, 4]); gear(it.id, b, 'rx');
         const recvOpts = [...rack.receivers.map((r) => [r.id, r.name]), ['new', 'A new receiver']];
         b.append(field('Receiver', select('Receiver for ' + linkName(it.id), recvOpts, m.r.id, (v) => moveChannel(store, it.id, v))),
           field('Receiver name', text('Receiver name', m.r.name, (v) => renameRackItem(store, 'receivers', m.r.id, v))),
@@ -79,6 +86,7 @@ export function mountRack({ container, store }) {
       },
       transmitter: (it, b) => {
         const m = find.transmitter(it.id); if (!m) return;
+        props(it.id, b, [0, 1]); gear(it.id, b, 'tx');
         const opts = [...rack.transmitters.map((r) => [r.id, r.name]), ['new', 'A new transmitter']];
         b.append(field('Transmitter', select('Transmitter for ' + linkName(it.id), opts, m.r.id, (v) => moveTxChannel(store, it.id, v))),
           field('Transmitter name', text('Transmitter name', m.r.name, (v) => renameRackItem(store, 'transmitters', m.r.id, v))),
@@ -118,7 +126,7 @@ export function mountRack({ container, store }) {
     btn('Add Rx antenna', () => addRackAntenna(store)), btn('Add splitter', () => addRackSplitter(store)),
     btn('Add Tx antenna', () => addRackAntenna(store, { role: 'tx' })), btn('Add combiner', () => addRackCombiner(store)),
   );
-  body.append(el('p', 'hint', 'Every radio item in the show. Open one to see its details and change what it is connected to; the link maths follows.'), bar, status, out);
+  body.append(el('p', 'hint', 'Every radio item in the show. Open one to see its properties, pick its equipment and change what it is connected to; the link maths follows.'), bar, status, out);
   let timer = null;
   const queue = () => { clearTimeout(timer); timer = setTimeout(render, 30); };
   const unsub = store.subscribe(queue); render();
