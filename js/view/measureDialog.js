@@ -199,13 +199,22 @@ export function mountMeasure({ doc = document, button, store, hostFactory = (c, 
     const notes = calibrationNotes(sug, c.n);
     calib.append(el('p', 'meas-headline', notes.headline));
     if (notes.cautions.length) { const box = el('div', 'meas-cautions', null, { role: 'note' }); box.append(el('strong', null, 'Caution')); const ul = el('ul'); for (const t of notes.cautions) ul.append(el('li', null, t)); box.append(ul); calib.append(box); }
+    if (notes.notes.length) { const nb = el('div', 'meas-notes', null, { role: 'note' }); nb.append(el('strong', null, 'Keep in mind')); const ul = el('ul'); for (const t of notes.notes) ul.append(el('li', null, t)); nb.append(ul); calib.append(nb); }
     const wrapc = el('div', 'meas-cards');
     for (const v of cardViews(sug)) {
       const card = el('div', `meas-card${v.isBest ? ' best' : ''}${v.applicable ? '' : ' na'}`, null, { role: 'group', 'aria-label': v.label });
       card.append(el('h4', null, v.isBest ? `${v.label} (best fit)` : v.label), el('p', 'meas-change', v.change), el('p', null, v.rms), el('p', null, v.improvement));
+      if (v.perMaterial && v.materials.length) {
+        const t = el('table', 'meas-mat'), hr = el('tr'); for (const h of ['Wall material', 'Current dB', 'Fitted dB', 'Readings']) hr.append(el('th', null, h, { scope: 'col' }));
+        const th2 = el('thead'); th2.append(hr); const tb = el('tbody');
+        for (const r of v.materials) { const tr = el('tr'); tr.append(el('th', null, r.material, { scope: 'row' }), el('td', 'num', r.current.toFixed(1)), el('td', 'num', r.fitted.toFixed(1)), el('td', 'num', String(r.readings))); tb.append(tr); }
+        t.append(el('caption', null, 'Extra loss per wall crossed, by material'), th2, tb); card.append(t);
+      }
+      if (v.lowConfidence) card.append(el('p', 'meas-lowconf', v.lowConfidence, { role: 'note' }));
+      if (v.ignored) card.append(el('p', 'hint', v.ignored));
       if (v.applicable) {
         const b = el('button', null, `Apply ${v.label}`, { type: 'button', title: 'Write this value to the environment settings; undo restores the old one' });
-        b.addEventListener('click', () => { const ok = applyCalibration(store, v.candidate); setStatus(ok ? `${v.label} set to ${v.candidate.fitted.toFixed(1)} dB. Undo restores ${v.candidate.current.toFixed(1)} dB.` : 'That value could not be applied.'); refresh(true); });
+        b.addEventListener('click', () => { const ok = applyCalibration(store, v.candidate); setStatus(ok ? (v.perMaterial ? `${v.label} applied: ${v.materials.map((r) => `${r.material} ${r.fitted.toFixed(1)} dB`).join(', ')}. Undo restores the old values.` : `${v.label} set to ${v.candidate.fitted.toFixed(1)} dB. Undo restores ${v.candidate.current.toFixed(1)} dB.`) : 'That value could not be applied.'); refresh(true); });
         card.append(b);
       } else card.append(el('p', 'meas-reason', `Not applied: ${v.reason}`));
       wrapc.append(card);

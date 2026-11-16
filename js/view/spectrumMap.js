@@ -6,9 +6,9 @@ import { createCanvasHost, setFont, haloText, inkAlpha, strokeHatchRect } from '
 import { createZoom } from './spectraZoom.js';
 import {
   axisLayout, BAND_CATALOGUE, STRIP_BANDS, tvChannelList, dabBlocks, wifi24Channels, wifi5Channels, pmr446Channels, simulatedOccupancy,
-  simulatedNoiseFloor, applyTvNoiseRise, tvBlockLevelDbm, TV_BLOCK_DBM, projectFrequencies, overlappingFrequencies, tvWidthOf, hashSeed, OCCUPANCY_SETTINGS, bandsAt, tvChannelOf,
+  simulatedNoiseFloor, applyTvNoiseRise, tvBlockLevelDbm, tvBlockLevelIsAssumed, tvBlockLevelsOf, TV_BLOCK_LEVEL_LIMITS, TV_BLOCK_DBM, projectFrequencies, overlappingFrequencies, tvWidthOf, hashSeed, OCCUPANCY_SETTINGS, bandsAt, tvChannelOf,
 } from '../model/spectrum-map.js';
-import { setTvChannelWidth } from '../actionsAreas.js';
+import { setTvChannelWidth, setTvBlockLevel, clearTvBlockLevels } from '../actionsAreas.js';
 
 export const PAD = 14, MAX_K = 40, MIN_PX = 3, FIT_MIN_K = 0.3;
 export const FLAG_TEXT = Object.freeze({
@@ -86,7 +86,8 @@ const ROW = 20, HEAD = 36, AXIS_Y = 40;
 export function buildMap({ segId = null, cw = 800, fit = false, scene = null, showTv = true, showOcc = true, showRise = true, occSetting = null, env = 'quiet' } = {}) {
   const view = mapView(segId, cw, fit);
   const tvWidth = tvWidthOf(scene), regions = regionsFor(tvWidth);
-  const out = { view, tvWidth, hits: [], y: {} };
+  const overrides = tvBlockLevelsOf(scene);
+  const out = { view, tvWidth, hits: [], y: {}, tvLevels: overrides };
   let y = AXIS_Y + 22;
   // project frequencies (markers) and their overlap warning
   const proj = projectFrequencies(scene || {});
@@ -125,9 +126,10 @@ export function buildMap({ segId = null, cw = 800, fit = false, scene = null, sh
     const chans = [];
     for (const c of tvChannelList(tvWidth)) {
       const ps = pieces(c.loMHz, c.hiMHz, view);
-      if (ps.length) chans.push({ ch: c, pieces: ps, occupied: !!(byN.get(c.n) && byN.get(c.n).occupied) });
+      if (ps.length) chans.push({ ch: c, pieces: ps, occupied: !!(byN.get(c.n) && byN.get(c.n).occupied), userSet: !tvBlockLevelIsAssumed(c.n, overrides) });
     }
     tv = { y, h: 26, chans, occupancy: occ };
+    for (const c of chans) for (const p of c.pieces) out.hits.push({ kind: 'tv', id: String(c.ch.n), n: c.ch.n, x0: p.px0, x1: Math.max(p.px1, p.px0 + MIN_PX), y0: y, y1: y + 26 });
     y += 26 + 12;
   }
   out.tv = tv;
@@ -155,19 +157,19 @@ export function buildMap({ segId = null, cw = 800, fit = false, scene = null, sh
     fs.sort((a, b) => a - b);
     for (const q of simulatedNoiseFloor({ environment: env, bwKHz: 200, freqsMHz: fs, seed: 1 })) pts.push({ segId: s.id, px: s.px0 + (q.freqMHz - s.startMHz) * s.pxPerMHz * s.k, dbm: q.dbm, freqMHz: q.freqMHz });
   }
-  pts = applyTvNoiseRise(pts, occChans, { widthMHz: tvWidth, bwKHz: 200 });
+  pts = applyTvNoiseRise(pts, occChans, { widthMHz: tvWidth, bwKHz: 200, blockLevelsDbm: overrides });
   // one label per occupied block that is visible: the rise at the block centre
   const rises = [];
   for (const c of occChans) {
     const ps = pieces(c.loMHz, c.hiMHz, view); if (!ps.length) continue;
     const inside = pts.filter((p) => p.tvChannel === c.n); if (!inside.length) continue;
     const riseDb = inside.reduce((a, p) => a + p.riseDb, 0) / inside.length;
-    rises.push({ n: c.n, loMHz: c.loMHz, hiMHz: c.hiMHz, widthMHz: tvWidth, blockDbm: tvBlockLevelDbm(c.n), riseDb, px0: ps[0].px0, px1: ps[ps.length - 1].px1, topDbm: Math.max(...inside.map((p) => p.dbm)) });
+    rises.push({ n: c.n, loMHz: c.loMHz, hiMHz: c.hiMHz, widthMHz: tvWidth, blockDbm: tvBlockLevelDbm(c.n, overrides), assumed: tvBlockLevelIsAssumed(c.n, overrides), riseDb, px0: ps[0].px0, px1: ps[ps.length - 1].px1, topDbm: Math.max(...inside.map((p) => p.dbm)) });
   }
   let lo = Infinity, hi = -Infinity; for (const p of pts) { lo = Math.min(lo, p.dbm); hi = Math.max(hi, p.dbm); }
   if (!Number.isFinite(lo)) { lo = -121; hi = -100; }
   lo = Math.floor((lo - 2) / 5) * 5; hi = Math.max(Math.ceil((hi + 2) / 5) * 5, lo + 10);
-  out.noise = { y, h: NH, pts, lo, hi, env, rises, riseShown: rises.length > 0, assumedBlockDbm: TV_BLOCK_DBM };
+  out.noise = { y, h: NH, pts, lo, hi, env, rises, riseShown: rises.length > 0, assumedBlockDbm: TV_BLOCK_DBM, userSetCount: rises.filter((r) => !r.assumed).length, assumedCount: rises.filter((r) => r.assumed).length };
   y += NH + 14;
   // strip
   out.y.strip = y;
@@ -203,7 +205,22 @@ export function infoFor(hit, map) {
     const tvc = tvChannelOf(m.freqMHz, map.tvWidth);
     return { title: `${m.name}, ${+m.freqMHz.toFixed(4)} MHz`, flag: null, lines: [`Project ${m.source === 'imd' ? 'intermod transmitter' : m.source === 'noise' ? 'noise source' : 'link'}${m.kind ? `, ${m.kind}` : ''}.`, tvc ? `Falls in TV channel ${tvc.n} (${tvc.loMHz}-${tvc.hiMHz} MHz).` : 'Not inside a TV channel of this raster.', ...bandsAt(m.freqMHz).filter((b) => regionsFor(map.tvWidth).includes(b.region)).map((b) => `Inside: ${b.label} (flag ${b.flag}).`), REGION_NOTE] };
   }
+  if (hit.kind === 'tv') {
+    const n = hit.n, c = tvChannelList(map.tvWidth).find((q) => q.n === n); if (!c) return null;
+    const lv = map.tvLevels || {}, set = !tvBlockLevelIsAssumed(n, lv), cell = map.tv && map.tv.chans.find((q) => q.ch.n === n);
+    return { title: `TV channel ${n}, ${c.loMHz}-${c.hiMHz} MHz`, flag: null, lines: [
+      `In-block level at the receiver: ${tvBlockLevelDbm(n, lv).toFixed(0)} dBm, ${set ? 'set by you' : 'assumed'}${set ? '' : ` (the map assumes about ${TV_BLOCK_DBM} dBm, +-3 dB, not measured)`}.`,
+      cell && cell.occupied ? 'This channel is on air in the simulated occupancy, so the level raises the noise floor across it.' : 'This channel is not on air in the simulated occupancy, so its level has no effect on the noise floor until it is shown as on air.',
+      'Use the TV level controls below to set or clear the level for this channel.'] };
+  }
   return null;
+}
+
+/** Hover text for the TV block under a frequency: "TV ch 34 block -50 dBm (set by you)", or '' when none. */
+export function tvHoverText(map, f) {
+  if (f === null || f === undefined || !map || !map.noise) return '';
+  const r = map.noise.rises.find((q) => f >= q.loMHz && f < q.hiMHz); if (!r) return '';
+  return `TV ch ${r.n} block ${r.blockDbm.toFixed(0)} dBm (${r.assumed ? 'assumed' : 'set by you'}), +${r.riseDb.toFixed(0)} dB`;
 }
 
 /** Rows of the table alternative for the current map: items, range and flag. */
@@ -217,7 +234,7 @@ export function mapTable(map) {
     rows.push([`TV channels (${map.tvWidth} MHz)`, map.tv.chans.length ? `${map.tv.chans[0].ch.n}-${map.tv.chans[map.tv.chans.length - 1].ch.n}` : 'none in view', occ.length ? `${ILLUSTRATIVE}: occupied ${occ.join(', ')}` : 'no occupancy shown']);
   }
   for (const r of map.wifi.rows) if (r.items.length) rows.push([r.name, `${r.items.length} in view`, r.items.slice(0, 40).map((i) => i.c.n || i.c.id).join(' ')]);
-  for (const r of map.noise.rises) rows.push([`Noise floor rise, TV ch ${r.n}`, `${r.loMHz}-${r.hiMHz} MHz (${r.widthMHz} MHz block)`, `+${r.riseDb.toFixed(0)} dB in 200 kHz; assumed block level ${r.blockDbm.toFixed(0)} dBm, ${ILLUSTRATIVE.toLowerCase()}`]);
+  for (const r of map.noise.rises) rows.push([`Noise floor rise, TV ch ${r.n}`, `${r.loMHz}-${r.hiMHz} MHz (${r.widthMHz} MHz block)`, `+${r.riseDb.toFixed(0)} dB in 200 kHz; ${r.assumed ? 'assumed' : 'set by you'} block level ${r.blockDbm.toFixed(0)} dBm, ${r.assumed ? ILLUSTRATIVE.toLowerCase() : 'not verified here'}`]);
   rows.push(['Noise floor (simulated)', `${map.noise.lo} to ${map.noise.hi} dBm, 200 kHz`, `${ILLUSTRATIVE}, ${map.noise.env}`]);
   return { caption: 'Spectrum map contents in the current view', cols: ['Item', 'Frequency', 'Note'], rows };
 }
@@ -279,10 +296,11 @@ export function drawMap(ctx, w, h, th, map, { hoverPx = null, selected = null } 
       const bw = Math.max(MIN_PX, p.px1 - p.px0);
       if (c.occupied) { ctx.fillStyle = inkAlpha(th, 0.1); ctx.fillRect(p.px0, t.y, bw, t.h); strokeHatchRect(ctx, p.px0, t.y, bw, t.h, th.ink, 5); }
       ctx.strokeStyle = th.inkSoft; ctx.strokeRect(p.px0 + 0.5, t.y + 0.5, bw - 1, t.h - 1);
+      if (c.userSet) { ctx.fillStyle = th.ink; ctx.fillRect(p.px0 + 1, t.y + 1, bw - 2, 3); } // a bar on top: the level of this channel was set by you
       if (bw > 16) { ctx.fillStyle = th.ink; setFont(ctx, th, 11); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(String(c.ch.n), p.px0 + bw / 2, t.y + t.h / 2 + 0.5); }
     }
     ctx.fillStyle = th.inkSoft; setFont(ctx, th, 11); ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-    ctx.fillText(`TV channels, ${map.tvWidth} MHz raster${t.occupancy ? `. Zebra stripes: occupied in a simulated ${t.occupancy.setting} setting (${ILLUSTRATIVE.toLowerCase()})` : ''}`, 4, t.y - 3);
+    ctx.fillText(`TV channels, ${map.tvWidth} MHz raster${t.occupancy ? `. Zebra stripes: occupied in a simulated ${t.occupancy.setting} setting (${ILLUSTRATIVE.toLowerCase()})` : ''}${t.chans.some((c) => c.userSet) ? '. Bar on top: level set by you' : ''}`, 4, t.y - 3);
   }
   // Wi-Fi, DAB and PMR446 rows
   for (const r of map.wifi.rows) {
@@ -302,7 +320,7 @@ export function drawMap(ctx, w, h, th, map, { hoverPx = null, selected = null } 
   const n = map.noise, ny = (d) => n.y + n.h - ((d - n.lo) / (n.hi - n.lo)) * n.h;
   ctx.strokeStyle = th.grid; ctx.lineWidth = 1; ctx.strokeRect(0.5, n.y + 0.5, w - 1, n.h);
   ctx.fillStyle = th.inkSoft; setFont(ctx, th, 11); ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-  ctx.fillText(`Simulated noise floor, 200 kHz, ${n.env} (${ILLUSTRATIVE.toLowerCase()}): ${n.lo} to ${n.hi} dBm${n.riseShown ? `. Amber blocks: a TV carrier on air raises the floor across its whole ${map.tvWidth} MHz channel (block level assumed ${n.assumedBlockDbm} dBm)` : ''}`, 4, n.y - 3);
+  ctx.fillText(`Simulated noise floor, 200 kHz, ${n.env} (${ILLUSTRATIVE.toLowerCase()}): ${n.lo} to ${n.hi} dBm${n.riseShown ? `. Amber blocks: a TV carrier on air raises the floor across its whole ${map.tvWidth} MHz channel (block level ${n.userSetCount ? `set by you on ${n.userSetCount} channel${n.userSetCount === 1 ? '' : 's'}${n.assumedCount ? `, assumed ${n.assumedBlockDbm} dBm on the rest` : ''}` : `assumed ${n.assumedBlockDbm} dBm`})` : ''}`, 4, n.y - 3);
   ctx.strokeStyle = th.ink; ctx.lineWidth = 1.5;
   let seg = null; ctx.beginPath();
   for (const p of n.pts) { if (p.segId !== seg) { ctx.moveTo(p.px, ny(p.dbm)); seg = p.segId; } else ctx.lineTo(p.px, ny(p.dbm)); }
@@ -341,14 +359,15 @@ export function drawMap(ctx, w, h, th, map, { hoverPx = null, selected = null } 
   if (hoverPx !== null) {
     const f = pxToF(hoverPx, view);
     ctx.strokeStyle = th.inkSoft; ctx.setLineDash && ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(hoverPx + 0.5, AXIS_Y); ctx.lineTo(hoverPx + 0.5, map.height - 24); ctx.stroke(); ctx.setLineDash && ctx.setLineDash([]);
-    haloText(ctx, th, f === null ? 'break (frequencies removed)' : fmtF(f), clamp(hoverPx + 6, 4, w - 120), map.height - 8, { px: 12, color: th.ink });
+    const tvh = tvHoverText(map, f);
+    haloText(ctx, th, f === null ? 'break (frequencies removed)' : fmtF(f) + (tvh ? `  ${tvh}` : ''), clamp(hoverPx + 6, 4, Math.max(4, w - (tvh ? 460 : 120))), map.height - 8, { px: 12, color: th.ink });
   }
 }
 
 // ------------------------------------------------------------------------------------------------ DOM
 export function mountSpectrumMap({ doc = document, button, store, hostFactory = (c, d) => createCanvasHost(c, d) } = {}) {
   const el = (tag, cls, text, attrs) => { const e = doc.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; if (attrs) for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); return e; };
-  const st = { segId: null, fit: true, showTv: true, showOcc: true, showRise: true, occ: { 6: 'us-top10', 8: 'uk-city' }, env: 'quiet', selected: null, hoverPx: null };
+  const st = { segId: null, fit: true, showTv: true, showOcc: true, showRise: true, tvSel: null, occ: { 6: 'us-top10', 8: 'uk-city' }, env: 'quiet', selected: null, hoverPx: null };
   let map = null, scroll = null;
   const width = () => tvWidthOf(store.getScene());
   const cw = () => (scroll && scroll.clientWidth) || 800;
@@ -421,6 +440,39 @@ export function mountSpectrumMap({ doc = document, button, store, hostFactory = 
   const scrollHint = el('p', 'map-scrollhint', '', { role: 'status' });
   const illus = el('p', 'map-illus', `${ILLUSTRATIVE}: TV occupancy and the noise floor are simulated to show how the tools look, not measurements of any site.`, { role: 'note' });
   bar.append(nav, widthBox, fitChk.lab, tvChk.lab, occChk.lab, occSel, riseChk.lab, envSel);
+  // TV block level for one channel (dBm at the receiver): set, clear, clear all. Writes scene.tvBlockLevelsDbm through the actions.
+  const LIM = TV_BLOCK_LEVEL_LIMITS;
+  const tvBox = el('fieldset', 'map-tvlevel'); tvBox.append(el('legend', null, 'TV carrier level for one channel (dBm at the receiver)'));
+  const tvChanIn = el('input', 'map-num', null, { type: 'number', min: String(LIM.channel[0]), max: String(LIM.channel[1]), step: '1', inputmode: 'numeric', 'aria-label': 'TV channel number' });
+  const tvDbmIn = el('input', 'map-num', null, { type: 'number', min: String(LIM.dbm[0]), max: String(LIM.dbm[1]), step: '1', inputmode: 'decimal', 'aria-label': `TV block level in dBm, ${LIM.dbm[0]} to ${LIM.dbm[1]}` });
+  const lab1 = el('label'); lab1.append(el('span', null, 'Channel '), tvChanIn);
+  const lab2 = el('label'); lab2.append(el('span', null, 'Level, dBm '), tvDbmIn);
+  const tvSet = el('button', null, 'Set level', { type: 'button', title: 'Use this level for the channel instead of the assumed one (undo restores it)' });
+  const tvClear = el('button', null, 'Clear', { type: 'button', title: 'Go back to the assumed level for this channel' });
+  const tvClearAll = el('button', null, 'Clear all', { type: 'button', title: 'Go back to the assumed level on every channel' });
+  const tvStatus = el('p', 'map-tvstatus', '', { role: 'status', 'aria-live': 'polite' });
+  tvBox.append(lab1, lab2, tvSet, tvClear, tvClearAll, tvStatus);
+  const chanNow = () => { const n = Math.round(Number(tvChanIn.value)); return tvChanIn.value !== '' && Number.isInteger(n) && n >= LIM.channel[0] && n <= LIM.channel[1] ? n : null; };
+  const syncTv = () => {
+    const lv = tvBlockLevelsOf(store.getScene()), n = chanNow(), cnt = Object.keys(lv).length;
+    tvClearAll.disabled = !cnt; tvClear.disabled = n === null || tvBlockLevelIsAssumed(n, lv);
+    if (n === null) { tvStatus.textContent = `Enter a TV channel number, ${LIM.channel[0]} to ${LIM.channel[1]}, or click a channel on the map. ${cnt} channel${cnt === 1 ? '' : 's'} set by you.`; return; }
+    const set = !tvBlockLevelIsAssumed(n, lv);
+    tvStatus.textContent = `Channel ${n}: ${tvBlockLevelDbm(n, lv).toFixed(0)} dBm, ${set ? 'set by you' : 'assumed'}. ${cnt} channel${cnt === 1 ? '' : 's'} set by you. A level only changes the noise floor while its channel is shown as on air.`;
+  };
+  const selectTv = (n) => { st.tvSel = n; tvChanIn.value = n === null ? '' : String(n); tvDbmIn.value = n === null ? '' : String(Math.round(tvBlockLevelDbm(n, tvBlockLevelsOf(store.getScene())))); syncTv(); };
+  tvChanIn.addEventListener('change', () => selectTv(chanNow()));
+  const say = (t) => { syncTv(); tvStatus.textContent = `${t} ${tvStatus.textContent}`; };
+  const doSet = () => {
+    const n = chanNow(), v = Number(tvDbmIn.value);
+    if (n === null) { tvStatus.textContent = `Enter a TV channel number, ${LIM.channel[0]} to ${LIM.channel[1]}.`; return; }
+    if (tvDbmIn.value === '' || !Number.isFinite(v) || v < LIM.dbm[0] || v > LIM.dbm[1]) { tvStatus.textContent = `The level must be between ${LIM.dbm[0]} and ${LIM.dbm[1]} dBm.`; return; }
+    setTvBlockLevel(store, n, v); refresh(); say(`Channel ${n} set to ${v} dBm by you.`);
+  };
+  tvSet.addEventListener('click', doSet);
+  tvDbmIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doSet(); } });
+  tvClear.addEventListener('click', () => { const n = chanNow(); if (n === null) return; setTvBlockLevel(store, n, null); refresh(); say(`Channel ${n} is back to the assumed level.`); });
+  tvClearAll.addEventListener('click', () => { clearTvBlockLevels(store); refresh(); say('All TV levels are back to the assumed ones.'); });
   const legend = el('p', 'map-legend', '', { role: 'status', 'aria-label': 'Noise floor legend' });
 
   const segList = el('details', 'map-list'); segList.append(el('summary', null, 'Zoom to a segment (keyboard list)'));
@@ -434,7 +486,7 @@ export function mountSpectrumMap({ doc = document, button, store, hostFactory = 
   const warn = el('p', 'map-warn', '', { role: 'status' });
   const info = el('div', 'map-info', null, { role: 'region', 'aria-label': 'Band information', 'aria-live': 'polite', tabindex: '-1' });
   const note = el('p', 'hint', 'Gaps between segments are removed and shown as // so one axis reaches 5.8 GHz. Click a segment name to zoom in, or a band for its details. Regional rules differ.');
-  zoom.slot.append(bar, legend, scrollHint, illus, warn, note, segList, bandList, info);
+  zoom.slot.append(bar, legend, tvBox, scrollHint, illus, warn, note, segList, bandList, info);
 
   function showInfo(hit) {
     info.textContent = '';
@@ -457,7 +509,9 @@ export function mountSpectrumMap({ doc = document, button, store, hostFactory = 
     fitChk.c.checked = st.fit; fitChk.c.disabled = !!st.segId;
     scrollHint.textContent = map.width > cw() + 2 ? `Scroll sideways: the map is ${Math.round(map.width)} px wide and the window shows ${cw()} px. Use the zoom buttons below to jump to a segment.` : (!st.segId && map.view.k !== 1 ? `Whole axis fitted to the window (scale ${map.view.k.toFixed(2)}); untick Fit for full size.` : '');
     tvChk.c.checked = st.showTv; occChk.c.checked = st.showOcc; occChk.c.disabled = !st.showTv; riseChk.c.checked = st.showRise; riseChk.c.disabled = !st.showTv || !st.showOcc;
-    legend.textContent = map.noise.riseShown ? `Noise floor legend: the black line is the simulated floor in 200 kHz. Amber blocks are TV channels on air in the simulated occupancy: a TV carrier raises the floor across its full ${map.tvWidth} MHz channel, by ${Math.min(...map.noise.rises.map((r) => r.riseDb)).toFixed(0)} to ${Math.max(...map.noise.rises.map((r) => r.riseDb)).toFixed(0)} dB here, assuming ${map.noise.assumedBlockDbm} dBm (+-3 dB) of TV power at the receiver. Assumed and illustrative, not measured.` : '';
+    const nz = map.noise;
+    legend.textContent = nz.riseShown ? `Noise floor legend: the black line is the simulated floor in 200 kHz. Amber blocks are TV channels on air in the simulated occupancy: a TV carrier raises the floor across its full ${map.tvWidth} MHz channel, by ${Math.min(...nz.rises.map((r) => r.riseDb)).toFixed(0)} to ${Math.max(...nz.rises.map((r) => r.riseDb)).toFixed(0)} dB here. TV power at the receiver: ${nz.assumedCount ? `${nz.assumedCount} channel${nz.assumedCount === 1 ? '' : 's'} assumed (${nz.assumedBlockDbm} dBm, +-3 dB)` : ''}${nz.assumedCount && nz.userSetCount ? ' and ' : ''}${nz.userSetCount ? `${nz.userSetCount} channel${nz.userSetCount === 1 ? '' : 's'} set by you` : ''}. Assumed levels are illustrative, not measured.` : '';
+    syncTv();
     occSel.textContent = '';
     for (const k of occupancyChoices(w)) occSel.append(el('option', null, k, { value: k }));
     occSel.value = st.occ[w]; occSel.disabled = !st.showTv || !st.showOcc;
@@ -482,6 +536,7 @@ export function mountSpectrumMap({ doc = document, button, store, hostFactory = 
   const activate = (hit) => {
     if (!hit) return;
     if (hit.kind === 'segment') zoomTo(hit.id);
+    else if (hit.kind === 'tv') { st.selected = null; showInfo(hit); selectTv(hit.n); zoom.update(); }
     else { showInfo(hit); zoom.update(); }
   };
   canvas.addEventListener('click', (e) => { if (!map) return; const p = local(e); activate(hitAt(map, p.x, p.y)); });

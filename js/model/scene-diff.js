@@ -17,6 +17,7 @@
 import { migrateScene } from './scene.js';
 import { solveLink } from './rf.js';
 import { coordinationCheck } from './imd.js';
+import { tvBlockLevelDbm } from './spectrum-map.js';
 
 export const MAX_RESOLVES = 40;
 export const MARGIN_EPS_DB = 0.05;
@@ -35,7 +36,11 @@ function prepare(raw) {
 }
 
 // ---------------------------------------------------------------- walking changes
+// Keyed maps compared entry by entry; a missing map counts as an empty one, so one entry added reads as that entry and not as a whole new object.
+const KEYED_MAPS = new Set(['tvBlockLevelsDbm', 'environment.wallLossAdjustByMaterialDb']);
+const isKeyedMap = (segs) => segs.every((x) => typeof x === 'string') && KEYED_MAPS.has(segs.join('.'));
 function walk(a, b, segs, out) {
+  if (isKeyedMap(segs) && (a === undefined || isObj(a)) && (b === undefined || isObj(b)) && (a !== undefined || b !== undefined)) { a = a || {}; b = b || {}; }
   if (isObj(a) && isObj(b)) {
     for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) { if (segs.length === 0 && SKIP_TOP.has(k)) continue; walk(a[k], b[k], [...segs, k], out); }
     return;
@@ -82,6 +87,9 @@ const resolve = (scene, segs) => { let cur = scene; for (const s of segs) { if (
 
 function labelOf(c, A, B) {
   const segs = c.segs, top = segs[0];
+  if (top === 'tvBlockLevelsDbm' && segs.length === 2 && typeof segs[1] === 'string') return `TV block level, channel ${segs[1]}`;
+  if (top === 'tvBlockLevelsDbm') return 'TV block levels';
+  if (top === 'environment' && segs[1] === 'wallLossAdjustByMaterialDb' && segs.length === 3 && typeof segs[2] === 'string') return `Environment extra wall loss, ${segs[2]} walls (dB)`;
   const nameOf = (item, fb) => (item && typeof item.name === 'string' && item.name ? item.name : fb);
   const elem = (arrKey, id) => resolve(B, [arrKey, { id }]) || resolve(A, [arrKey, { id }]);
   let who = SECTION[top] || human(top);
@@ -124,7 +132,21 @@ export function formatValue(v) {
   if (isObj(v) && typeof v.name === 'string') return `"${v.name}"`;
   return '(changed)';
 }
-const publicChange = (c, A, B) => ({ path: pathOf(c.segs), label: labelOf(c, A, B), from: c.from, to: c.to, fromText: formatValue(c.from), toText: formatValue(c.to), kind: c.kind });
+// A TV block level that is absent is the built-in ASSUMED level, so it reads "-75 dBm assumed"; a per-material wall figure that is absent is "not set".
+function valueTexts(c) {
+  const top = c.segs[0];
+  if (top === 'tvBlockLevelsDbm' && c.segs.length === 2 && typeof c.segs[1] === 'string') {
+    const n = Number(c.segs[1]), assumed = Number.isInteger(n) ? `${fmtNum(tvBlockLevelDbm(n))} dBm assumed` : 'assumed';
+    const t = (v) => (typeof v === 'number' && Number.isFinite(v) ? `${fmtNum(v)} dBm` : assumed);
+    return [t(c.from), t(c.to)];
+  }
+  if (top === 'environment' && c.segs[1] === 'wallLossAdjustByMaterialDb' && c.segs.length === 3) {
+    const t = (v) => (typeof v === 'number' && Number.isFinite(v) ? `${fmtNum(v)} dB` : 'not set');
+    return [t(c.from), t(c.to)];
+  }
+  return [formatValue(c.from), formatValue(c.to)];
+}
+const publicChange = (c, A, B) => { const [fromText, toText] = valueTexts(c); return { path: pathOf(c.segs), label: labelOf(c, A, B), from: c.from, to: c.to, fromText, toText, kind: c.kind }; };
 
 // ---------------------------------------------------------------- applying a revert
 function revertOn(scene, change) {
@@ -132,6 +154,7 @@ function revertOn(scene, change) {
     let cur = scene;
     for (let i = 0; i < op.segs.length - 1; i++) {
       const s = op.segs[i];
+      if (typeof s === 'string' && cur && cur[s] === undefined && isKeyedMap(op.segs.slice(0, i + 1))) cur[s] = {}; // a reverted entry of a map the scene no longer has
       cur = typeof s === 'string' ? cur && cur[s] : (Array.isArray(cur) ? cur.find((e) => e && e.id === s.id) : undefined);
       if (cur == null) return false;
     }
@@ -170,7 +193,7 @@ function deltasOf(ra, rb, imd) {
   };
 }
 
-const NON_RF_TOP = new Set(['measurements', 'people', 'units', 'coverage', 'venue', 'name', 'audioSource']);
+const NON_RF_TOP = new Set(['tvBlockLevelsDbm', /* spectrum map only, never reaches solveLink */ 'measurements', 'people', 'units', 'coverage', 'venue', 'name', 'audioSource']);
 
 /**
  * diffScenes(a, b) -> { summary: { linksA, linksB, added[], removed[], changed[], notes[], changeCount },

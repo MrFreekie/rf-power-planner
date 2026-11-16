@@ -46,11 +46,22 @@ export function tableRows(scene, cmp) {
 
 const unitOf = (field) => 'dB';
 /** Calibration cards: one per candidate with plain text and a flag for the Apply button. */
+/** Rows of a per-material candidate: [{ material, current, fitted, readings, text }] (empty for single-number candidates). */
+export function materialRows(c) {
+  return ((c && Array.isArray(c.byMaterial)) ? c.byMaterial : []).map((r) => ({ material: r.material, current: r.current, fitted: r.fitted, readings: r.readings, text: `${r.material}: ${f1(r.current)} → ${f1(r.fitted)} dB, ${r.readings} reading${r.readings === 1 ? '' : 's'}` }));
+}
+/** One plain line for a candidate's change; per-material candidates (current and fitted are maps) list the materials. */
+export function changeText(c) {
+  if (c && c.byMaterial) return `${c.label}: ${materialRows(c).map((r) => `${r.material} ${f1(r.current)} → ${f1(r.fitted)} dB`).join(', ') || 'no materials'}`;
+  return `${c.label}: ${f1(c.current)} ${unitOf(c.field)} → ${f1(c.fitted)} ${unitOf(c.field)}`;
+}
 export function cardViews(sug) {
   if (!sug) return [];
   return (sug.candidates || []).map((c, i) => ({
     id: c.id, label: c.label, field: c.field, applicable: !!c.applicable && c.improvementDb >= NEEDED_IMPROVEMENT_DB && sug.needed !== false, isBest: !!sug.best && sug.best.id === c.id,
-    change: `${c.label}: ${f1(c.current)} ${unitOf(c.field)} → ${f1(c.fitted)} ${unitOf(c.field)}`,
+    change: changeText(c), materials: materialRows(c), perMaterial: !!c.byMaterial,
+    lowConfidence: c.confidence === 'low' ? 'Low confidence: some wall materials rest on very few readings. Walk more paths through each wall type before relying on these figures.' : '',
+    ignored: c.byMaterial && c.ignoredReadings > 0 ? `${c.ignoredReadings} reading${c.ignoredReadings === 1 ? '' : 's'} left out of this fit (no wall crossed, or a material with too few readings).` : '',
     rms: `rms ${f1(sug.before.rmsDb)} → ${f1(c.afterRmsDb)} dB`,
     improvement: `improves by ${f1(c.improvementDb)} dB`,
     reason: !c.applicable ? (c.reason || 'Not applicable to this scene.') : (c.improvementDb < NEEDED_IMPROVEMENT_DB || sug.needed === false) ? `it changes the rms by less than ${NEEDED_IMPROVEMENT_DB} dB, so there is nothing worth applying.` : '',
@@ -59,10 +70,11 @@ export function cardViews(sug) {
 }
 /** Cautions and the headline for the calibration section. */
 export function calibrationNotes(sug, n) {
-  const out = { headline: '', cautions: [] };
+  const out = { headline: '', cautions: [], notes: [] };
   if (!sug || !n) { out.headline = 'Add readings to get a calibration suggestion.'; return out; }
   out.cautions = (sug.cautions || []).filter((t) => !/already matches/i.test(t)); // the headline says it
-  out.headline = sug.headline && /does not match|already matches/i.test(sug.headline) && !sug.best ? sug.headline : sug.best ? `Best fit: ${sug.best.label} (${f1(sug.best.current)} → ${f1(sug.best.fitted)} dB).` : 'No single calibration value explains these readings.';
+  out.notes = Array.isArray(sug.notes) ? sug.notes.filter((t) => typeof t === 'string' && t) : [];
+  out.headline = sug.headline && /does not match|already matches/i.test(sug.headline) && !sug.best ? sug.headline : sug.best ? (sug.best.byMaterial ? `Best fit: ${changeText(sug.best)}${sug.best.confidence === 'low' ? ' (low confidence)' : ''}.` : `Best fit: ${sug.best.label} (${f1(sug.best.current)} → ${f1(sug.best.fitted)} dB).`) : 'No single calibration value explains these readings.';
   return out;
 }
 

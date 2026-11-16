@@ -881,6 +881,11 @@ body.vnalab-open { overflow: hidden; }
 .map-bar button { min-height: 32px; }
 .map-width { display: flex; flex-wrap: wrap; gap: 4px 12px; border: 1px solid var(--line); border-radius: var(--radius); padding: 2px 8px 4px; margin: 0; }
 .map-crumbs { display: flex; align-items: center; gap: 4px; font-size: 13px; }
+.map-tvlevel { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; border: 1px solid var(--line); border-radius: var(--radius); padding: 2px 8px 6px; margin: 6px 0; font-size: 13px; }
+.spectrum-dialog .map-tvlevel { margin-left: 14px; margin-right: 14px; }
+.map-tvlevel .map-num { width: 5.5em; min-height: 32px; }
+.map-tvlevel button { min-height: 32px; }
+.map-tvstatus { flex-basis: 100%; margin: 2px 0 0; }
 .map-illus { margin: 4px 0; font-size: 13px; font-weight: 600; }
 .map-warn { margin: 4px 0; font-size: 13px; color: var(--warn-text); }
 .map-warn:empty { display: none; }
@@ -1009,6 +1014,13 @@ body.vnalab-open { overflow: hidden; }
 .meas-card h4 { margin: 0 0 2px; font-size: 14px; }
 .meas-card p { margin: 2px 0; font-size: 13px; }
 .meas-reason { font-weight: 600; }
+.meas-notes { border: 1px solid var(--line); padding: 6px 10px; margin: 6px 0; font-size: 13px; }
+.meas-notes ul { margin: 2px 0 0; padding-left: 18px; }
+.meas-mat { border-collapse: collapse; width: 100%; font-size: 13px; margin: 4px 0; }
+.meas-mat caption { text-align: left; font-weight: 600; }
+.meas-mat th, .meas-mat td { padding: 2px 4px; border-bottom: 1px solid var(--line); text-align: left; }
+.meas-mat td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.meas-lowconf { font-weight: 600; border-left: 4px solid var(--warn-text); padding-left: 6px; }
 @media (max-width: 480px) { .meas-dialog { width: 100vw; max-width: 100vw; } .meas-in { width: 5.5em; } }
 @media (pointer: coarse), (max-width: 800px) {
   .meas-bar button, .meas-bar select, .meas-calib button, .meas-rm, .meas-in, .meas-import input[type=file], .meas-import summary { min-height: 44px !important; }

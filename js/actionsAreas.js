@@ -8,6 +8,7 @@ import { antennaOf } from './actions.js';
 import { WALL_CONSTRUCTIONS, WALL_NOISE_LIMITS } from './model/ledwall.js';
 import { MEASUREMENT_LIMITS, CALIBRATION_FIELDS, WALL_ADJUST_BY_MATERIAL } from './model/measurement-schema.js';
 import { importMeasurementsCsv } from './model/measurements.js';
+import { TV_BLOCK_LEVEL_LIMITS } from './model/spectrum-map.js';
 import { NOISE_CATALOGUE, NOISE_SOURCE_LIMITS, createNoiseSource, engCrewSources } from './model/noise-sources.js';
 
 const fin = Number.isFinite;
@@ -344,6 +345,35 @@ export function removeNoiseSource(store, id) {
 }
 
 // ---- spectrum map ---------------------------------------------------------------------------------------------------
+
+/**
+ * setTvBlockLevel(store, channel, dbm): the user's own in-block TV level (dBm at the receiver) for one TV channel, scene.tvBlockLevelsDbm[channel].
+ * channel must be an integer 2..69 (a numeric string of one is accepted) else nothing happens and false is returned. A finite dbm is clamped to -120..-10.
+ * null, undefined, NaN or anything non-numeric removes that channel (back to the assumed level) and removes the whole map when it becomes empty.
+ * A new channel beyond the 70-entry cap is refused (false). One undo step. Returns true when the call was applied.
+ */
+export function setTvBlockLevel(store, channel, dbm) {
+  const L = TV_BLOCK_LEVEL_LIMITS, n = typeof channel === 'string' && /^\d+$/.test(channel) ? Number(channel) : channel;
+  if (!Number.isInteger(n) || n < L.channel[0] || n > L.channel[1]) return false;
+  const key = String(n), remove = !(typeof dbm === 'number' && fin(dbm));
+  const cur = store.getScene().tvBlockLevelsDbm;
+  const map = cur && typeof cur === 'object' && !Array.isArray(cur) ? cur : null;
+  if (remove && !(map && key in map)) return false;
+  if (!remove && !(map && key in map) && map && Object.keys(map).length >= L.maxEntries) return false;
+  store.update((d) => {
+    if (remove) { delete d.tvBlockLevelsDbm[key]; if (Object.keys(d.tvBlockLevelsDbm).length === 0) delete d.tvBlockLevelsDbm; return; }
+    if (!d.tvBlockLevelsDbm || typeof d.tvBlockLevelsDbm !== 'object' || Array.isArray(d.tvBlockLevelsDbm)) d.tvBlockLevelsDbm = {};
+    d.tvBlockLevelsDbm[key] = clampTo(dbm, L.dbm);
+  });
+  return true;
+}
+
+/** clearTvBlockLevels(store): removes every user-entered TV block level (back to the assumed levels) in one undo step. Returns false when there were none. */
+export function clearTvBlockLevels(store) {
+  if (store.getScene().tvBlockLevelsDbm === undefined) return false;
+  store.update((d) => { delete d.tvBlockLevelsDbm; });
+  return true;
+}
 
 /** setTvChannelWidth(store, mhz): the global TV channel raster, 8 (Europe, UK, Australia; default) or 6 (North America). Anything else is ignored. */
 export function setTvChannelWidth(store, mhz) {
