@@ -11,7 +11,13 @@ export function mountVenueBuilder({ container }) {
   const host = document.createElement('div'); host.className = 'venue-docked';
   // The floor surface select is wired in app.js; its element moves here from the top bar so the venue settings sit together.
   const floorSel = document.getElementById('floor'), floorLabel = floorSel && floorSel.closest('label');
-  if (floorLabel) { floorLabel.classList.add('venue-floor'); body.append(intro, floorLabel, host); } else body.append(intro, host);
+  // The venue drawing import button (opens its dialog) also moves here from the top bar.
+  const importBtn = document.getElementById('btn-venue');
+  const row = document.createElement('div'); row.className = 'venue-import-row';
+  if (importBtn) row.append(importBtn);
+  body.append(intro, row);
+  if (floorLabel) { floorLabel.classList.add('venue-floor'); body.append(floorLabel); }
+  body.append(host);
   container.append(summary, body);
   const draw = () => {
     const dock = getVenueDock(); host.textContent = '';
