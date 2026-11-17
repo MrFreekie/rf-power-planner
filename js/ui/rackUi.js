@@ -188,9 +188,9 @@ export function mountRack({ container, store }) {
         const bl = el('label', 'inv-field'); bl.append(bias, el('span', '', ' Supply antenna bias from this receiver (powers a booster or active antenna up the cable)')); b.append(bl);
         if (on) b.append(field('Bias voltage (V)', num('Bias voltage', lk.rx.antennaBiasV, (v) => setRxBias(store, it.id, { volts: v }), 1, 48)), field('Bias current limit (mA, 0 = not stated)', num('Bias current', lk.rx.antennaBiasMa || 0, (v) => setRxBias(store, it.id, { ma: v }), 0, 1000)));
         else b.append(el('p', 'hint', 'Or put a bias tee in the antenna cable run. The list warns when something on the line needs bias and none reaches it.'));
-        const recvOpts = [...rack.receivers.map((r) => [r.id, r.name]), ['new', 'A new receiver']];
-        b.append(field('Receiver', select('Receiver for ' + linkName(it.id), recvOpts, m.r.id, (v) => moveChannel(store, it.id, v))),
-          field('Receiver name', text('Receiver name', m.r.name, (v) => renameRackItem(store, 'receivers', m.r.id, v))),
+        const recvOpts = [...rack.receivers.map((r) => [r.id, r.name]), ['new', 'A new receiver unit']];
+        b.append(field('Sits in receiver unit', select('Receiver unit for ' + linkName(it.id), recvOpts, m.r.id, (v) => moveChannel(store, it.id, v))),
+          field('Receiver unit name', text('Receiver unit name', m.r.name, (v) => renameRackItem(store, 'receivers', m.r.id, v))),
           field('Fed from', select('Feed for ' + linkName(it.id), [['', 'Antennas directly'], ...rack.splitters.map((s) => [s.id, s.name])], m.c.splitterId, (v) => connectChannel(store, it.id, v ? { splitterId: v } : { antA: m.c.antA || (rack.antennas.find((a) => a.role !== 'tx') || {}).id, antB: m.c.antB }))));
         const loopOpts = [['', 'No (own antenna feed)'], ...rack.receivers.filter((x) => x.id !== m.r.id && (canLoopReceiver(rack, m.r.id, x.id) || x.id === m.r.loopFrom)).map((x) => [x.id, `${x.name} loop-through`])];
         b.append(field('Antenna loop-through from', select('Loop-through for ' + linkName(it.id), loopOpts, m.r.loopFrom || '', (v) => setReceiverLoop(store, m.r.id, v || null))));
