@@ -102,6 +102,8 @@ export function channelRoute(rack, ch, r) {
   return { splitter: sp, stages, antA: ant(root ? root.antA : feed.antA), antB: ant(root ? root.antB : feed.antB), hops, loopLossDb: hops.reduce((t, h) => t + loopLossOf(h), 0) };
 }
 
+const freeId = (base, taken) => { let id = base, n = 2; while (taken.includes(id)) id = `${base}_${n++}`; return id; };
+
 /** compileRack(scene): in place, no-op without scene.rack. Dangling channels are left alone; a splitter with no antenna A leaves its links' antennas untouched. */
 export function compileRack(scene, mk) {
   const rack = scene && scene.rack;
@@ -115,8 +117,8 @@ export function compileRack(scene, mk) {
   for (const l of links) { // a mic link added after the rack was made gets its own receiver and antenna
     if (l.kind !== 'mic' || placed.has(l.id) || rack.receivers.length >= RACK_LIMITS.maxReceivers || rack.antennas.length >= RACK_LIMITS.maxAntennas) continue;
     if (!rack.antennas.some((x) => x.id === `ra_${l.id}`)) rack.antennas.push({ id: `ra_${l.id}`, name: `Rx antenna for ${l.name || 'mic'}`, pos: structuredClone(l.rx.pos), antenna: structuredClone(l.rx.antenna) }); // reuse one left behind by the same link
-    if (rack.receivers.some((r) => r.id === `rr_${l.id}` || r.channels.some((c) => c.id === `rc_${l.id}`))) continue;
-    rack.receivers.push({ id: `rr_${l.id}`, name: `Rx ${rack.receivers.length + 1}`, channels: [{ id: `rc_${l.id}`, linkId: l.id, splitterId: null, antA: `ra_${l.id}`, antB: null }] });
+    const rid = freeId(`rr_${l.id}`, rack.receivers.map((r) => r.id)), cid = freeId(`rc_${l.id}`, rack.receivers.flatMap((r) => r.channels.map((c) => c.id))); // a stale id of the same link is not reused
+    rack.receivers.push({ id: rid, name: `Rx ${rack.receivers.length + 1}`, channels: [{ id: cid, linkId: l.id, splitterId: null, antA: `ra_${l.id}`, antB: null }] });
   }
   for (const r of rack.receivers) if (r.loopFrom && !rack.receivers.some((x) => x.id === r.loopFrom)) delete r.loopFrom; // the receiver it looped from is gone
   for (const r of rack.receivers) for (const ch of r.channels || []) {
@@ -156,8 +158,8 @@ function compileTxRack(scene, rack, links, mk) {
   for (const l of links) {
     if (l.kind !== 'iem' || l.txOf !== undefined || placed.has(l.id) || rack.transmitters.length >= RACK_LIMITS.maxTransmitters || rack.antennas.length >= RACK_LIMITS.maxAntennas) continue;
     if (!rack.antennas.some((x) => x.id === `ta_${l.id}`)) rack.antennas.push({ id: `ta_${l.id}`, role: 'tx', name: `Tx antenna for ${l.name || 'IEM'}`, pos: structuredClone(l.tx.pos), antenna: structuredClone(l.tx.antenna) }); // an antenna left behind by a link that changed kind or was deleted is reused
-    if (rack.transmitters.some((t) => t.id === `rt_${l.id}` || t.channels.some((c) => c.id === `tc_${l.id}`))) continue;
-    rack.transmitters.push({ id: `rt_${l.id}`, name: `IEM Tx ${rack.transmitters.length + 1}`, channels: [{ id: `tc_${l.id}`, linkId: l.id, combinerId: null, antennaId: `ta_${l.id}` }] });
+    const tid = freeId(`rt_${l.id}`, rack.transmitters.map((t) => t.id)), cid = freeId(`tc_${l.id}`, rack.transmitters.flatMap((t) => t.channels.map((c) => c.id)));
+    rack.transmitters.push({ id: tid, name: `IEM Tx ${rack.transmitters.length + 1}`, channels: [{ id: cid, linkId: l.id, combinerId: null, antennaId: `ta_${l.id}` }] });
   }
   const used = new Map();
   for (const t of rack.transmitters) for (const c of t.channels) if (c.combinerId) used.set(c.combinerId, (used.get(c.combinerId) || 0) + 1);
@@ -218,6 +220,14 @@ export function validateRack(scene) {
     if (cyc) errors.push(`rack.splitters[${i}] feeds itself through a loop of splitters`);
     else if (n > RACK_LIMITS.maxSplitterDepth) errors.push(`rack.splitters[${i}] is more than ${RACK_LIMITS.maxSplitterDepth} splitter stages deep`);
   });
+  if (!errors.length) { // receive and transmit antennas are separate pools
+    const tx = new Set(rack.antennas.filter((a) => a.role === 'tx').map((a) => a.id)), have = new Set(rack.antennas.map((a) => a.id));
+    const bad = (id, wantTx, p) => { if (id && have.has(id) && tx.has(id) !== wantTx) errors.push(`${p} must be a ${wantTx ? 'transmit' : 'receive'} antenna`); };
+    rack.splitters.forEach((s, i) => { bad(s.antA, false, `rack.splitters[${i}].antA`); bad(s.antB, false, `rack.splitters[${i}].antB`); });
+    rack.receivers.forEach((r, i) => r.channels.forEach((c, j) => { bad(c.antA, false, `rack.receivers[${i}].channels[${j}].antA`); bad(c.antB, false, `rack.receivers[${i}].channels[${j}].antB`); }));
+    (rack.transmitters || []).forEach((t, i) => (t.channels || []).forEach((c, j) => bad(c.antennaId, true, `rack.transmitters[${i}].channels[${j}].antennaId`)));
+    (rack.combiners || []).forEach((cb, i) => { bad(cb.antennaId, true, `rack.combiners[${i}].antennaId`); if (cb.fanout && Array.isArray(cb.fanout.outputs)) cb.fanout.outputs.forEach((o, j) => o && bad(o.antennaId, true, `rack.combiners[${i}].fanout.outputs[${j}].antennaId`)); });
+  }
   if (!errors.length) {
     const fed = new Set();
     rack.receivers.forEach((r, i) => {

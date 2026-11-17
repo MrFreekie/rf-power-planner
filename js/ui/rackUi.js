@@ -113,11 +113,12 @@ export function mountRack({ container, store }) {
       const has = (p) => (which === 'mic' ? p.micLinkId : p.iemLinkId);
       const opts = [['', 'No one'], ...people.map((p) => [p.id, has(p) && has(p) !== id ? `${p.name} (already has ${(scene.links.find((l) => l.id === has(p)) || {}).name || 'one'}; this becomes an extra)` : p.name])];
       b.append(field(which === 'mic' ? 'Worn or held by' : 'Worn by', select('Person for ' + linkName(id), opts, cur, (v) => {
-        if (!v) { if (o && o.extra) removeExtraMic(store, o.personId, id); else if (o) (which === 'mic' ? assignMic : assignIem)(store, o.personId, null); return; }
-        if (o && o.personId === v) return; // already theirs (main or extra)
+        const who = (pid) => (people.find((x) => x.id === pid) || {}).name || 'the person';
+        if (!v) { if (o && o.extra) { removeExtraMic(store, o.personId, id); msg.textContent = `${linkName(id)} is no longer one of ${who(o.personId)}'s extra packs.`; } else if (o) { (which === 'mic' ? assignMic : assignIem)(store, o.personId, null); msg.textContent = `${linkName(id)} is no longer ${who(o.personId)}'s main ${which === 'mic' ? 'mic' : 'IEM'}.`; } return; }
+        if (o && o.personId === v) { msg.textContent = `${linkName(id)} is already carried by ${who(v)}.`; return; } // already theirs (main or extra)
         const swap = !!o && o.personId !== v, pe = people.find((x) => x.id === v);
-        if (pe && has(pe) && has(pe) !== id) assignExtraMic(store, v, id, { swap }); // a person can carry several: the second and later ones are extras
-        else (which === 'mic' ? assignMic : assignIem)(store, v, id, { swap });
+        if (pe && has(pe) && has(pe) !== id) { assignExtraMic(store, v, id, { swap }); msg.textContent = `${pe.name} already has ${linkName(has(pe))}, so ${linkName(id)} was added as an extra pack.`; } // a person can carry several: the second and later ones are extras
+        else { (which === 'mic' ? assignMic : assignIem)(store, v, id, { swap }); msg.textContent = `${linkName(id)} is now ${(pe || {}).name || 'their'}'s main ${which === 'mic' ? 'mic' : 'IEM'}.`; }
       })));
     };
     const gear = (id, b, part) => { const l = scene.links.find((q) => q.id === id); if (l) b.append(gearPickers(store, l, part)); };

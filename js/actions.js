@@ -867,9 +867,11 @@ export function updatePerson(store, id, patch = {}, o = {}) {
 }
 
 /** Remove one extra link (and its offset) from a person; removes the empty fields. */
-function dropExtra(p, linkId) {
+function dropExtra(p, linkId, d) {
   if (!Array.isArray(p.extraLinkIds)) return;
+  const before = d ? p.extraLinkIds.map((id) => [id, extraNameOf(d, p, id)]) : [];
   p.extraLinkIds = p.extraLinkIds.filter((x) => x !== linkId);
+  for (const [id, old] of before) { const l = id !== linkId && findLink(d, id); if (l && l.name === old) l.name = extraNameOf(d, p, id); } // the extras behind it move up one number
   if (p.extraOffsets) delete p.extraOffsets[linkId];
   if (!p.extraLinkIds.length) { delete p.extraLinkIds; delete p.extraOffsets; }
 }
@@ -902,12 +904,13 @@ function assign(store, personId, linkId, which, { swap = false } = {}) {
     if (!p) return;
     const idKey = which === 'iem' ? 'iemLinkId' : 'micLinkId', offKey = which === 'iem' ? 'iemOffset' : 'micOffset';
     if (linkId === null || linkId === undefined) { delete p[idKey]; delete p[offKey]; ok = true; return; }
+    let ownExtra = false;
     const link = findLink(d, linkId);
     if (!link || link.kind !== (which === 'iem' ? 'iem' : 'mic') || (link.txOf !== undefined && which !== 'iem')) return;
     { // a link that is someone's extra pack: this person's own extra is promoted, another person's needs a swap
       const xo = list.find((x) => Array.isArray(x.extraLinkIds) && x.extraLinkIds.includes(linkId));
       if (xo && xo.id !== personId && !swap) return;
-      if (xo) dropExtra(xo, linkId);
+      if (xo) { ownExtra = xo.id === personId; dropExtra(xo, linkId, d); }
     }
     if (p[idKey] === linkId) { ok = true; return; } // the person already carries this link: nothing to do, and the pack is not moved
     const owner = list.find((x) => x.id !== personId && x[idKey] === linkId);
@@ -924,6 +927,7 @@ function assign(store, personId, linkId, which, { swap = false } = {}) {
       }
       applyCoupling(d, owner); // the other person's body coupling goes onto the link they received
     }
+    const prevMain = p[idKey], prevOff = p[offKey];
     const here = posOf(link);
     const placed = !!p.pos; // a person already on the plan keeps their place: the pack jumps to them. An unplaced person stands where their first pack is.
     if (!placed) p.pos = { x: here.x, y: here.y };
@@ -931,6 +935,10 @@ function assign(store, personId, linkId, which, { swap = false } = {}) {
     p[offKey] = placed ? assignedOffset(p, which, here) : packOffset(p, here);
     if (placed) placePacks(d, p);
     link.name = personLinkName(p, which);
+    if (ownExtra && prevMain && prevMain !== linkId && findLink(d, prevMain) && !(p.extraLinkIds || []).includes(prevMain) && (p.extraLinkIds || []).length < PEOPLE_LIMITS.maxExtra) { // promoted from the extras: the old main takes its place there
+      p.extraLinkIds = [...(p.extraLinkIds || []), prevMain]; p.extraOffsets = { ...(p.extraOffsets || {}), [prevMain]: prevOff || packOffset(p, posOf(findLink(d, prevMain))) };
+      findLink(d, prevMain).name = extraNameOf(d, p, prevMain);
+    }
     applyCoupling(d, p);
     ok = true;
   });
@@ -956,7 +964,7 @@ export function assignExtraMic(store, personId, linkId, { swap = false } = {}) {
     if ((p.extraLinkIds || []).length >= PEOPLE_LIMITS.maxExtra) return;
     const other = list.find((x) => x.id !== personId && (x.micLinkId === linkId || x.iemLinkId === linkId || (x.extraLinkIds || []).includes(linkId)));
     if (other && !swap) return;
-    if (other) { if (other.micLinkId === linkId) { delete other.micLinkId; delete other.micOffset; } else if (other.iemLinkId === linkId) { delete other.iemLinkId; delete other.iemOffset; } else dropExtra(other, linkId); }
+    if (other) { if (other.micLinkId === linkId) { delete other.micLinkId; delete other.micOffset; } else if (other.iemLinkId === linkId) { delete other.iemLinkId; delete other.iemOffset; } else dropExtra(other, linkId, d); }
     const here = packOf(link).pos, placed = !!p.pos;
     if (!placed) p.pos = { x: here.x, y: here.y };
     p.extraLinkIds = [...(p.extraLinkIds || []), linkId];
@@ -971,7 +979,7 @@ export function assignExtraMic(store, personId, linkId, { swap = false } = {}) {
 
 /** removeExtraMic(store, personId, linkId): the link stays in the scene where it is, no longer carried by the person. */
 export function removeExtraMic(store, personId, linkId) {
-  return store.update((d) => { const p = peopleOf(d).find((x) => x.id === personId); if (p) dropExtra(p, linkId); });
+  return store.update((d) => { const p = peopleOf(d).find((x) => x.id === personId); if (p) dropExtra(p, linkId, d); });
 }
 
 /** removePerson(store, id): the links stay where they are. */

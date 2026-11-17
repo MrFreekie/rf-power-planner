@@ -92,20 +92,20 @@ export function linkOwners(people, links) {
  */
 export function prunePeople(scene) {
   if (!scene || !Array.isArray(scene.people)) return scene;
-  const kinds = new Map((scene.links || []).map((l) => [l.id, l.kind]));
+  const kinds = new Map((scene.links || []).map((l) => [l.id, l.kind])), extraRx = new Set((scene.links || []).filter((l) => l.txOf !== undefined).map((l) => l.id)); // a mic extra receiver cannot be carried
   const seen = new Set();
   scene.people = scene.people.filter((p) => isObj(p)).slice(0, PEOPLE_LIMITS.max);
   for (const p of scene.people) {
     for (const [idKey, offKey, kind] of [['micLinkId', 'micOffset', 'mic'], ['iemLinkId', 'iemOffset', 'iem']]) {
       const id = p[idKey];
       if (id === undefined || id === null) { delete p[idKey]; continue; }
-      if (kinds.get(id) !== kind || seen.has(id)) { delete p[idKey]; delete p[offKey]; continue; }
+      if (kinds.get(id) !== kind || seen.has(id) || (kind === 'mic' && extraRx.has(id))) { delete p[idKey]; delete p[offKey]; continue; }
       seen.add(id);
     }
     if (p.extraLinkIds !== undefined) {
       const keep = [];
       for (const id of Array.isArray(p.extraLinkIds) ? p.extraLinkIds : []) {
-        if (typeof id === 'string' && (kinds.get(id) === 'mic' || kinds.get(id) === 'iem') && !seen.has(id) && keep.length < PEOPLE_LIMITS.maxExtra) { keep.push(id); seen.add(id); }
+        if (typeof id === 'string' && (kinds.get(id) === 'iem' || (kinds.get(id) === 'mic' && !extraRx.has(id))) && !seen.has(id) && keep.length < PEOPLE_LIMITS.maxExtra) { keep.push(id); seen.add(id); }
       }
       if (keep.length) {
         p.extraLinkIds = keep;

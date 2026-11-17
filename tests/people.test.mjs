@@ -340,3 +340,18 @@ test('one person can carry several mics and several IEM bodypacks', () => {
   // the same IEM cannot be both the main and an extra
   assert.equal(A.assignExtraMic(st, id, i1.id), false);
 });
+
+test('extras: renumbered after a removal, the old main takes the promoted extra place, and pruning drops extra receivers', () => {
+  const sc = createDefaultScene(); sc.links = [createDefaultLink('mic'), createDefaultLink('mic'), createDefaultLink('mic')];
+  const st = createStore(sc), id = A.addPerson(st, { name: 'Ann', pos: { x: 1, y: 1 } });
+  const [m1, m2, m3] = st.getScene().links, nm = (x) => st.getScene().links.find((l) => l.id === x).name;
+  A.assignMic(st, id, m1.id); A.assignExtraMic(st, id, m2.id); A.assignExtraMic(st, id, m3.id);
+  assert.equal(nm(m3.id), 'Ann mic 3');
+  A.removeExtraMic(st, id, m2.id);
+  assert.equal(nm(m3.id), 'Ann mic 2');
+  A.assignMic(st, id, m3.id); // promote: the old main becomes the extra
+  const p = st.getScene().people[0];
+  assert.equal(p.micLinkId, m3.id); assert.deepEqual(p.extraLinkIds, [m1.id]); assert.equal(nm(m1.id), 'Ann mic 2');
+  const d = structuredClone(st.getScene()); d.links.find((l) => l.id === m1.id).txOf = m3.id; prunePeople(d);
+  assert.equal(d.people[0].extraLinkIds, undefined);
+});

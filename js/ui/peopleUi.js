@@ -10,7 +10,7 @@ export function personOfLink(scene, linkId, owners = null) {
   const person = (scene.people || []).find((p) => p.id === o.personId);
   if (!person) return null;
   const out = { person, which: o.which };
-  if (o.extra) { out.extra = true; out.extraIndex = (person.extraLinkIds || []).indexOf(linkId); } // a backup mic pack: "Mic 2" is extraIndex 0
+  if (o.extra) { out.extra = true; const ids = person.extraLinkIds || [], me = (scene.links || []).find((l) => l.id === linkId); out.extraIndex = ids.slice(0, ids.indexOf(linkId)).filter((x) => ((scene.links || []).find((l) => l.id === x) || {}).kind === (me && me.kind)).length; } // per kind: "Mic 2" / "IEM 2" is extraIndex 0
   return out;
 }
 

@@ -58,7 +58,7 @@ export function drawPersonSide(ctx, th, scene, link, role, sx, floorY, headY, le
   const top = Math.min(floorY, headY) - 18, hw = 14;
   ctx.beginPath(); ctx.moveTo(sx - hw, floorY); ctx.lineTo(sx - hw, top); ctx.lineTo(sx + hw, top); ctx.lineTo(sx + hw, floorY); ctx.stroke();
   ctx.restore();
-  const text = `${roleMark(o.person.role)} ${o.person.name} (${o.which === 'iem' ? 'IEM' : o.extra ? `mic ${o.extraIndex + 2}` : 'mic'})`;
+  const text = `${roleMark(o.person.role)} ${o.person.name} (${o.which === 'iem' ? (o.extra ? `IEM ${o.extraIndex + 2}` : 'IEM') : o.extra ? `mic ${o.extraIndex + 2}` : 'mic'})`;
   haloText(ctx, th, text, sx + (leftEnd ? hw + 5 : -hw - 5), floorY - 6, { align: leftEnd ? 'left' : 'right', color: th.inkSoft });
   return { x: sx, y: floorY - 20, w: 120, h: 18 };
 }
