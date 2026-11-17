@@ -34,7 +34,7 @@ export function extraChoices(scene, person) {
 export function linkChoices(scene, person, which) {
   const kind = which === 'iem' ? 'iem' : 'mic', owners = linkOwners(scene.people), out = [{ value: '', label: 'None', swap: false }];
   for (const l of scene.links || []) {
-    if (l.kind !== kind || l.txOf !== undefined) continue; // an extra receiver is not a transmitter anyone can carry
+    if (l.kind !== kind || (l.txOf !== undefined && kind !== 'iem')) continue; // an extra mic receiver is not a transmitter anyone can carry; an extra in-ear bodypack is worn
     const o = owners.get(l.id);
     if (o && o.personId === person.id) { out.push({ value: l.id, label: l.name, swap: false }); continue; }
     if (!o) out.push({ value: l.id, label: l.name, swap: false });

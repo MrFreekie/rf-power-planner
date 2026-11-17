@@ -125,7 +125,12 @@ export function mountRack({ container, store }) {
         const add = btn('Add a receiver for this mic', () => { const id = addReceiverFor(store, it.id); msg.textContent = id ? 'Receiver added: see it under Receivers.' : 'Could not add a receiver (link limit reached).'; }, 'A second receiver listening to this transmitter, for a backup, a recording rig or another room. It has its own antenna and path.');
         b.append(el('p', 'hint', extras.length ? `Also heard by ${extras.map((q) => q.name).join(', ')}.` : 'Heard by one receiver.'), add);
       },
-      bodypack: (it, b) => { props(it.id, b, [2]); owner(it.id, b, 'iem'); gear(it.id, b, 'rx'); },
+      bodypack: (it, b) => {
+        props(it.id, b, [2]); owner(it.id, b, 'iem'); gear(it.id, b, 'rx');
+        const lk = scene.links.find((q) => q.id === it.id), src = lk && lk.txOf !== undefined && scene.links.find((q) => q.id === lk.txOf);
+        if (src) b.append(el('p', 'hint', `Listens to ${src.name}: it hears that transmitter and mix, and follows its frequency.`));
+        else if (scene.links.some((q) => q.txOf === it.id)) b.append(el('p', 'hint', `Also heard by ${scene.links.filter((q) => q.txOf === it.id).map((q) => q.name).join(', ')}.`));
+      },
       antenna: (it, b) => {
         const a = rack.antennas.find((x) => x.id === it.id);
         b.append(field('Name', text('Antenna name', a.name, (v) => renameRackItem(store, 'antennas', a.id, v))));
@@ -246,7 +251,7 @@ export function mountRack({ container, store }) {
   const status = el('p', 'hint rack-status'); status.setAttribute('role', 'status');
   const bar = el('div', 'inv-add'), msg = el('p', 'hint inv-msg'); msg.setAttribute('role', 'status');
   for (const [kind, word] of [['mic', 'microphone'], ['iem', 'in-ear monitor']]) {
-    const b = btn(`Add ${kind === 'mic' ? 'mic' : 'IEM'}`, () => {
+    const b = btn(`Add ${kind === 'mic' ? 'Mic' : 'IEM'} Tx`, () => {
       const id = addLink(store, kind);
       if (!id) { msg.textContent = 'The link limit has been reached.'; return; }
       const l = store.getScene().links.find((q) => q.id === id);
@@ -254,9 +259,16 @@ export function mountRack({ container, store }) {
     }, `Add another ${word} link at the next free frequency, beside the last one`);
     bar.append(b);
   }
+  bar.append(btn('Add IEM Rx', () => {
+    const sc = store.getScene(), act = activeLink(sc, store.getSelection()), prim = sc.links.filter((q) => q.kind === 'iem' && q.txOf === undefined);
+    const src = act && act.kind === 'iem' ? (act.txOf !== undefined ? sc.links.find((q) => q.id === act.txOf) : act) : prim[prim.length - 1];
+    if (!src) { msg.textContent = 'Add an IEM Tx first: a bodypack needs a transmitter to listen to.'; return; }
+    const id = addReceiverFor(store, src.id);
+    msg.textContent = id ? `Added a bodypack for ${src.name}'s mix: see it under In-ear bodypacks. Assign it to a person there.` : 'Could not add a bodypack (link limit reached).';
+  }, 'Another bodypack on the same IEM transmitter and mix (the selected IEM, or the last one)'));
   bar.append(
-    btn('Add Rx antenna', () => addRackAntenna(store)), btn('Add splitter', () => addRackSplitter(store)),
-    btn('Add Tx antenna', () => addRackAntenna(store, { role: 'tx' })), btn('Add combiner', () => addRackCombiner(store)),
+    btn('Add Rx antenna', () => addRackAntenna(store)), btn('Add Rx splitter', () => addRackSplitter(store)),
+    btn('Add Tx antenna', () => addRackAntenna(store, { role: 'tx' })), btn('Add Tx combiner', () => addRackCombiner(store)),
   );
   body.append(el('p', 'hint', 'Every radio item in the show. Open one to see its properties, pick its equipment and change what it is connected to; the link maths follows.'), bar, msg, status, out);
   let timer = null;

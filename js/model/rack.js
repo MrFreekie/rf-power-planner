@@ -41,7 +41,7 @@ export function deriveRack(scene) {
     }
   }
   rack.transmitters = []; rack.combiners = [];
-  ((scene && scene.links) || []).filter((l) => l && l.kind === 'iem').forEach((l, i) => {
+  ((scene && scene.links) || []).filter((l) => l && l.kind === 'iem' && l.txOf === undefined).forEach((l, i) => {
     rack.antennas.push({ id: `ta_${l.id}`, role: 'tx', name: `Tx Antenna ${i + 1}`, pos: structuredClone(l.tx.pos), antenna: structuredClone(l.tx.antenna) });
     rack.transmitters.push({ id: `rt_${l.id}`, name: `IEM Tx ${i + 1}`, channels: [{ id: `tc_${l.id}`, linkId: l.id, combinerId: null, antennaId: `ta_${l.id}` }] });
   });
@@ -149,11 +149,11 @@ export function compileRack(scene, mk) {
 function compileTxRack(scene, rack, links, mk) {
   if (!Array.isArray(rack.transmitters)) rack.transmitters = [];
   if (!Array.isArray(rack.combiners)) rack.combiners = [];
-  for (const t of rack.transmitters) t.channels = (t.channels || []).filter((c) => links.some((l) => l.id === c.linkId && l.kind === 'iem'));
+  for (const t of rack.transmitters) t.channels = (t.channels || []).filter((c) => links.some((l) => l.id === c.linkId && l.kind === 'iem' && l.txOf === undefined));
   rack.transmitters = rack.transmitters.filter((t) => t.channels.length);
   const placed = new Set(rack.transmitters.flatMap((t) => t.channels.map((c) => c.linkId)));
   for (const l of links) {
-    if (l.kind !== 'iem' || placed.has(l.id) || rack.transmitters.length >= RACK_LIMITS.maxTransmitters || rack.antennas.length >= RACK_LIMITS.maxAntennas) continue;
+    if (l.kind !== 'iem' || l.txOf !== undefined || placed.has(l.id) || rack.transmitters.length >= RACK_LIMITS.maxTransmitters || rack.antennas.length >= RACK_LIMITS.maxAntennas) continue;
     rack.antennas.push({ id: `ta_${l.id}`, role: 'tx', name: `Tx antenna for ${l.name || 'IEM'}`, pos: structuredClone(l.tx.pos), antenna: structuredClone(l.tx.antenna) });
     rack.transmitters.push({ id: `rt_${l.id}`, name: `IEM Tx ${rack.transmitters.length + 1}`, channels: [{ id: `tc_${l.id}`, linkId: l.id, combinerId: null, antennaId: `ta_${l.id}` }] });
   }

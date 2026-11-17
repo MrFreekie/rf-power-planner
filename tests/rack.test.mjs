@@ -230,3 +230,22 @@ test('antenna detail (tilt, roll, polarisation) edited on the rack antenna reach
   assert.equal(link.rx.antenna.tiltDeg, 90); assert.equal(link.rx.antenna.rollDeg, -30);
   assert.notEqual(link.rx.antenna.polarisation, 'nonsense');
 });
+
+test('an extra IEM bodypack shares the transmitter, has no transmitter item and can be worn', async () => {
+  const { addReceiverFor, addLink, assignIem, addPerson } = await import('../js/actions.js');
+  const { createStore } = await import('../js/store.js');
+  const { createDefaultScene, validateScene } = await import('../js/model/scene.js');
+  const { rackSections, tuningClashes } = await import('../js/model/rack.js');
+  const st = createStore(createDefaultScene());
+  const iem = addLink(st, 'iem'), id = addReceiverFor(st, iem);
+  assert.ok(id);
+  st.update((d) => { d.links.find((l) => l.id === iem).freqMHz = 590.5; });
+  const s = st.getScene(), ex = s.links.find((l) => l.id === id);
+  assert.equal(ex.kind, 'iem'); assert.equal(ex.freqMHz, 590.5); assert.equal(ex.txOf, iem);
+  assert.deepEqual(ex.chain, s.links.find((l) => l.id === iem).chain);
+  const items = rackSections(s).flatMap((x) => x.items);
+  assert.ok(!items.some((i) => i.kind === 'transmitter' && i.id === id));
+  assert.ok(items.some((i) => i.kind === 'bodypack' && i.id === id));
+  assert.equal(tuningClashes(s).filter((c) => c.a === id || c.b === id).length, 0);
+  const v = validateScene(s); assert.ok(v.ok, (v.errors || []).join());
+});

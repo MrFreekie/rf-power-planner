@@ -234,8 +234,9 @@ export function syncSharedTx(scene) {
   for (const l of links) {
     if (!l || l.txOf === undefined) continue;
     const src = links.find((q) => q && q.id === l.txOf);
-    if (!src || src === l || l.kind !== 'mic' || src.kind !== 'mic' || src.txOf !== undefined || !src.tx) { delete l.txOf; continue; }
+    if (!src || src === l || (l.kind !== 'mic' && l.kind !== 'iem') || src.kind !== l.kind || src.txOf !== undefined || !src.tx) { delete l.txOf; continue; }
     const own = l.tx && l.tx.id; l.freqMHz = src.freqMHz; l.tx = structuredClone(src.tx); if (own) l.tx.id = own; // the id stays unique
+    if (l.kind === 'iem') l.chain = structuredClone(src.chain || []); // an extra bodypack hears the same rack-side path (combiner, cable, antenna)
   }
   return scene;
 }
@@ -243,7 +244,9 @@ export function syncSharedTx(scene) {
 /** Run syncBranches over every link of a scene (in place), then the shared receive antennas. */
 export function syncScene(scene) {
   syncSharedTx(scene);
-  compileRack(scene, { fromPreset: createChainItemFromPreset, item: createChainItem }); // before the branch mirrors so an IEM antenna from the rack is copied into them
+  compileRack(scene, { fromPreset: createChainItemFromPreset, item: createChainItem });
+  syncSharedTx(scene); // again, so an extra bodypack takes the rack-side chain just compiled
+  // (compileRack runs before the branch mirrors so an IEM antenna from the rack is copied into them
   if (scene && Array.isArray(scene.links)) for (const l of scene.links) syncBranches(l);
   syncSharedAntennas(scene);
   return scene;

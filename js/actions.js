@@ -196,11 +196,11 @@ export function addReceiverFor(store, linkId) {
   let id = null;
   store.update((d) => {
     const src = d.links.find((l) => l.id === linkId);
-    if (!src || src.kind !== 'mic' || src.txOf !== undefined || d.links.length >= SCENE_LIMITS.maxLinks) return;
-    const link = createDefaultLink('mic'), taken = new Set(d.links.map((l) => l.name));
+    if (!src || (src.kind !== 'mic' && src.kind !== 'iem') || src.txOf !== undefined || d.links.length >= SCENE_LIMITS.maxLinks) return;
+    const link = createDefaultLink(src.kind), taken = new Set(d.links.map((l) => l.name));
     let n = 2; while (taken.has(`${src.name} Rx ${n}`)) n += 1;
     link.name = `${src.name} Rx ${n}`.slice(0, 80); link.txOf = src.id; link.freqMHz = src.freqMHz; link.tx = { ...structuredClone(src.tx), id: link.tx.id };
-    link.rx.pos = { ...src.rx.pos, x: src.rx.pos.x + 0.5 };
+    link.rx.pos = { ...src.rx.pos, x: src.rx.pos.x + (src.kind === 'iem' ? 0.8 : 0.5) };
     d.links.push(link); id = link.id;
   });
   return id;
@@ -900,7 +900,7 @@ function assign(store, personId, linkId, which, { swap = false } = {}) {
     const idKey = which === 'iem' ? 'iemLinkId' : 'micLinkId', offKey = which === 'iem' ? 'iemOffset' : 'micOffset';
     if (linkId === null || linkId === undefined) { delete p[idKey]; delete p[offKey]; ok = true; return; }
     const link = findLink(d, linkId);
-    if (!link || link.kind !== (which === 'iem' ? 'iem' : 'mic') || link.txOf !== undefined) return;
+    if (!link || link.kind !== (which === 'iem' ? 'iem' : 'mic') || (link.txOf !== undefined && which !== 'iem')) return;
     if (which === 'mic') { // a link that is someone's backup pack: this person's own backup is promoted, another person's needs a swap (the backup goes to the old main owner's list)
       const xo = list.find((x) => Array.isArray(x.extraLinkIds) && x.extraLinkIds.includes(linkId));
       if (xo && xo.id !== personId && !swap) return;

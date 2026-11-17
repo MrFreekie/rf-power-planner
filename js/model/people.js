@@ -138,7 +138,7 @@ export function validatePerson(p, path, errors, scene) {
     const l = links.find((x) => x.id === p[k]);
     if (!l) errors.push(`${path}.${k} does not match an existing link`);
     else if (l.kind !== kind) errors.push(`${path}.${k} must be a ${kind} link`);
-    else if (l.txOf !== undefined) errors.push(`${path}.${k} must not be an extra receiver`);
+    else if (l.txOf !== undefined && kind === 'mic') errors.push(`${path}.${k} must not be an extra receiver`);
   }
   if (p.extraLinkIds !== undefined) {
     if (!Array.isArray(p.extraLinkIds)) errors.push(`${path}.extraLinkIds must be an array`);
