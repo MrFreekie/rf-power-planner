@@ -74,7 +74,7 @@ export function createSideView(canvas, store) {
     const zt = zTop(link);
     const left = w < 520 ? 56 : 70, right = 24;
     const px = Math.min(Math.max((w - left - right) / Math.max(range, 1), 0.005), 600);
-    const pxY = (h - 88) / (zt + 0.9);
+    const pxY = Math.max(h - 88, 40) / (zt + 0.9); // a very short pane keeps a usable scale instead of collapsing to the floor
     vp.pxPerM = Math.min(px, Math.max(pxY, 0.005), 600);
     vp.origin.x = left;
     vp.origin.y = h / 2 - ((-zt + 0.9) / 2) * vp.pxPerM;
@@ -417,7 +417,7 @@ export function createSideView(canvas, store) {
   canvas.addEventListener('pointermove', trackShift); canvas.addEventListener('pointerdown', trackShift);
   const unsubSq = squelch.subscribe(() => host.invalidate());
   const unsubRx = rxState.subscribe(() => host.invalidate());
-  const unsub = store.subscribe(() => { syncReset(); host.invalidate(); });
+  const unsub = store.subscribe((_s, info) => { syncReset(); if (info && info.loaded) { fit(); return; } host.invalidate(); }); // a loaded scene or example opens fitted
   const unsubFresnel = fresnelView.subscribe(() => host.invalidate());
   return { viewport: vp, fit, invalidate: host.invalidate, tiltBy, tiltReset, destroy() { resetBtn?.removeEventListener('click', onReset); canvas.removeEventListener('pointermove', trackShift); canvas.removeEventListener('pointerdown', trackShift); unsubFresnel(); unregSnap(); detachRip(); detach(); unsub?.(); unsubSq?.(); unsubRx?.(); host.destroy(); } };
 }
