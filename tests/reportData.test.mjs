@@ -55,7 +55,7 @@ test('failing and marginal links raise margin warnings', () => {
   const r = buildReportData(ex.scene, ex.scene.links[0].id, { now: NOW });
   assert.equal(r.margin.status, 'fail');
   assert.ok(r.warnings.some((w) => w.kind === 'margin' && w.severity === 'critical'));
-  assert.ok(r.assumptions.some((a) => /system noise figure \+?28\.\d/.test(a)));
+  assert.ok(r.assumptions.some((a) => /system noise figure \+?32\.\d/.test(a)));
   const m = buildExample('long-cable');
   const rm = buildReportData(m.scene, m.scene.links[0].id, { now: NOW });
   assert.ok(rm.warnings.some((w) => w.kind === 'margin' && w.severity === 'warning'));

@@ -198,7 +198,7 @@ import { buildExample } from '../js/examples.js';
 
 const pathOf = (r, kind) => r.paths.find((p) => p.kind === kind);
 
-test('raised-stage-null: the dip moves from 6.8 m (-46 dBm) to 5.1 m (-41 dBm) when the deck is 1.2 m', () => {
+test('raised-stage-null: the dip moves from 6.8 m (-47 dBm) to 5.1 m (-42 dBm) when the deck is 1.2 m', () => {
   const ex = buildExample('raised-stage-null');
   assert.deepEqual(validateScene(ex.scene), { ok: true, errors: [] });
   assert.equal(ex.scene.stage.heightM, 1.2);
@@ -217,8 +217,8 @@ test('raised-stage-null: the dip moves from 6.8 m (-46 dBm) to 5.1 m (-41 dBm) w
   const ground = structuredClone(ex.scene);
   ground.stage.heightM = 0;
   const flat = dip(ground);
-  assert.ok(Math.abs(deck[0] - 5.1) < 0.2 && Math.abs(deck[1] + 40.8) < 0.5, deck.join(','));
-  assert.ok(Math.abs(flat[0] - 6.8) < 0.2 && Math.abs(flat[1] + 46.3) < 0.5, flat.join(','));
+  assert.ok(Math.abs(deck[0] - 5.1) < 0.2 && Math.abs(deck[1] + 41.7) < 0.5, deck.join(','));
+  assert.ok(Math.abs(flat[0] - 6.8) < 0.2 && Math.abs(flat[1] + 47.1) < 0.5, flat.join(','));
   assert.ok(deck[1] > ex.scene.links[0].rx.squelch.thresholdDbm, 'the squelch stays open on the deck');
   assert.ok(flat[1] < ex.scene.links[0].rx.squelch.thresholdDbm, 'and closes at 6.8 m on the ground');
 });
@@ -235,7 +235,7 @@ test('drum-riser: the floor bounce reflects from the riser and is about 16.3 dB 
   const without = solveLink(bare, l);
   assert.ok(Math.abs(pathOf(withR, 'floor').relDb + 43.2) < 0.2 && Math.abs(pathOf(without, 'floor').relDb + 27.0) < 0.2);
   assert.ok(Math.abs(pathOf(without, 'floor').relDb - pathOf(withR, 'floor').relDb - 16.3) < 0.2);
-  assert.ok(Math.abs(withR.inputPowerDbm + 36.0) < 0.2 && Math.abs(without.inputPowerDbm + 36.1) < 0.2);
+  assert.ok(Math.abs(withR.inputPowerDbm + 36.6) < 0.2 && Math.abs(without.inputPowerDbm + 36.8) < 0.2);
 });
 
 test('audience-vs-stage: deck costs 1.9 dB, a wooden riser 3.6 dB more, a metal one 5.8 dB', () => {
@@ -249,7 +249,7 @@ test('audience-vs-stage: deck costs 1.9 dB, a wooden riser 3.6 dB more, a metal 
   const metal = structuredClone(ex.scene);
   metal.platforms[0].material = 'metal';
   const a = solveLink(flat, l).inputPowerDbm, b = solveLink(noRiser, l).inputPowerDbm, c = solveLink(ex.scene, l).inputPowerDbm, d = solveLink(metal, l).inputPowerDbm;
-  assert.ok(Math.abs(a + 36.6) < 0.2 && Math.abs(b + 38.5) < 0.2 && Math.abs(c + 42.1) < 0.2, [a, b, c].join(','));
+  assert.ok(Math.abs(a + 37.3) < 0.2 && Math.abs(b + 39.1) < 0.2 && Math.abs(c + 42.8) < 0.2, [a, b, c].join(','));
   assert.ok(Math.abs(b - c - 3.6) < 0.3 && Math.abs(b - d - 5.8) < 0.3);
   const directLoss = pathOf(solveLink(noRiser, l), 'direct').gainDb - pathOf(solveLink(ex.scene, l), 'direct').gainDb;
   assert.ok(Math.abs(directLoss - 3.6) < 0.3);

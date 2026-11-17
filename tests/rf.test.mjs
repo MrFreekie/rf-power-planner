@@ -91,10 +91,10 @@ test('metal wall |G| ~ 1 at all incidence angles (+/-0.005); drapes absorb (|G| 
 test('omni gain is 0 dBi in all directions', () => {
   for (const b of [{ az: 0, el: 0 }, { az: 123, el: 40 }, { az: -90, el: -20 }]) near(rf.antennaGainDb(omni, b), 0, 1e-9);
 });
-test('paddle: boresight = 7 dBi; behind = 7-18 = -11 dBi; follows orientation az (+/-0.05)', () => {
+test('paddle: boresight = 7 dBi; behind = 7-15 = -8 dBi; follows orientation az (+/-0.05)', () => {
   const pad = { type: 'paddle', gainDbi: 7, orientation: { az: 90, el: 0 } }; // pointing +x
   near(rf.antennaGainDb(pad, { az: 90, el: 0 }), 7, 0.05);
-  near(rf.antennaGainDb(pad, { az: -90, el: 0 }), -11, 0.05);
+  near(rf.antennaGainDb(pad, { az: -90, el: 0 }), -8, 0.05);
   assert.ok(rf.antennaGainDb(pad, { az: 0, el: 0 }) < 7 - 3); // 90 deg off is well down
 });
 test('paddle HPBW: table lobe -12*(a/75)^2 at 37.5 deg = -3 dB (+/-0.2)', () => {
@@ -169,12 +169,12 @@ test('free-space link: 10 dBm, 600 MHz, 10 m, omni -> rx = -38.009 dBm (+/-0.01)
   near(r.marginDb, 90 - 38.009, 0.01);
   assert.equal(r.status, 'pass');
 });
-test('antenna gain at true bearing: paddle aimed at Rx +7 dBi; aimed away -11 dBi (+/-0.05)', () => {
+test('antenna gain at true bearing: paddle aimed at Rx +7 dBi; aimed away -8 dBi (+/-0.05)', () => {
   const sc = mkScene({ model: 'free-space' });
   const toward = rf.solveLink(sc, mkLink({ txAnt: { type: 'paddle', gainDbi: 7, orientation: { az: 0, el: 0 } } }));
   const away = rf.solveLink(sc, mkLink({ txAnt: { type: 'paddle', gainDbi: 7, orientation: { az: 180, el: 0 } } }));
   near(toward.rxPowerDbm, 10 + 7 - 48.009, 0.05);
-  near(away.rxPowerDbm, 10 - 11 - 48.009, 0.05);
+  near(away.rxPowerDbm, 10 - 8 - 48.009, 0.05);
 });
 test('rx antenna gain evaluated at arrival bearing (rx paddle pointing at tx: az 180)', () => {
   const r = rf.solveLink(mkScene({ model: 'free-space' }),
@@ -241,11 +241,11 @@ test('mic waterfall: LMR-400 20 m (2.16 dB) + 10 dB booster after Rx antenna, bo
   assert.equal(r.waterfall[0].label, 'Tx power');
   assert.equal(r.waterfall[0].valueDbm, 10);
 });
-test('iem waterfall: chain precedes Tx antenna (rg58 10 m = 4.25 dB), bodypack input = rx power', () => {
+test('iem waterfall: chain precedes Tx antenna (rg58 10 m = 4.92 dB), bodypack input = rx power', () => {
   const lk = mkLink({ kind: 'iem', p: 20, chain: [{ kind: 'cable', cableType: 'rg58', lengthM: 10 }] });
   const r = rf.solveLink(mkScene({ model: 'free-space' }), lk);
-  near(r.waterfall[1].valueDbm, 20 - 4.25, 1e-9);
-  near(r.rxPowerDbm, 20 - 4.25 - 48.009, 0.01);
+  near(r.waterfall[1].valueDbm, 20 - 4.92, 1e-9);
+  near(r.rxPowerDbm, 20 - 4.92 - 48.009, 0.01);
   near(r.inputPowerDbm, r.rxPowerDbm, 1e-12);
 });
 test('status thresholds: >=6 dB pass, 0..6 marginal, <0 fail', () => {

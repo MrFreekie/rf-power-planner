@@ -80,7 +80,7 @@ test('walking band: the singer moves 6.5 m right and 1 m forward, only her two l
   const a = bandPeopleScene(), b = bandWalkEndScene();
   const ma = linkMargins(a), mb = linkMargins(b);
   for (const k of ['Ben mic', 'Ben IEM', 'Chloe mic', 'Chloe IEM', 'Dev mic', 'Dev IEM']) near(mb[k], ma[k], 1e-9, k);
-  near(mb['Anna mic'] - ma['Anna mic'], -6.1, 0.05); near(mb['Anna IEM'] - ma['Anna IEM'], 10.9, 0.05);
+  near(mb['Anna mic'] - ma['Anna mic'], -6.1, 0.05); near(mb['Anna IEM'] - ma['Anna IEM'], 7.9, 0.05);
   const pa = a.people.find((p) => p.name === 'Anna'), pb = b.people.find((p) => p.name === 'Anna');
   near(pb.pos.x - pa.pos.x, 6.5, 1e-9); near(pb.pos.y - pa.pos.y, 1, 1e-9);
   const ka = a.links.find((l) => l.id === pa.micLinkId).tx.pos, kb = b.links.find((l) => l.id === pb.micLinkId).tx.pos;
@@ -248,7 +248,7 @@ test('measurements-calibrated: the fit is stored in the scene, the residual is u
   assert.ok(c.rmsDb < 0.5, `rms ${c.rmsDb}`); near(c.rmsDb, 0.2, 0.05); near(cu.rmsDb, 8.8, 0.05); near(Math.abs(c.worst.deltaDb), 0.4, 0.05);
   const g = suggestCalibration(sc); assert.equal(g.best, null); assert.equal(g.needed, false); assert.equal(g.matches, true);
   const m0 = solveLink(un, un.links[0]).marginDb, m1 = solveLink(sc, sc.links[0]).marginDb;
-  near(m0, 28.1, 0.05); near(m1, 17.2, 0.05); near(m0 - m1, by.brick + by.drywall, 0.01, 'the receiver at 40 m is behind both walls, so the margin drops by exactly the two adjustments');
+  near(m0, 27.1, 0.05); near(m1, 16.2, 0.05); near(m0 - m1, by.brick + by.drywall, 0.01, 'the receiver at 40 m is behind both walls, so the margin drops by exactly the two adjustments');
   has('measurements-calibrated', f1(by.brick), f1(by.drywall), f1(c.rmsDb), f1(cu.rmsDb), f1(Math.abs(c.worst.deltaDb)), f1(m0), f1(m1));
 });
 
@@ -348,7 +348,7 @@ test('compare-single-change: only the cable differs, Compare credits it, and the
   b.links[0].id = a.links[0].id; b.links[0].tx.id = a.links[0].tx.id; b.links[0].rx.id = a.links[0].rx.id; b.links[0].chain[0].id = a.links[0].chain[0].id; // what the app keeps when you edit after a snapshot
   const d = diffScenes(a, b), h = headline(d).join(' '), ra = solveLink(a, a.links[0]), rb = solveLink(b, b.links[0]);
   assert.equal(d.summary.changeCount, 1, JSON.stringify(d.summary)); assert.ok(/cable/i.test(h) && /lmr-400/i.test(h), h);
-  near(rb.marginDb - ra.marginDb, 19.2, 0.05); assert.ok(h.includes('19.2 dB'), h);
+  near(rb.marginDb - ra.marginDb, 23.2, 0.05); assert.ok(h.includes('23.2 dB'), h);
   has('compare-single-change', f1(ra.marginDb), f1(rb.marginDb), f1(rb.marginDb - ra.marginDb), f1(ra.cascade.noiseFloorDbm), f1(rb.cascade.noiseFloorDbm), '60 m of RG58', 'LMR-400');
 });
 

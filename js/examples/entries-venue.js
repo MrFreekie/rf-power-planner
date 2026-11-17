@@ -8,7 +8,7 @@ export const VENUE_EXAMPLES = [
   {
     id: 'imd-too-close',
     title: 'Two mics too close to the receive antenna',
-    note: 'Problem: mics B and C are held next to the receive antenna, so each arrives far stronger than the wanted mic A. The level meter shows the own transmitter of the link (about -46 dBm); in the intermod panel mic A is about -40 dBm at the antenna. The receiver front end is not perfectly linear and mixes them: twice B minus C lands exactly on the channel of mic A and buries it. The squelch closes with the reason intermod.',
+    note: 'Problem: mics B and C are held next to the receive antenna, so each arrives far stronger than the wanted mic A. The level meter shows the own transmitter of the link (about -47 dBm); in the intermod panel mic A is about -40 dBm at the antenna. The receiver front end is not perfectly linear and mixes them: twice B minus C lands exactly on the channel of mic A and buries it. The squelch closes with the reason intermod.',
     build: () => ({
       scene: imdScene('mic', 605.6, [
         ['Mic A (wanted)', 605.6, 14, 2, 3, 1.5], ['Mic B', 606.0, 14, 9.5, 6.5, 2.0], ['Mic C', 606.4, 14, 9.3, 6.0, 2.0], ['Mic D', 607.2, 14, 6, 2, 1.5],
@@ -102,7 +102,7 @@ export const VENUE_EXAMPLES = [
   {
     id: 'audience-crowd',
     title: 'Audience: a standing crowd between the stage and a low receive antenna',
-    note: 'Problem: a handheld microphone on stage and a receive antenna 1.5 m high at the back of the room, across 20 m of standing audience (2 persons per m2, heads at 1.7 m). The ray runs through the crowd below head height and loses 20.0 dB (assumed 0.5 dB per metre per person per m2), so the margin falls from 51.8 to 31.8 dB. Raising the antenna to 2.5 m puts the ray above the heads for all but 1.0 dB of its path, and at 4.7 persons per m2 the loss saturates at the 30 dB cap. Absorption figures are assumed and unverified.',
+    note: 'Problem: a handheld microphone on stage and a receive antenna 1.5 m high at the back of the room, across 20 m of standing audience (2 persons per m2, heads at 1.7 m). The ray runs through the crowd below head height and loses 20.0 dB (assumed 0.5 dB per metre per person per m2), so the margin falls from 51.5 to 31.4 dB. Raising the antenna to 2.5 m puts the ray above the heads for all but 1.0 dB of its path, and at 4.7 persons per m2 the loss saturates at the 30 dB cap. Absorption figures are assumed and unverified.',
     build: () => ({ scene: audienceScene() }),
   },
   {
@@ -138,19 +138,19 @@ export const VENUE_EXAMPLES = [
   {
     id: 'sos-iem-too-close',
     title: 'Side of stage: IEM antenna 0.5 m from the mic receiver antenna',
-    note: 'Problem: a 100 mW IEM transmitter (20 dBm, 614.0 MHz) faces a mic receive paddle 0.5 m away with the same polarisation and a 12 dB booster behind it. Only 8.2 dB separates them, so +22.5 dBm reaches the receiver input against a -18 dBm P1dB and a -10 dBm maximum (assumed receiver figures): 40.5 dB over, desense capped at 40 dB, and the wanted mic margin falls from 41.1 dB to 1.1 dB. The IM3 product of the IEM and the mic is +27.8 dBm, so the booster makes it worse. Free-space figures; a real room adds or subtracts a few dB.',
+    note: 'Problem: a 100 mW IEM transmitter (20 dBm, 614.0 MHz) faces a mic receive paddle 0.5 m away with the same polarisation and a 12 dB booster behind it. Only 8.2 dB separates them, so +22.3 dBm reaches the receiver input against a -18 dBm P1dB and a -10 dBm maximum (assumed receiver figures): 40.3 dB over, desense capped at 40 dB, and the wanted mic margin falls from 44.1 dB to 4.1 dB. The IM3 product of the IEM and the mic is +30.2 dBm, so the booster makes it worse. Free-space figures; a real room adds or subtracts a few dB.',
     build: () => ({ scene: sosScene('too-close') }),
   },
   {
     id: 'sos-iem-crossed-pol',
     title: 'Side of stage: 3.3 m apart, slant mic antennas, rack in between',
-    note: 'Less ideal: the IEM antenna is vertical and the mic antennas slant 45 degrees, so the wanted mic loses 3 dB of polarisation (never a null) and the IEM is only 3 dB cross-polar; they are 3.3 m apart, both paddles aimed at the stage so each sits in the other side lobe, with a rack screen (2.5 dB, assumed) between. Coupling is 59.4 dB, the IEM reaches the receiver at -43.7 dBm with 25.7 dB of headroom, and desense is 0. The wanted mic keeps 50.1 dB of margin, which already includes that 3 dB. A horizontal mic antenna would isolate 14.9 dB more but cost the wanted mic 15.0 dB, so distance and the antenna patterns do the work here.',
+    note: 'Less ideal: the IEM antenna is vertical and the mic antennas slant 45 degrees, so the wanted mic loses 3 dB of polarisation (never a null) and the IEM is only 3 dB cross-polar; they are 3.3 m apart, both paddles aimed at the stage so each sits in the other side lobe, with a rack screen (2.5 dB, assumed) between. Coupling is 56.4 dB, the IEM reaches the receiver at -40.9 dBm with 22.9 dB of headroom, and desense is 0. The wanted mic keeps 49.9 dB of margin, which already includes that 3 dB. A horizontal mic antenna would isolate 14.9 dB more but cost the wanted mic 15.0 dB, so distance and the antenna patterns do the work here.',
     build: () => ({ scene: sosScene('crossed-pol') }),
   },
   {
     id: 'sos-iem-best-practice',
     title: 'Side of stage: best practice (filter, low power, remote antennas)',
-    note: 'Best practice: the IEM runs 10 mW (10 dBm) from a stand at the stage-side edge aimed at the stage, and the IEM link still has 40.8 dB of margin. The mic antennas are 10.8 m away, high and behind its beam, slant 45 degrees so the wanted mic loses only 3 dB, with a 604 to 608 MHz bandpass filter (40 dB rejection, assumed) and 15 m of cable. Coupling is 66.6 dB but only -101.1 dBm reaches the receiver input (83.1 dB of headroom, no desense) and the wanted mic keeps 44.1 dB, a margin that already includes the polarisation loss. Distance and the filter do most of the work; power only costs the IEM margin you need.',
+    note: 'Best practice: the IEM runs 10 mW (10 dBm) from a stand at the stage-side edge aimed at the stage, and the IEM link still has 39.8 dB of margin. The mic antennas are 10.8 m away, high and behind its beam, slant 45 degrees so the wanted mic loses only 3 dB, with a 604 to 608 MHz bandpass filter (40 dB rejection, assumed) and 15 m of cable. Coupling is 63.6 dB but only -98.1 dBm reaches the receiver input (80.1 dB of headroom, no desense) and the wanted mic keeps 44.1 dB, a margin that already includes the polarisation loss. Distance and the filter do most of the work; power only costs the IEM margin you need.',
     build: () => ({ scene: sosScene('best') }),
   },
   {
@@ -180,7 +180,7 @@ export const VENUE_EXAMPLES = [
   {
     id: 'video-wall-noisy',
     title: 'Video wall: noisy budget panels',
-    note: 'Problem: budget panels or poor cabling (class A plus 15 dB, assumed) put -73.3 dBm in the FOH receiver and raise the floor by 39.2 dB, so the mic margin falls to -5.0 dB and the link fails. A wall at the class A limit leaves 10.0 dB. With the receiver at the stage front, 3 m from the wall, the noisy wall still leaves only 8.2 dB, and 24.0 dB with the receiver at the stage side. A CE-marked wall can still be the loudest thing in the band. This source does not pulse: the floor is a steady line in the RF spectrum.',
+    note: 'Problem: budget panels or poor cabling (class A plus 15 dB, assumed) put -73.3 dBm in the FOH receiver and raise the floor by 39.2 dB, so the mic margin falls to -5.0 dB and the link fails. A wall at the class A limit leaves 10.0 dB. With the receiver at the stage front, 3 m from the wall, the noisy wall still leaves only 5.1 dB, and 24.0 dB with the receiver at the stage side. A CE-marked wall can still be the loudest thing in the band. This source does not pulse: the floor is a steady line in the RF spectrum.',
     build: () => ({ scene: videoWallScene({ preset: 'noisy', rx: 'foh' }) }),
   },
   {

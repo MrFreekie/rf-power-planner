@@ -106,12 +106,12 @@ test('booster-overloaded example: root-sum-square 16.4 dB (worst case 19.5 dB), 
 import { bodyWornReport, EXAMPLES } from '../js/examples.js';
 test('body-worn examples: thin margin not proven, shortened twin proven, notes quote the asserted figures', () => {
   const t = bodyWornReport('thin'), s = bodyWornReport('short');
-  near(t.marginDb, 8.6, 0.05); assert.equal(t.proven, false); assert.deepEqual(t.assumptionIds, ['body-loss', 'cross-polar-floor']);
+  near(t.marginDb, 7.6, 0.05); assert.equal(t.proven, false); assert.deepEqual(t.assumptionIds, ['body-loss', 'cross-polar-floor']);
   near(t.rssDb, 7.1, 0.05); near(t.worstCaseDb, 10, 0.05); assert.ok(t.reasons.some((x) => /body-worn/.test(x)));
-  near(s.marginDb, 17.5, 0.05); assert.equal(s.proven, true); assert.deepEqual(s.assumptionIds, t.assumptionIds);
+  near(s.marginDb, 16.5, 0.05); assert.equal(s.proven, true); assert.deepEqual(s.assumptionIds, t.assumptionIds);
   const a = EXAMPLES.find((e) => e.id === 'body-worn-thin-margin').note, b = EXAMPLES.find((e) => e.id === 'body-worn-proven-twin').note;
-  for (const x of ['70 m', '8.6 dB', '10 dB', '15 dB', '7.1 dB', '10.0 dB']) assert.ok(a.includes(x), x);
-  for (const x of ['25 m', '17.5 dB', '10 dB', '7.1 dB', '15 dB', '8.6 dB']) assert.ok(b.includes(x), x);
+  for (const x of ['70 m', '7.6 dB', '10 dB', '15 dB', '7.1 dB', '10.0 dB']) assert.ok(a.includes(x), x);
+  for (const x of ['25 m', '16.5 dB', '10 dB', '7.1 dB', '15 dB', '7.6 dB']) assert.ok(b.includes(x), x);
   for (const n of [a, b]) { assert.match(n, /^(Problem|Best practice):/); assert.ok(n.split(/(?<=\.)\s/).length <= 4); }
 });
 

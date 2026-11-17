@@ -43,9 +43,11 @@ const F = [100, 200, 400, 600, 900, 1800, 2400, 3500, 5000, 5800, 6000];
 function tab(vals) { return F.map((f, i) => [f, vals[i]]); }
 
 export const CABLES = {
-  // Pasternack/Belden 8259 RG58/U. 100 ft: 4.5/6.6/9.8/12.5/16.5/26/32 approx
+  // RG58C/U (50 ohm, solid PE). Datasheet anchors, dB/100 ft: 100 MHz 4.9 (16.0 dB/100 m), 200 MHz 7.3, 400 MHz 11.5, 1000 MHz 21.3
+  // (MIL-C-17 RG-58C/U nominal, Caledonian / RS RG58C/U sheets). Other points from A = 0.405 sqrt(f) + 0.0085 f (dB/100 ft)
+  // fitted to those anchors (within 2 percent); no datasheet above 1 GHz. Brands differ by +-10 percent (Belden 8240 low-loss sheet is lower).
   rg58: { name: 'RG58 (solid PE)', velocityFactor: 0.66,
-    attenDbPer100m: tab([15.4, 22.6, 33.5, 42.5, 55.5, 88, 108, 139.2, 180.2, 201.1, 206.2]) }, // approx
+    attenDbPer100m: tab([16.1, 24.0, 37.7, 49.2, 65.0, 106.6, 131.9, 176.2, 233.3, 262.8, 270.3]) }, // approx
   // Belden 8267 RG213. 100 ft: 2.0/2.9/4.3/5.6/7.2/11.6/14.2 approx
   rg213: { name: 'RG213 (Belden 8267)', velocityFactor: 0.66,
     attenDbPer100m: tab([6.8, 9.8, 14.4, 18.4, 24.0, 38.5, 47.0, 60.4, 78.1, 87.2, 89.4]) }, // approx
@@ -82,16 +84,19 @@ export const CABLES = {
   // Belden 8214 RG8/foam
   'belden-8214': { name: 'Belden 8214 (RG8 foam)', velocityFactor: 0.78,
     attenDbPer100m: tab([7.5, 10.8, 15.8, 19.8, 25.0, 38.5, 45.5, 57.9, 73.0, 80.6, 82.5]) }, // approx
-  // RG8X (mini RG8, foam PE, e.g. Belden 9258 class): taken as about 0.8 x RG58 at every frequency (ASSUMED class figure,
-  // datasheets show roughly 12 dB/100 m at 100 MHz and 40 at 900 MHz). Check the datasheet of the cable you have.
+  // RG8X (mini RG8, foam PE): Belden 9258 datasheet, dB/100 ft: 100 MHz 3.1, 200 4.5, 400 6.6, 700 9.1, 900 10.7, 1000 11.2
+  // (600 MHz log-interpolated). Above 1 GHz (no datasheet) A = 0.2895 sqrt(f) + 0.002049 f dB/100 ft, fitted to 100 and 1000 MHz.
+  // 9258 is a low-loss RG8X; other RG8X brands can be 30-100 percent lossier (e.g. 12 dB/100 ft at 400 MHz), so flagged assumed.
   rg8x: { name: 'RG8X (mini RG8)', velocityFactor: 0.78, assumed: true,
-    attenDbPer100m: tab([12.3, 18.1, 26.8, 34.0, 44.4, 70.4, 86.4, 111.4, 144.2, 160.9, 165.0]) }, // approx, assumed
+    attenDbPer100m: tab([10.2, 14.8, 21.7, 27.3, 35.1, 52.4, 62.7, 79.7, 100.7, 111.2, 113.8]) }, // approx, assumed
   // 1/2 inch corrugated-copper foam hardline (CommScope/Andrew HELIAX LDF4-50A): 6.86 dB/100 m at 894 MHz, 10.1 at 1.8 GHz,
-  // 7.3 at 1 GHz (published attenuation table). Points use A = 0.2107 sqrt(f) + 0.000623 f fitted to those; +-5 percent.
+  // 7.28 at 1 GHz, 5.53 at 600 MHz, 11.5 at 2.3 GHz and 12.1 at 2.5 GHz (published attenuation tables, so 600, 900, 1800 and 2400 MHz
+  // are datasheet points). 100, 200, 400 MHz and 3.5-6 GHz use A = 0.2107 sqrt(f) + 0.00062 f fitted to the 50 and 1000 MHz rows; +-5 percent.
   'hardline-half': { name: '1/2 inch hardline (LDF4-50A class)', velocityFactor: 0.88,
     attenDbPer100m: tab([2.2, 3.1, 4.5, 5.5, 6.9, 10.1, 11.8, 14.6, 18.0, 19.7, 20.1]) }, // approx
   // RG6 (75 ohm foam coax), Belden 1694A datasheet (dB/100 ft: 100 MHz 1.95, 540 4.5, 750 5.4, 1000 6.3, 1500 7.8,
-  // 2000 9.2, 2250 9.8), interpolated log-log between the published rows; 3.5-6 GHz from the sqrt(f)+f fit.
+  // 2000 9.2, 2250 9.8, 3000 11.5; also 180 2.57, 270 3.17, 360 3.69, 720 5.3), log-log interpolated between adjacent published rows
+  // (200-2400 MHz points lie inside published rows); 3.5-6 GHz from the sqrt(f)+f fit.
   // 75 OHM: in a 50 ohm chain it adds an impedance step at each end (see chain-checks.js). Other RG6 brands differ by +-10 percent.
   rg6: { name: 'RG6 (75 ohm TV coax, Belden 1694A)', velocityFactor: 0.82, impedanceOhm: 75,
     attenDbPer100m: tab([6.4, 9.0, 12.8, 15.7, 19.5, 28.4, 33.3, 40.9, 49.7, 54.0, 55.0]) }, // approx
@@ -180,15 +185,15 @@ export const ANTENNAS = {
     pattern: { azDb: table(flat), elDb: table(dipoleEl) } }, // approx, see PHYSICS.md
   omni: { name: 'Omni (0 dBi reference)', gainDbi: 0, patternFn: 'omni',
     pattern: { azDb: table(flat), elDb: table(flat) } },
-  // Shure PA805 / UA860 style paddle (~7 dBi, HPBW ~70-80 deg, F/B ~ 15-20 dB)
+  // Shure PA805 / UA860 style paddle (~7 dBi, HPBW ~70-80 deg, F/B 15 dB, same as FRONT_TO_BACK_DB in rf.js)
   paddle: { name: 'Paddle / directional panel', gainDbi: 7, patternFn: 'paddle',
-    pattern: { azDb: table(lobe(75, 18)), elDb: table(lobe(65, 18)) } },
-  // Log-periodic (Shure PA805Z2 / Sennheiser A 1031 type, 6-10 dBi, F/B ~ 20 dB)
+    pattern: { azDb: table(lobe(75, 15)), elDb: table(lobe(65, 15)) } },
+  // Log-periodic (Shure PA805Z2 / Sennheiser A 1031 type, 6-10 dBi, F/B 15 dB as FRONT_TO_BACK_DB)
   logperiodic: { name: 'Log-periodic (LPDA)', gainDbi: 8, patternFn: 'logperiodic',
-    pattern: { azDb: table(lobe(65, 20)), elDb: table(lobe(75, 20)) } },
-  // Normal-mode/axial helical (IEM). approx; circular polarisation not modelled here
+    pattern: { azDb: table(lobe(65, 15)), elDb: table(lobe(75, 15)) } },
+  // Normal-mode/axial helical (IEM), F/B 13 dB as FRONT_TO_BACK_DB. approx; circular polarisation not modelled here
   helical: { name: 'Helical', gainDbi: 5, patternFn: 'helical',
-    pattern: { azDb: table(lobe(80, 15)), elDb: table(lobe(80, 15)) } }, // approx
+    pattern: { azDb: table(lobe(80, 13)), elDb: table(lobe(80, 13)) } }, // approx
   // Yagi-Uda directional antenna for fixed point-to-point links (about 10 dBi, HPBW about 55 degrees, F/B about 18 dB). ASSUMED class figures (flag U).
   yagi: { name: 'Yagi (directional, point-to-point)', gainDbi: 10, patternFn: 'yagi', confidence: { gainDbi: 'U' },
     pattern: { azDb: table(lobe(55, 18)), elDb: table(lobe(60, 18)) } },

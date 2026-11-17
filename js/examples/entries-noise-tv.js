@@ -13,7 +13,7 @@ export const NOISE_TV_EXAMPLES = [
   {
     id: 'noise-ptt-beside-bodypack',
     title: 'Noise: a PTT radio beside an IEM bodypack',
-    note: 'Problem: a 2 W business UHF handheld keyed 1.5 m from the IEM bodypack puts -9.1 dBm at the antenna, 83.1 dB above what the 606 MHz channel filter passes (selectivity assumed). In the channel that is -92.3 dBm while keyed and -97.5 dBm on average (30 percent duty), a 13.7 dB floor rise and 37.5 dB of margin. A 0.5 W PMR446 radio gives 7.4 dB and 43.8 dB, so keep crew radios away from bodypacks (figures assumed). In the RF spectrum the floor steps up while the radio is keyed and drops back when it is released, in time with the plan rings; the margin quoted is the duty-weighted average.',
+    note: 'Problem: a 2 W business UHF handheld keyed 1.5 m from the IEM bodypack puts -9.1 dBm at the antenna, 83.1 dB above what the 606 MHz channel filter passes (selectivity assumed). In the channel that is -92.3 dBm while keyed and -97.5 dBm on average (30 percent duty), a 13.7 dB floor rise and 37.3 dB of margin. A 0.5 W PMR446 radio gives 7.4 dB and 43.6 dB, so keep crew radios away from bodypacks (figures assumed). In the RF spectrum the floor steps up while the radio is keyed and drops back when it is released, in time with the plan rings; the margin quoted is the duty-weighted average.',
     build: () => ({ scene: noiseSourceScene('ptt-beside-bodypack') }),
   },
   {
@@ -85,13 +85,13 @@ export const NOISE_TV_EXAMPLES = [
   {
     id: 'body-worn-thin-margin',
     title: 'Body-worn link with a thin margin: not proven',
-    note: 'Problem: a bodypack 70 m from the receiver has 8.6 dB of margin, with 10 dB of body loss and a 15 dB cross-polar floor (horizontal against vertical antennas, which is why the model warns about polarisation) both assumed. A body-worn margin under 10 dB is not called proven, because body loss changes by several dB with posture. The assumptions could move it by about 7.1 dB (10.0 dB if every error went the wrong way). Shorten the path, align the antennas, or walk-test it.',
+    note: 'Problem: a bodypack 70 m from the receiver has 7.6 dB of margin, with 10 dB of body loss and a 15 dB cross-polar floor (horizontal against vertical antennas, which is why the model warns about polarisation) both assumed. A body-worn margin under 10 dB is not called proven, because body loss changes by several dB with posture. The assumptions could move it by about 7.1 dB (10.0 dB if every error went the wrong way). Shorten the path, align the antennas, or walk-test it.',
     build: () => ({ scene: bodyWornScene('thin') }),
   },
   {
     id: 'body-worn-proven-twin',
     title: 'The same bodypack 25 m away: a proven margin',
-    note: 'Best practice: the same bodypack 25 m from the receiver has 17.5 dB of margin, over the 10 dB a body-worn link needs and over the 7.1 dB the assumptions could take off. It is called proven although the same assumed 10 dB body loss and 15 dB cross-polar floor are in it (the polarisation warning is that deliberately assumed floor, and aligning the antennas would add margin again). Compare with the 70 m case, where the margin is 8.6 dB.',
+    note: 'Best practice: the same bodypack 25 m from the receiver has 16.5 dB of margin, over the 10 dB a body-worn link needs and over the 7.1 dB the assumptions could take off. It is called proven although the same assumed 10 dB body loss and 15 dB cross-polar floor are in it (the polarisation warning is that deliberately assumed floor, and aligning the antennas would add margin again). Compare with the 70 m case, where the margin is 7.6 dB.',
     build: () => ({ scene: bodyWornScene('short') }),
   },
   {

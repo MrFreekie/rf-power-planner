@@ -179,12 +179,12 @@ test('note check: dropout-two-ray dips about 9 dB below the direct ray at about 
   assert.ok(Math.abs((l.rx.pos.x - dip.x) - 6.8) < 0.3);
 });
 
-test('note check: long-cable run costs 42.5 dB and leaves about 5 dB margin', () => {
+test('note check: long-cable run costs 44.3 dB and leaves about 4 dB margin', () => {
   const ex = buildExample('long-cable');
   const r = solveLink(ex.scene, ex.scene.links[0]);
   const cable = r.waterfall.find((w) => w.label.startsWith('Cable'));
-  assert.ok(Math.abs(cable.deltaDb + 42.5) < 0.1, String(cable.deltaDb));
-  assert.ok(Math.abs(r.marginDb - 5.3) < 0.3);
+  assert.ok(Math.abs(cable.deltaDb + 44.3) < 0.1, String(cable.deltaDb));
+  assert.ok(Math.abs(r.marginDb - 3.6) < 0.3);
   assert.equal(r.status, 'marginal');
 });
 
@@ -203,7 +203,7 @@ test('note check: reflective-wall dips are metres apart (about 2.5 m), not a qua
   assert.ok(Math.min(...gaps) > 0.5, 'every gap exceeds one wavelength');
 });
 
-test('note check: zones-long-hall needs the 24 dB booster; 20 dB leaves about a third failing', () => {
+test('note check: zones-long-hall needs the 24 dB booster; 18 dB leaves about a fifth failing', () => {
   const pass = (gain) => {
     const ex = buildExample('zones-long-hall');
     const l = ex.scene.links[0];
@@ -213,9 +213,9 @@ test('note check: zones-long-hall needs the 24 dB booster; 20 dB leaves about a 
     return zoneStats(g, ex.scene.zones[0], rq.squelchThresholdDbm, rq.appliedMarginDb);
   };
   assert.equal(buildExample('zones-long-hall').scene.links[0].branches[1].chain.find((c) => c.kind === 'booster').gainDb, 24);
-  const s24 = pass(24), s20 = pass(20);
+  const s24 = pass(24), s20 = pass(18);
   assert.equal(s24.pass, true);
-  assert.ok(s20.passFraction > 0.6 && s20.passFraction < 0.72, String(s20.passFraction));
+  assert.ok(s20.passFraction > 0.75 && s20.passFraction < 0.85, String(s20.passFraction));
   assert.equal(s20.pass, false);
 });
 
@@ -255,11 +255,11 @@ test('note check: imd-plan-bad retune clears the checker and meets the 400 kHz c
   assert.ok(minOffsetKHz >= 400, 'closest product is ' + minOffsetKHz + ' kHz from a channel centre');
 });
 
-test('note check: imd-too-close link meter is the own transmitter (-46 dBm), mic A at the antenna is -40 dBm', () => {
+test('note check: imd-too-close link meter is the own transmitter (-47 dBm), mic A at the antenna is -40 dBm', () => {
   const ex = buildExample('imd-too-close');
   const meter = solveLink(ex.scene, ex.scene.links[0]).inputPowerDbm;
   const a = noiseFloor(ex.scene).perChannel.find((c) => Math.abs(c.freqMHz - 605.6) < 0.1);
-  assert.ok(Math.abs(meter + 45.7) < 0.5);
+  assert.ok(Math.abs(meter + 46.7) < 0.5);
   assert.ok(Math.abs(a.wantedDbm + 40) < 0.5);
   assert.ok(a.imSumDbm > a.wantedDbm - 10);
   assert.ok(frontEndImd(ex.scene).length > 0);

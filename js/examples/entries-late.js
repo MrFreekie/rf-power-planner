@@ -22,7 +22,7 @@ export const LATE_EXAMPLES = [
   {
     id: 'presenter-with-backup-bodypack',
     title: 'Presenter: a main bodypack and a hot-spare backup',
-    note: 'Best practice: a presenter wears the main mic bodypack on the belt and a hot-spare backup on the other hip, 0.3 m apart, on a different frequency (607.3 against 606.1 MHz) so the two never share a channel. At 11 m the margins are 34.6 dB (main) and 34.0 dB (backup), and with the IEM at 614.1 MHz no third-order product comes closer than 1200 kHz to any channel. The person owns the main mic, the backup and the IEM, so moving or turning them carries all three packs with the offsets kept. Frequencies are illustrative.',
+    note: 'Best practice: a presenter wears the main mic bodypack on the belt and a hot-spare backup on the other hip, 0.3 m apart, on a different frequency (607.3 against 606.1 MHz) so the two never share a channel. At 11 m the margins are 36.6 dB for both (main and backup), and with the IEM at 614.1 MHz no third-order product comes closer than 1200 kHz to any channel. The person owns the main mic, the backup and the IEM, so moving or turning them carries all three packs with the offsets kept. Frequencies are illustrative.',
     build: () => ({ scene: presenterScene() }),
   },
   {
@@ -40,7 +40,7 @@ export const LATE_EXAMPLES = [
   {
     id: 'band-four-piece-walk',
     title: 'Four-piece band: moving the singer carries her packs',
-    note: 'Compare: moving Anna from the middle of the stage (8, 7.5) to the stage-right front (14.5, 8.5), by dragging her on the plan, carries her handheld and IEM pack with her, offsets kept. Her mic margin falls from 36.8 to 30.7 dB (-6.1 dB) while her IEM rises from 36.8 to 47.7 dB (+10.9 dB) because she is nearer the IEM antenna, and the other six links do not change (0.0 dB). The scene is the start; the animated walk moves only her mic pack along that line, so her IEM pack stays behind while it runs.',
+    note: 'Compare: moving Anna from the middle of the stage (8, 7.5) to the stage-right front (14.5, 8.5), by dragging her on the plan, carries her handheld and IEM pack with her, offsets kept. Her mic margin falls from 39.8 to 33.7 dB (-6.1 dB) while her IEM rises from 38.8 to 46.7 dB (+7.9 dB) because she is nearer the IEM antenna, and the other six links do not change (0.0 dB). The scene is the start; the animated walk moves only her mic pack along that line, so her IEM pack stays behind while it runs.',
     build: () => ({ scene: bandPeopleScene(), walk: { to: { ...bandWalkEndScene().links[0].tx.pos }, speedMps: 0.8, pingPong: true } }),
   },
   {
@@ -52,7 +52,7 @@ export const LATE_EXAMPLES = [
   {
     id: 'coord-spread-plan',
     title: 'Coordination: the same three mics on a spread plan',
-    note: 'Best practice: the same mics at 600.0, 601.0 and 603.3 MHz: no third-order product comes closer than 1000 kHz to a channel (hand: 2f2-f1 = 602.0, 2f1-f2 = 599.0, f1+f3-f2 = 602.3, f2+f3-f1 = 604.3). Nothing lands in a channel, so the products add no noise; the floor still rises 9.4 dB from the transmitter noise skirts of mics about 3 m away (assumed model). The wanted mic keeps 50.9 dB of margin, the same as in the equal plan.',
+    note: 'Best practice: the same mics at 600.0, 601.0 and 603.3 MHz: no third-order product comes closer than 1000 kHz to a channel (hand: 2f2-f1 = 602.0, 2f1-f2 = 599.0, f1+f3-f2 = 602.3, f2+f3-f1 = 604.3). Nothing lands in a channel, so the products add no noise; the floor still rises 9.4 dB from the transmitter noise skirts of mics about 3 m away (assumed model). The wanted mic keeps 49.9 dB of margin, the same as in the equal plan.',
     build: () => ({ scene: coordScene('spread') }),
   },
   {
@@ -94,7 +94,7 @@ export const LATE_EXAMPLES = [
   {
     id: 'measurements-calibrated',
     title: 'Walk test: the per-material fit applied',
-    note: 'Best practice: the same walk after applying the per-material fit (brick +8.1 dB, plasterboard +2.8 dB, stored in the scene): the readings now agree with the model to 0.2 dB rms instead of 8.8 dB, the worst single reading is 0.4 dB off, and asking for a fit again suggests nothing. The margin at the receiver behind both walls falls from 28.1 dB to 17.2 dB, which is the truer figure, so calibrating moved the plan toward the venue. The figures belong to these two walls, this transmitter and this body position: a new venue or another performer needs a new walk (readings synthetic).',
+    note: 'Best practice: the same walk after applying the per-material fit (brick +8.1 dB, plasterboard +2.8 dB, stored in the scene): the readings now agree with the model to 0.2 dB rms instead of 8.8 dB, the worst single reading is 0.4 dB off, and asking for a fit again suggests nothing. The margin at the receiver behind both walls falls from 27.1 dB to 16.2 dB, which is the truer figure, so calibrating moved the plan toward the venue. The figures belong to these two walls, this transmitter and this body position: a new venue or another performer needs a new walk (readings synthetic).',
     build: () => ({ scene: twoWallsScene('calibrated') }),
   },
   {
@@ -124,7 +124,7 @@ export const LATE_EXAMPLES = [
   {
     id: 'band-four-piece-swap-person',
     title: 'Four-piece band: a spare pack assigned to a person',
-    note: 'Best practice: the bodypack on 608.9 MHz is lying in a case at stage right, 8.5 m from the drummer, and is still called Spare bodypack with 31.8 dB of margin. Assign it to Dev in the people panel as his mic: the pack jumps to his belt (0.15 m to his right, 0.05 m behind, height kept at 1.0 m), is renamed Dev mic and shows 45.5 dB of margin, because it is now 2.4 m from the receive antenna instead of 10.2 m. The other seven links do not change. Assign every pack before checking the plan, so each figure is for where the pack is worn and not where it was left (positions illustrative).',
+    note: 'Best practice: the bodypack on 608.9 MHz is lying in a case at stage right, 8.5 m from the drummer, and is still called Spare bodypack with 34.8 dB of margin. Assign it to Dev in the people panel as his mic: the pack jumps to his belt (0.15 m to his right, 0.05 m behind, height kept at 1.0 m), is renamed Dev mic and shows 48.5 dB of margin, because it is now 2.4 m from the receive antenna instead of 10.2 m. The other seven links do not change. Assign every pack before checking the plan, so each figure is for where the pack is worn and not where it was left (positions illustrative).',
     build: () => ({ scene: bandSwapScene(false) }),
   },
   {
@@ -148,7 +148,7 @@ export const LATE_EXAMPLES = [
   {
     id: 'compare-single-change',
     title: 'Compare: one change, the receive cable',
-    note: 'Compare: a mic 19 m from the receiver with 60 m of RG58 on the receive side has 29.7 dB of margin. Take a snapshot, change only the cable to LMR-400 and Compare shows 48.8 dB, 19.2 dB more, and credits it to the cable alone, since nothing else differs. The cable is the first stage of the receive chain, so its loss goes straight into the noise floor (-87.3 dBm against -106.5 dBm). Change one thing at a time and the comparison can name its cause (figures assumed).',
+    note: 'Compare: a mic 19 m from the receiver with 60 m of RG58 on the receive side has 25.6 dB of margin. Take a snapshot, change only the cable to LMR-400 and Compare shows 48.8 dB, 23.2 dB more, and credits it to the cable alone, since nothing else differs. The cable is the first stage of the receive chain, so its loss goes straight into the noise floor (-83.3 dBm against -106.5 dBm). Change one thing at a time and the comparison can name its cause (figures assumed).',
     build: () => ({ scene: compareChangeScene(false) }),
   },
   {

@@ -49,12 +49,12 @@ test('buildSweep clamps and orders; presets resolve', () => {
 });
 
 // ---------------------------------------------------------------- cables
-test('open cable: |S11| ripple period = c VF /(2 L) (1 m, VF 0.66: 98.94 MHz; tolerance 1.5 percent)', () => {
+test('open cable: |S11| ripple period = c VF /(2 L) (1 m, VF 0.66: 98.94 MHz; tolerance 2 percent)', () => {
   const sw = sweep(100, 1000, 1001);
   const r = V.measure({ sweep: sw, dut: { type: 'cable', cableId: 'rg58', lengthM: 1, termination: 'open' }, ...CAL });
   const per = V.rippleSpacingMHz(sw.fMHz, r.s11.map(V.cAbs));
   const want = 299792458 * 0.66 / 2 / 1e6;
-  near(per, want, want * 0.015);
+  near(per, want, want * 0.02);
   near(V.cableRipplePeriodMHz(1, 0.66), 98.9376, 0.01);
   near(V.cableLengthFromRippleMHz(want, 0.66), 1, 1e-9);
 });

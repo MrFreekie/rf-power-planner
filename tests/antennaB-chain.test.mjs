@@ -135,8 +135,8 @@ test('example: different cable runs give B its own level, and switching moves to
   const ex = buildExample('diversity-cable-runs');
   assert.deepEqual(validateScene(ex.scene), { ok: true, errors: [] });
   const l = ex.scene.links[0];
-  assert.ok(Math.abs(chainLossDb(l.chain, l.freqMHz) - 2.1) < 0.1);
-  assert.ok(Math.abs(chainLossDb(l.rx.diversity.antennaB.chain, l.freqMHz) - 11.0) < 0.2);
+  assert.ok(Math.abs(chainLossDb(l.chain, l.freqMHz) - 2.5) < 0.1);
+  assert.ok(Math.abs(chainLossDb(l.rx.diversity.antennaB.chain, l.freqMHz) - 10.7) < 0.2);
   const from = { ...l.tx.pos };
   let prev = null, switches = 0, onB = 0, n = 0, aOnB = -Infinity;
   for (let i = 0; i <= 40; i++) {

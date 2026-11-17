@@ -284,8 +284,8 @@ test('example scenes: UR4D-style link', () => {
   assert.ok(Math.abs(l.tx.powerDbm - 16.99) < 0.01);
   assert.equal(fmTuningCheck('shure-ur2', l.freqMHz).onGrid, true);
   const r = solveLink(ex.scene, l);
-  assert.ok(Math.abs(r.marginDb - 65.5) < 0.1, `margin ${r.marginDb}`);        // note says 65.5 dB
-  assert.match(ex.note, /65\.5 dB/);
+  assert.ok(Math.abs(r.marginDb - 65.2) < 0.1, `margin ${r.marginDb}`);        // note says 65.2 dB
+  assert.match(ex.note, /65\.2 dB/);
   assert.match(ex.note, /assumed/);
   assert.match(ex.note, /-102 dBm at 30 dB SINAD/);
   // walking to 2.5 m: overloaded

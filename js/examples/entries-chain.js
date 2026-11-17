@@ -6,7 +6,7 @@ export const CHAIN_EXAMPLES = [
   {
     id: 'splitter-two-way-receiver',
     title: 'Splitter: one antenna feeding two receivers',
-    note: 'Less ideal: a passive 2-way splitter lets two receivers share one antenna and costs 3.5 dB, so the chain loses 5.6 dB against 2.1 dB without it. The loss comes before the first gain stage, so the system noise figure rises from 10.1 dB to 13.6 dB and the margin falls from 59.5 dB to 56.0 dB. An active splitter (0 dB net gain, assumed 8 dB noise figure) gives 11.9 dB and 57.7 dB. Use active distribution for several receivers (figures illustrative).',
+    note: 'Less ideal: a passive 2-way splitter lets two receivers share one antenna and costs 3.5 dB, so the chain loses 6.0 dB against 2.5 dB without it. The loss comes before the first gain stage, so the system noise figure rises from 10.5 dB to 14.0 dB and the margin falls from 59.2 dB to 55.6 dB. An active splitter (0 dB net gain, assumed 8 dB noise figure) gives 12.2 dB and 57.5 dB. Use active distribution for several receivers (figures illustrative).',
     build: () => ({ scene: reviewScene('splitter-two-way-receiver', {}) }),
   },
   {
@@ -18,13 +18,13 @@ export const CHAIN_EXAMPLES = [
   {
     id: 'lna-no-filter',
     title: 'LNA with no filter beside an IEM transmitter',
-    note: 'Problem: a 20 dB LNA at the mic receive antenna with no filter sees the IEM transmitter 3.3 m away at -42.4 dBm and delivers -23.7 dBm to the receiver, which is hot (5.7 dB from the P1dB of -18 dBm) with 0.4 dB of desense. The wanted mic margin is 58.2 dB but the receiver works near compression. Put a bandpass filter ahead of the LNA (see filter-before-booster). Receiver figures illustrative.',
+    note: 'Problem: a 20 dB LNA at the mic receive antenna with no filter sees the IEM transmitter 3.3 m away at -39.4 dBm and delivers -20.9 dBm to the receiver, which is hot (2.9 dB from the P1dB of -18 dBm) with 1.0 dB of desense. The wanted mic margin is 58.2 dB but the receiver works near compression. Put a bandpass filter ahead of the LNA (see filter-before-booster). Receiver figures illustrative.',
     build: () => ({ scene: reviewScene('lna-no-filter', {}) }),
   },
   {
     id: 'filter-before-booster',
     title: 'Filter before the booster',
-    note: 'Best practice: the same scene with a 604 to 608 MHz bandpass (1.5 dB loss, 40 dB rejection, assumed) ahead of the LNA: the IEM carrier reaches the receiver at -65.2 dBm, 47.2 dB below the P1dB, with no desense. The filter costs the wanted mic 1.5 dB (margin 56.7 dB against 58.2 dB), a cheap price. Filter before gain.',
+    note: 'Best practice: the same scene with a 604 to 608 MHz bandpass (1.5 dB loss, 40 dB rejection, assumed) ahead of the LNA: the IEM carrier reaches the receiver at -62.4 dBm, 44.4 dB below the P1dB, with no desense. The filter costs the wanted mic 1.5 dB (margin 56.7 dB against 58.2 dB), a cheap price. Filter before gain.',
     build: () => ({ scene: reviewScene('filter-before-booster', {}) }),
   },
   {
@@ -36,7 +36,7 @@ export const CHAIN_EXAMPLES = [
   {
     id: 'bias-tee-booster-up-the-mast',
     title: 'Bias tee: powering a booster up the mast',
-    note: 'Best practice: a 12 dB booster at the antenna is powered up 45 m of LMR-400 by a bias tee at the rack, and the model raises no DC warning. The chain gains 6.5 dB net and the system noise figure is 5.2 dB against 10.1 dB for a bare RG58 run. Keep every DC block, analyser and passive splitter off the line between the tee and the booster.',
+    note: 'Best practice: a 12 dB booster at the antenna is powered up 45 m of LMR-400 by a bias tee at the rack, and the model raises no DC warning. The chain gains 6.5 dB net and the system noise figure is 5.2 dB against 10.5 dB for a bare RG58 run. Keep every DC block, analyser and passive splitter off the line between the tee and the booster.',
     build: () => ({ scene: reviewScene('bias-tee-booster-up-the-mast', {}) }),
   },
   {
@@ -48,13 +48,13 @@ export const CHAIN_EXAMPLES = [
   {
     id: 'body-contact-sweaty-bodypack',
     title: 'Sweaty bodypack: contact and dampness',
-    note: 'Problem: a bodypack antenna against bare skin (6 dB, assumed) and wet with sweat (3 dB more) loses 9.0 dB, so the margin is 42.1 dB against 51.1 dB for the same pack free and dry. The contact option replaces the scene body-loss setting instead of adding to it. A layer of clothing costs 2.5 dB and dry skin 6 dB; keep the antenna off the skin and dry.',
+    note: 'Problem: a bodypack antenna against bare skin (6 dB, assumed) and wet with sweat (3 dB more) loses 9.0 dB, so the margin is 41.8 dB against 50.8 dB for the same pack free and dry. The contact option replaces the scene body-loss setting instead of adding to it. A layer of clothing costs 2.5 dB and dry skin 6 dB; keep the antenna off the skin and dry.',
     build: () => ({ scene: reviewScene('body-contact-sweaty-bodypack', {}) }),
   },
   {
     id: 'tilted-whip-vs-vertical',
     title: 'Tilted bodypack whip against a vertical receive antenna',
-    note: 'Less ideal: a bodypack whip tilted 60 degrees from the vertical receive antenna loses 5.6 dB to polarisation mismatch (2.9 dB at 45 degrees, 14.1 dB at 85, 15.0 dB at 90 where the 15 dB cross-polar floor applies). The margin falls from 58.8 dB upright to 53.1 dB. Wear the pack upright or use a slant or circular receive antenna (see circular-polarisation-wanted-mic).',
+    note: 'Less ideal: a bodypack whip tilted 60 degrees from the vertical receive antenna loses 5.6 dB to polarisation mismatch (2.9 dB at 45 degrees, 14.1 dB at 85, 15.0 dB at 90 where the 15 dB cross-polar floor applies). The margin falls from 58.4 dB upright to 52.8 dB. Wear the pack upright or use a slant or circular receive antenna (see circular-polarisation-wanted-mic).',
     build: () => ({ scene: reviewScene('tilted-whip-vs-vertical', {}) }),
   },
   {
@@ -66,19 +66,19 @@ export const CHAIN_EXAMPLES = [
   {
     id: 'ground-plane-quarterwave',
     title: 'Quarter-wave whip: ground plane or free cable',
-    note: 'Problem: a quarter-wave whip on a free cable has no ground plane, so its gain is only -1 dBi and unpredictable (the model warns). On a rack panel it is +3 dBi, which is 4.0 dB more margin (61.8 dB against 57.8 dB); a body counts 1 dBi and a large plate 5 dBi. Mount it on a panel or a ground plate (gain figures assumed).',
+    note: 'Problem: a quarter-wave whip on a free cable has no ground plane, so its gain is only -1 dBi and unpredictable (the model warns). On a rack panel it is +3 dBi, which is 4.0 dB more margin (61.4 dB against 57.4 dB); a body counts 1 dBi and a large plate 5 dBi. Mount it on a panel or a ground plate (gain figures assumed).',
     build: () => ({ scene: reviewScene('ground-plane-quarterwave', {}) }),
   },
   {
     id: 'coverage-modes-compare',
     title: 'Coverage modes: coherent, power and best',
-    note: 'Compare: the same two IEM antennas 1.5 m apart over a front zone, combined three ways. Coherent adds the waves with phase, so the worst cell is -77.0 dBm in a null; power adds the powers (-43.1 dBm worst) and best takes the stronger antenna (-45.9 dBm). Plan with power or best and check the coherent nulls separately (see zones-coherent-nulls).',
+    note: 'Compare: the same two IEM antennas 1.5 m apart over a front zone, combined three ways. Coherent adds the waves with phase, so the worst cell is -77.7 dBm in a null; power adds the powers (-43.8 dBm worst) and best takes the stronger antenna (-46.5 dBm). Plan with power or best and check the coherent nulls separately (see zones-coherent-nulls).',
     build: () => ({ scene: reviewScene('coverage-modes-compare', {}) }),
   },
   {
     id: 'external-noise-urban-vs-quiet',
     title: 'External noise: urban against quiet',
-    note: 'Less ideal: a 20 dB low-noise booster at the antenna (system noise figure 2.3 dB) makes the receiver sensitive to a city: urban noise lifts the floor to -116.4 dBm against -118.7 dBm with none and costs 2.3 dB of margin (54.6 dB against 56.9 dB). Without the booster (16.6 dB noise figure) the same city costs only 0.1 dB. Gain cannot fix noise that arrives at the antenna.',
+    note: 'Less ideal: a 20 dB low-noise booster at the antenna (system noise figure 2.7 dB) makes the receiver sensitive to a city: urban noise lifts the floor to -116.1 dBm against -118.3 dBm with none and costs 2.2 dB of margin (54.3 dB against 56.5 dB). Without the booster (17.9 dB noise figure) the same city costs only 0.1 dB. Gain cannot fix noise that arrives at the antenna.',
     build: () => ({ scene: reviewScene('external-noise-urban-vs-quiet', {}) }),
   },
   {
@@ -102,7 +102,7 @@ export const CHAIN_EXAMPLES = [
   {
     id: 'band-four-piece-people',
     title: 'Four-piece band: a mic and an IEM pack per person',
-    note: 'Best practice: four people each carry a mic and an IEM bodypack, and the links are named after them (Anna mic, Anna IEM). The margins run from 27.9 dB (Dev IEM, the weakest) to 47.7 dB (Ben mic); the handheld sits at 1.3 m and the bodypacks at the belt, 1.0 m. Move a person and both of their packs move together with the offsets kept, and deleting a person leaves the links in place (frequencies illustrative).',
+    note: 'Best practice: four people each carry a mic and an IEM bodypack, and the links are named after them (Anna mic, Anna IEM). The margins run from 29.6 dB (Dev IEM, the weakest) to 48.5 dB (Dev mic); the handheld sits at 1.3 m and the bodypacks at the belt, 1.0 m. Move a person and both of their packs move together with the offsets kept, and deleting a person leaves the links in place (frequencies illustrative).',
     build: () => ({ scene: bandPeopleScene() }),
   },
 ];
