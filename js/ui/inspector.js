@@ -438,12 +438,13 @@ export function mountInspector({ container, store }) {
       selectField({
         key: 'tx-fm', label: 'Equipment preset', options: () => txPresetOptions(),
         get: (cc) => cc.link.tx.fmPreset || '', set: (cc, v) => setTxFmPreset(store, cc.link.id, v || null),
+        visible: (cc) => cc.link.kind === 'p2p', // a mic or IEM transmitter picks its model in its radio item (Transmitter model)
       }),
       selectField({
         key: 'tx-fm-pow', label: 'Power option',
         options: (cc) => { const o = powerOptionChoices(cc.link.tx.fmPreset); return currentPowerOption(cc.link) === 'custom' ? [...o, ['custom', 'Custom (edited)']] : o; },
         get: (cc) => currentPowerOption(cc.link), set: (cc, v) => { if (v !== 'custom') setTxPowerOption(store, cc.link.id, v); },
-        visible: (cc) => !!cc.link.tx.fmPreset,
+        visible: (cc) => !!cc.link.tx.fmPreset && cc.link.kind === 'p2p', // mic and IEM links have Transmit power next to the model
       }),
       selectField({
         key: 'tx-fm-li', label: LOW_IM_LABEL, options: [['off', 'Off'], ['on', 'On']],
