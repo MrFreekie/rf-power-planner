@@ -3,7 +3,7 @@
 //   to a half-wave dipole (EIRP = ERP + 2.15 dB); 'conducted' limits (US Part 74 style) count the power at the antenna terminals only.
 // A mic link's chain belongs to the receiver, so a mic is checked on Tx power plus antenna gain alone.
 import { powerLimitDetailFor, ERP_TO_EIRP_DB, mwToDbm } from './bands.js';
-import { chainLossDb } from './rf.js';
+import { chainLossDb, nominalGainDbi } from './rf.js';
 
 /**
  * erpCheck(link, regionId) -> null | { eirpDbm, radiatedDbm, limitDbm, unit, chainLossDb, gainDbi, over, level, text }
@@ -17,7 +17,7 @@ export function erpCheck(link, regionId) {
   if (!d) return null;
   const iem = link.kind === 'iem';
   const loss = iem ? chainLossDb(link.chain, link.freqMHz) : 0;
-  const g = link.tx.antenna && Number.isFinite(link.tx.antenna.gainDbi) ? link.tx.antenna.gainDbi : 0;
+  const g = link.tx.antenna ? nominalGainDbi(link.tx.antenna) : 0; // the library gain and the ground-plane table count, not just a typed gainDbi
   const atAnt = link.tx.powerDbm - loss, eirp = atAnt + g;
   const radiated = d.unit === 'conducted' ? atAnt : d.unit === 'ERP' ? eirp - ERP_TO_EIRP_DB : eirp;
   const hand = mwToDbm(d.handheldMw), top = mwToDbm(Math.max(d.handheldMw, d.bodyWornMw));

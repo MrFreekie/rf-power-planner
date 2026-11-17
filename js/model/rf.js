@@ -1062,10 +1062,12 @@ export function solveLink(scene, link) {
   // Reflected power returns toward the transmitter output stage through the chain (twice the one-way chain loss on the reflected wave).
   // Per item the reverse loss is reverseIsolationDb (an isolator: low forward loss, high reverse isolation) or else twice the forward loss (a reciprocal pad or cable is crossed by the reflected wave on the way back); gain stages count 0.
   const chainToAntDb = iem ? chain.reduce((sum, it) => sum + (Number.isFinite(it.reverseIsolationDb) ? Math.max(it.reverseIsolationDb, 0) : 2 * Math.max(chainItemLossDb(it, f), 0)), 0) : 0;
+  // The reflection starts at the antenna input, which is already after the forward loss; going back it pays only the reverse loss of each item (the isolation of an isolator, else the same one-way loss).
+  const revChainDb = iem ? chain.reduce((sum, it) => sum + (Number.isFinite(it.reverseIsolationDb) ? Math.max(it.reverseIsolationDb, 0) : Math.max(chainItemLossDb(it, f), 0)), 0) : 0;
   const antInDbm = txOutDbm;
   const txReflectedDbm = txM.matched ? -Infinity : antInDbm + 10 * Math.log10(Math.max(txM.gammaSq, 1e-30));
   const vswrAtPa = txM.matched ? 1 : vswrThroughLoss(txM.vswr, chainToAntDb / 2);
-  const reflectedAtPaDbm = txM.matched ? -Infinity : txReflectedDbm - chainToAntDb;
+  const reflectedAtPaDbm = txM.matched ? -Infinity : txReflectedDbm - revChainDb;
   for (const [side, m, a] of [['Tx', txM, link.tx.antenna], ['Rx', rxM, link.rx.antenna]]) {
     if (!m.matched && !m.inBand) warnings.push(`${side} antenna is cut for ${m.band.label} but the link is at ${f} MHz: VSWR ${m.vswr.toFixed(1)}:1, mismatch loss ${m.mismatchDb.toFixed(1)} dB. Use an antenna cut for this band.`);
   }

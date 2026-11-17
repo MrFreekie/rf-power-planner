@@ -78,7 +78,7 @@ export const VENUE_EXAMPLES = [
   {
     id: 'band-iem-tx-wrong-antenna',
     title: 'Antenna band: IEM transmitter into an antenna cut for 863-865 MHz',
-    note: 'Problem: the 100 mW IEM transmitter at 606.1 MHz drives an antenna cut for 863-865 MHz (assumed, a whip about 8 percent wide at best): VSWR 46.2:1, 10.8 dB mismatch loss, and 92 percent of the power (19.6 dBm) returns to the output stage, which can stress the PA or trigger foldback. A 6 dB pad cuts that to 1.6 dBm (1.6:1 at the PA, the reflection crosses the pad twice); an isolator (0.5 dB forward, 20 dB reverse, assumed) gives 1.2:1 at the PA and -0.9 dBm. The real fix is the right antenna. Illustrative figures.',
+    note: 'Problem: the 100 mW IEM transmitter at 606.1 MHz drives an antenna cut for 863-865 MHz (assumed, a whip about 8 percent wide at best): VSWR 46.2:1, 10.8 dB mismatch loss, and 92 percent of the power (19.6 dBm) returns to the output stage, which can stress the PA or trigger foldback. A 6 dB pad cuts that to 7.6 dBm (1.6:1 at the PA, the reflection crosses the pad twice); an isolator (0.5 dB forward, 20 dB reverse, assumed) gives 1.2:1 at the PA and -0.9 dBm. The real fix is the right antenna. Illustrative figures.',
     build: () => ({ scene: bandScene('iem-tx-wrong-band') }),
   },
   {

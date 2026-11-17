@@ -11,6 +11,8 @@ export const RACK_LIMITS = Object.freeze({ maxAntennas: 160, maxSplitters: 32, m
 export const DEFAULT_LOOP_LOSS_DB = 2; // assumed insertion loss of one receiver RF loop-through hop (typically 1 to 3 dB; not from a datasheet)
 const RACK_COMBINER = Object.freeze({ passive: 'splitter-2', active: 'active-combiner-8' });
 const RACK_SPLITTER = Object.freeze({ passive: 'splitter-2', active: 'active-splitter-4' });
+const passivePreset = (ports) => (ports > 4 ? 'splitter-8' : ports > 2 ? 'splitter-4' : 'splitter-2'); // the excess loss grows with the port count (0.5, 1.0, 1.5 dB)
+const presetFor = (table, type, ports) => (type === 'active' ? table.active : passivePreset(ports));
 /** Gain given to a transmit antenna that is a dummy load: nothing is radiated. */
 export const DUMMY_LOAD_GAIN_DBI = -60;
 const isRackItem = (it) => !!it && it.rackSplitter === true;
@@ -133,7 +135,7 @@ export function compileRack(scene, mk) {
     const div = l.rx.diversity;
     if (div && antB) { div.enabled = true; div.antennaB = { ...(div.antennaB || {}), pos: structuredClone(antB.pos), antenna: structuredClone(antB.antenna) }; }
     else if (div && ch.antB === null && !splitter && div.enabled) { /* channel says no antenna B: leave the link's own setting */ }
-    const stageItems = (pre) => stages.map((st, k) => ({ ...mk.fromPreset(RACK_SPLITTER[st.type] || RACK_SPLITTER.passive, { ports: Math.min(Math.max(splitterLoad(rack, st.id) || 2, st.ports || 2), 16) }), id: `${pre}${k === stages.length - 1 ? '' : k}_${l.id.slice(0, 40)}`, rackSplitter: true }));
+    const stageItems = (pre) => stages.map((st, k) => ({ ...mk.fromPreset(presetFor(RACK_SPLITTER, st.type, Math.min(Math.max(splitterLoad(rack, st.id) || 2, st.ports || 2), 16)), { ports: Math.min(Math.max(splitterLoad(rack, st.id) || 2, st.ports || 2), 16) }), id: `${pre}${k === stages.length - 1 ? '' : k}_${l.id.slice(0, 40)}`, rackSplitter: true }));
     const items = stageItems('sp'), itemsB = stageItems('spb');
     const loop = hops.length ? [{ ...mk.item('attenuator', { lossDb: loopLossDb, name: `Receiver loop-through (${hops.length} hop${hops.length === 1 ? '' : 's'})`, assumed: hops.some((h) => !Number.isFinite(h.loopLossDb)) }), id: `lp_${l.id.slice(0, 40)}`, rackSplitter: true }] : [];
     const loopB = loop.map((it) => ({ ...it, id: `lpb_${l.id.slice(0, 40)}` }));
@@ -172,10 +174,10 @@ function compileTxRack(scene, rack, links, mk) {
     l.chain = (l.chain || []).filter((it) => !isRackItem(it));
     if (ant) { l.tx.pos = structuredClone(ant.pos); l.tx.antenna = structuredClone(ant.antenna); if (ant.load) l.tx.antenna.gainDbi = DUMMY_LOAD_GAIN_DBI; } // a 50 ohm load radiates nothing
     if (cb) {
-      const items = [{ ...mk.fromPreset(RACK_COMBINER[cb.type] || RACK_COMBINER.passive, { ports: Math.min(Math.max(used.get(cb.id) || 2, cb.ports || 2), 16) }), rackSplitter: true }];
+      const items = [{ ...mk.fromPreset(presetFor(RACK_COMBINER, cb.type, Math.min(Math.max(used.get(cb.id) || 2, cb.ports || 2), 16)), { ports: Math.min(Math.max(used.get(cb.id) || 2, cb.ports || 2), 16) }), rackSplitter: true }];
       if (cb.cable && cb.cable.lengthM > 0) items.push({ ...mk.item('cable', { cableType: cb.cable.type || 'rg58', lengthM: cb.cable.lengthM }), rackSplitter: true });
       if (fan) { // combiner > (cable) > splitter > that output's own cable > antenna; every output pays the same split loss
-        items.push({ ...mk.fromPreset(RACK_SPLITTER[fan.type] || RACK_SPLITTER.passive, { ports: Math.min(Math.max(fan.outputs.length, fan.ports || 2, 2), 16) }), rackSplitter: true });
+        items.push({ ...mk.fromPreset(presetFor(RACK_SPLITTER, fan.type, Math.min(Math.max(fan.outputs.length, fan.ports || 2, 2), 16)), { ports: Math.min(Math.max(fan.outputs.length, fan.ports || 2, 2), 16) }), rackSplitter: true });
         const oc = fanOut && fanOut.cable;
         if (oc && oc.lengthM > 0) items.push({ ...mk.item('cable', { cableType: oc.type || 'rg58', lengthM: oc.lengthM }), rackSplitter: true });
       }

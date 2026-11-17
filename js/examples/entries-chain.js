@@ -30,7 +30,7 @@ export const CHAIN_EXAMPLES = [
   {
     id: 'pad-on-iem-transmitter',
     title: 'Pad on an IEM transmitter with the wrong antenna',
-    note: 'Less ideal: a pad as the fix. The IEM transmitter drives an antenna cut for 863 to 865 MHz at 606.1 MHz (VSWR 46.2:1), and a 6 dB pad in front of it brings the reflection at the output stage down from 19.6 dBm to 1.6 dBm (1.6:1 at the PA). The price is 6 dB of link margin (38.3 dB against 44.3 dB), which is still plenty. The real fix is the right antenna (figures illustrative, assumed band edges).',
+    note: 'Less ideal: a pad as the fix. The IEM transmitter drives an antenna cut for 863 to 865 MHz at 606.1 MHz (VSWR 46.2:1), and a 6 dB pad in front of it brings the reflection at the output stage down from 19.6 dBm to 7.6 dBm (1.6:1 at the PA). The price is 6 dB of link margin (38.3 dB against 44.3 dB), which is still plenty. The real fix is the right antenna (figures illustrative, assumed band edges).',
     build: () => ({ scene: reviewScene('pad-on-iem-transmitter', {}) }),
   },
   {
