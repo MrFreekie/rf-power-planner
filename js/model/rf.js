@@ -34,6 +34,7 @@ import { CEILING_MATERIALS, overheadPlanes, overheadZoneFraction } from './ceili
 import { antennaMatch, vswrThroughLoss, BAND_VSWR_WARN, BAND_VSWR_STRONG } from './antenna-band.js';
 export { antennaMatch, mismatchLossDb, returnLossSweep, ANTENNA_BANDS, resolveDesignBand } from './antenna-band.js';
 import { ACTIVE_CHAIN_KINDS, couplerThroughLossDb, chainDcWarnings, CHAIN_PRESETS } from './chain-presets.js';
+import { chainImpedanceWarnings } from './chain-checks.js';
 import { hasFloorFeatures, floorHeightAt, floorSurfaceAt, absolutePos, allReflectors, chordsThrough, floorZoneFraction } from './floor.js';
 import { RX_PRESETS, RX_DEFAULTS, externalNoiseFigureDb, INTERFERENCE_RISE_DB, INTERFERENCE_LEVELS, isInterferenceBand, interferenceBandOf, cascadeIip3Dbm as stagesIip3Dbm } from './rx-params.js';
 
@@ -1071,6 +1072,7 @@ export function solveLink(scene, link) {
   if (!txM.matched && vswrAtPa > BAND_VSWR_WARN) warnings.push(`Reflected power: the Tx antenna VSWR is ${txM.vswr.toFixed(1)}:1, so ${(100 * txM.gammaSq).toFixed(0)} percent of the power (${reflectedAtPaDbm.toFixed(1)} dBm) returns to the transmitter output stage (VSWR there ${vswrAtPa.toFixed(1)}:1)${vswrAtPa > BAND_VSWR_STRONG ? ': this can stress the PA or trigger foldback. Fit the correct antenna, or an isolator or pad (a pad of N dB returns the reflection 2N dB weaker; an isolator is better).' : '. Check the antenna.'}`);
   warnings.push(...chainDcWarnings(chain, { endSupplyV: iem ? 0 : (link.rx.antennaBiasV || 0), endSupplyMa: link.rx.antennaBiasMa > 0 ? link.rx.antennaBiasMa : Infinity }));
   if (iem && rxChain.length) warnings.push(...chainDcWarnings(rxChain));
+  warnings.push(...chainImpedanceWarnings(chain), ...(iem ? chainImpedanceWarnings(rxChain) : []));
   for (const [side, a] of [['Tx', link.tx.antenna], ['Rx', link.rx.antenna]]) {
     if (a && a.type === 'quarterwave' && a.groundPlane === 'none') warnings.push(`${side} antenna is a quarter-wave whip with no ground plane (free cable): it needs a ground plane of about a quarter wave radius, so gain is only about ${GROUND_PLANE_GAIN_DBI.none} dBi and unpredictable. Use a rack panel or ground plate, or a dipole with a choke.`);
   }

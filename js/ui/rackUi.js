@@ -1,6 +1,6 @@
 // Radio items panel: every mic, receive antenna, splitter, receiver, IEM transmitter, combiner and transmit antenna in categories,
 // each item expandable to show its details and edit its connections. Edits go through js/actionsRack.js (one undo step each).
-import { rackSections, deriveRack, rackWarnings, rackLoads, channelRoute } from '../model/rack.js';
+import { rackSections, deriveRack, rackWarnings, rackLoads, channelRoute, canFeedSplitter, canLoopReceiver, loopLossOf, RACK_LIMITS, DEFAULT_LOOP_LOSS_DB } from '../model/rack.js';
 import { solveCached } from '../view/util.js';
 import { CABLES, ANTENNAS } from '../model/library.js';
 import { linkCard, txFormFactor } from '../model/inventory.js';
@@ -11,10 +11,15 @@ import { getLinkDock, subscribeLinkDock } from './linkDock.js';
 import { activeLink } from '../view/util.js';
 import { FM_PRESETS } from '../model/fm-presets.js';
 import { CHAIN_PRESETS } from '../model/chain-presets.js';
+import { poweringBudget, poweringLine } from '../model/powering.js';
+import { erpCheck } from '../model/erp.js';
+import { getCoordRegion } from './region.js';
 import { gearPickers } from './gearUi.js';
 import {
   renameRackItem, addRackAntenna, addRackSplitter, setSplitterType, setSplitterInput, connectChannel, moveChannel, removeRackItem, setRackAntenna,
   addRackCombiner, setCombiner, setSplitterPorts, setRxBias, setRackAntennaType, setRackAntennaAim, addAntennaChainItem, setAntennaChainItem, removeAntennaChainItem, setAntennaZones, connectTxChannel, moveTxChannel, removeCombiner,
+  setCombinerFanout, setFanoutOutput, setTxIsolator,
+  setSplitterFeed, setReceiverLoop, setReceiverLoopLoss,
 } from '../actionsRack.js';
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
@@ -62,13 +67,22 @@ export function mountRack({ container, store }) {
     out.textContent = '';
     const linkName = (id) => { const l = scene.links.find((q) => q.id === id); return l ? l.name : id; };
     const bwOf = (l) => { const p = l.tx && l.tx.fmPreset && FM_PRESETS[l.tx.fmPreset]; return p && p.params ? p.params.occupiedBwKhz : 200; };
-    const warns = rackWarnings(scene, bwOf), warnBy = new Map();
+    const warns = rackWarnings(scene, bwOf, { erpOf: (l) => erpCheck(l, getCoordRegion()) }), warnBy = new Map();
     const dcOf = new Map(); // bias warnings from the link maths, shown on the receiver and on the antennas that feed it
     for (const l of scene.links) if (l.kind === 'mic') { const r = solveCached(scene, l); const ws = ((r && r.warnings) || []).filter((t) => /bias|DC/i.test(t)); if (ws.length) dcOf.set(l.id, ws); }
     for (const [lid, ws] of dcOf) {
       const m = (rack.receivers || []).flatMap((r) => r.channels).find((c) => c.linkId === lid); if (!m) continue;
-      const route = channelRoute(rack, m), keys = [`receiver:${lid}`, ...[route.antA, route.antB].filter(Boolean).map((a) => `antenna:${a.id}`)];
+      const mr = rack.receivers.find((r) => r.channels.some((c) => c.linkId === lid)), route = channelRoute(rack, m, mr), keys = [`receiver:${lid}`, ...[route.antA, route.antB].filter(Boolean).map((a) => `antenna:${a.id}`)];
       for (const k of new Set(keys)) for (const t of new Set(ws)) warns.push({ key: k, level: 'warn', text: `${linkName(lid)}: ${t}` });
+    }
+    for (const l of scene.links) { // powering budget: current drawn by powered gear against each DC source
+      if (l.kind !== 'mic') continue;
+      const m = (rack.receivers || []).flatMap((r) => r.channels).find((c) => c.linkId === l.id); if (!m) continue;
+      const route = channelRoute(rack, m), keys = [`receiver:${l.id}`, ...[route.antA, route.antB].filter(Boolean).map((a) => `antenna:${a.id}`)];
+      for (const e of poweringBudget(l)) {
+        warns.push({ key: keys[0], level: e.ok ? 'info' : 'warn', text: `${linkName(l.id)} powering, ${e.source}: ${poweringLine(e)}.` });
+        for (const t of e.warnings) for (const k of keys.slice(1)) warns.push({ key: k, level: 'warn', text: `${linkName(l.id)}: ${t}` });
+      }
     }
     for (const w of warns) warnBy.set(w.key, [...(warnBy.get(w.key) || []), w]);
     const portOpts = [['', 'As many as used'], ...[2, 3, 4, 5, 6, 8, 12, 16].map((n) => [String(n), `${n} ports`])];
@@ -145,14 +159,18 @@ export function mountRack({ container, store }) {
         b.append(field('Name', text('Splitter name', s.name, (v) => renameRackItem(store, 'splitters', s.id, v))),
           field('Type', select('Splitter type', [['passive', 'Passive'], ['active', 'Active (powers the antennas)']], s.type, (v) => setSplitterType(store, s.id, v))),
           field('Ports', select('Splitter ports', portOpts, s.ports ? String(s.ports) : '', (v) => setSplitterPorts(store, s.id, v || null))),
-          field('Input A', select('Splitter input A', antOpts('rx'), s.antA, (v) => setSplitterInput(store, s.id, 'A', v))),
-          field('Input B', select('Splitter input B', antOpts('rx'), s.antB, (v) => setSplitterInput(store, s.id, 'B', v))),
-          btn('Remove splitter', () => removeRackItem(store, 'splitters', s.id), 'Receivers on it connect straight to its antennas'));
+          field('Fed from', select('Splitter feed', [['', 'Antennas'], ...rack.splitters.filter((x) => x.id !== s.id && canFeedSplitter(rack, s.id, x.id)).map((x) => [x.id, `${x.name} (output)`])], s.fromSplitter || '', (v) => setSplitterFeed(store, s.id, v || null))));
+        if (s.fromSplitter) b.append(el('p', 'hint', `Cascaded: takes its signal from an output of another splitter, up to ${RACK_LIMITS.maxSplitterDepth} stages. Each stage adds its own split loss (and gain if active); antennas come from the first stage.`));
+        else b.append(field('Input A', select('Splitter input A', antOpts('rx'), s.antA, (v) => setSplitterInput(store, s.id, 'A', v))),
+          field('Input B', select('Splitter input B', antOpts('rx'), s.antB, (v) => setSplitterInput(store, s.id, 'B', v))));
+        b.append(btn('Remove splitter', () => removeRackItem(store, 'splitters', s.id), 'Receivers on it connect straight to its antennas'));
       },
       receiver: (it, b) => {
         const m = find.receiver(it.id); if (!m) return;
         props(it.id, b, [2, 3, 4]); gear(it.id, b, 'rx');
-        const lk = scene.links.find((q) => q.id === it.id), on = lk.rx.antennaBiasV > 0, bias = el('input'); bias.type = 'checkbox'; bias.checked = on; bias.setAttribute('aria-label', 'Antenna bias for ' + lk.name);
+        const lk = scene.links.find((q) => q.id === it.id), src0 = lk.txOf !== undefined && scene.links.find((q) => q.id === lk.txOf);
+        if (src0) b.append(el('p', 'hint', `Listens to ${src0.name}: it hears that mic's transmitter and follows its frequency.`));
+        const on = lk.rx.antennaBiasV > 0, bias = el('input'); bias.type = 'checkbox'; bias.checked = on; bias.setAttribute('aria-label', 'Antenna bias for ' + lk.name);
         bias.addEventListener('change', () => setRxBias(store, it.id, { on: bias.checked }));
         const bl = el('label', 'inv-field'); bl.append(bias, el('span', '', ' Supply antenna bias from this receiver (powers a booster or active antenna up the cable)')); b.append(bl);
         if (on) b.append(field('Bias voltage (V)', num('Bias voltage', lk.rx.antennaBiasV, (v) => setRxBias(store, it.id, { volts: v }), 1, 48)), field('Bias current limit (mA, 0 = not stated)', num('Bias current', lk.rx.antennaBiasMa || 0, (v) => setRxBias(store, it.id, { ma: v }), 0, 1000)));
@@ -161,7 +179,12 @@ export function mountRack({ container, store }) {
         b.append(field('Receiver', select('Receiver for ' + linkName(it.id), recvOpts, m.r.id, (v) => moveChannel(store, it.id, v))),
           field('Receiver name', text('Receiver name', m.r.name, (v) => renameRackItem(store, 'receivers', m.r.id, v))),
           field('Fed from', select('Feed for ' + linkName(it.id), [['', 'Antennas directly'], ...rack.splitters.map((s) => [s.id, s.name])], m.c.splitterId, (v) => connectChannel(store, it.id, v ? { splitterId: v } : { antA: m.c.antA || (rack.antennas.find((a) => a.role !== 'tx') || {}).id, antB: m.c.antB }))));
-        if (!m.c.splitterId) b.append(field('Antenna A', select('Antenna A for ' + linkName(it.id), antOpts('rx'), m.c.antA, (v) => connectChannel(store, it.id, { antA: v, antB: m.c.antB }))), field('Antenna B', select('Antenna B for ' + linkName(it.id), antOpts('rx'), m.c.antB, (v) => connectChannel(store, it.id, { antA: m.c.antA, antB: v }))));
+        const loopOpts = [['', 'No (own antenna feed)'], ...rack.receivers.filter((x) => x.id !== m.r.id && (canLoopReceiver(rack, m.r.id, x.id) || x.id === m.r.loopFrom)).map((x) => [x.id, `${x.name} loop-through`])];
+        b.append(field('Antenna loop-through from', select('Loop-through for ' + linkName(it.id), loopOpts, m.r.loopFrom || '', (v) => setReceiverLoop(store, m.r.id, v || null))));
+        if (m.r.loopFrom) {
+          b.append(field(`Loss of this hop (dB, ${Number.isFinite(m.r.loopLossDb) ? 'set by you' : 'assumed ' + DEFAULT_LOOP_LOSS_DB})`, num('Loop-through loss', loopLossOf(m.r), (v) => setReceiverLoopLoss(store, m.r.id, v), 0, 20)),
+            el('p', 'hint', `This receiver takes the antenna signal passed on by ${(rack.receivers.find((x) => x.id === m.r.loopFrom) || {}).name || 'another receiver'}, with one small insertion loss per hop (about 1 to 3 dB, an assumption: check the receiver's data sheet). At most ${RACK_LIMITS.maxLoopHops} hops. Its feed follows that receiver's first channel.`));
+        } else if (!m.c.splitterId) b.append(field('Antenna A', select('Antenna A for ' + linkName(it.id), antOpts('rx'), m.c.antA, (v) => connectChannel(store, it.id, { antA: v, antB: m.c.antB }))), field('Antenna B', select('Antenna B for ' + linkName(it.id), antOpts('rx'), m.c.antB, (v) => connectChannel(store, it.id, { antA: m.c.antA, antB: v }))));
         else b.append(el('p', 'hint', 'It takes antenna A and B from the splitter. A splitter costs each output its share of the signal.'));
       },
       transmitter: (it, b) => {
@@ -173,6 +196,8 @@ export function mountRack({ container, store }) {
           field('Through', select('Combiner for ' + linkName(it.id), [['', 'Straight to an antenna'], ...rack.combiners.map((c) => [c.id, c.name])], m.c.combinerId, (v) => connectTxChannel(store, it.id, v ? { combinerId: v } : { antennaId: m.c.antennaId }))));
         if (!m.c.combinerId) b.append(field('Antenna', select('Transmit antenna for ' + linkName(it.id), antOpts('tx'), m.c.antennaId, (v) => connectTxChannel(store, it.id, { antennaId: v }))));
         else b.append(el('p', 'hint', 'The combiner sets the antenna and any cable run; each channel pays the combining loss.'));
+        b.append(field('Isolator', select('Isolator for ' + linkName(it.id), [['', 'None'], ['20', 'Isolator, 20 dB'], ['25', 'Isolator, 25 dB'], ['30', 'Circulator, 30 dB']], m.c.isolator ? String(m.c.isolatorDb || 25) : '', (v) => setTxIsolator(store, it.id, !!v, v ? Number(v) : undefined))));
+        if (m.c.isolator) b.append(el('p', 'hint', 'Fitted at the transmitter output: 0.5 dB loss, and reflected power returning to the output stage is cut by the isolation. The combiner-to-combiner IMD isolation setting is separate and is not changed by this.'));
       },
       combiner: (it, b) => {
         const c = rack.combiners.find((x) => x.id === it.id);
@@ -182,7 +207,18 @@ export function mountRack({ container, store }) {
           field('Transmit antenna', select('Antenna for ' + c.name, antOpts('tx'), c.antennaId, (v) => setCombiner(store, c.id, { antennaId: v }))),
           field('Cable to antenna (m)', num('Cable length for ' + c.name, c.cable ? c.cable.lengthM : 0, (v) => setCombiner(store, c.id, { cableM: v }), 0, 500)),
           field('Cable type', select('Cable type for ' + c.name, Object.entries(CABLES).map(([k, v]) => [k, v.name]), c.cable ? c.cable.type : 'rg58', (v) => setCombiner(store, c.id, { cableType: v }))),
+          field('Splitter to several antennas', select('Output splitter for ' + c.name, [['', 'None'], ['passive', 'Passive'], ['active', 'Active']], c.fanout ? c.fanout.type : '', (v) => setCombinerFanout(store, c.id, v ? { on: true, type: v } : { on: false }))),
           btn('Remove combiner', () => removeCombiner(store, c.id), 'Its channels go straight to the antenna'));
+        if (c.fanout) {
+          const outs = c.fanout.outputs;
+          [...outs, null].forEach((o, i) => {
+            if (!o && outs.length >= 16) return;
+            b.append(field(`Output ${i + 1} antenna`, select(`Splitter output ${i + 1} antenna for ${c.name}`, antOpts('tx'), o ? o.antennaId : '', (v) => setFanoutOutput(store, c.id, i, { antennaId: v }))));
+            if (o) b.append(field(`Output ${i + 1} cable (m)`, num(`Splitter output ${i + 1} cable length for ${c.name}`, o.cable ? o.cable.lengthM : 0, (v) => setFanoutOutput(store, c.id, i, { cableM: v }), 0, 500)),
+              btn(`Remove output ${i + 1}`, () => setFanoutOutput(store, c.id, i, null)));
+          });
+          b.append(el('p', 'hint', 'Every antenna gets the splitter loss plus its own cable. The link is solved on the first output that has an antenna; the Transmit antenna and Cable fields above are not used.'));
+        }
       },
       txantenna: (it, b) => {
         editors.antenna(it, b);

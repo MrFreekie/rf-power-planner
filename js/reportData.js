@@ -44,6 +44,7 @@ export function buildReportData(scene, linkId, results = {}) {
   // scenario summary
   const S = out.scenario;
   S.push({ label: 'Link', value: `${link.name} (${link.kind === 'iem' ? 'in-ear monitor' : 'wireless microphone'})` });
+  if (link.txOf !== undefined) { const src = (scene.links || []).find((q) => q.id === link.txOf); if (src) S.push({ label: 'Extra receiver for', value: `${src.name} (same transmitter and frequency)` }); }
   S.push({ label: 'Frequency', value: `${link.freqMHz} MHz` });
   S.push({ label: 'Transmitter', value: `${link.tx.name}, ${pw(link.tx.powerDbm)}, antenna ${link.tx.antenna.type}` });
   S.push({ label: 'Receiver', value: `${link.rx.name}, sensitivity ${pw(link.rx.sensitivityDbm)}, antenna ${link.rx.antenna.type}` });

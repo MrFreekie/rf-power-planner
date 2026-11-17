@@ -900,7 +900,7 @@ function assign(store, personId, linkId, which, { swap = false } = {}) {
     const idKey = which === 'iem' ? 'iemLinkId' : 'micLinkId', offKey = which === 'iem' ? 'iemOffset' : 'micOffset';
     if (linkId === null || linkId === undefined) { delete p[idKey]; delete p[offKey]; ok = true; return; }
     const link = findLink(d, linkId);
-    if (!link || link.kind !== (which === 'iem' ? 'iem' : 'mic')) return;
+    if (!link || link.kind !== (which === 'iem' ? 'iem' : 'mic') || link.txOf !== undefined) return;
     if (which === 'mic') { // a link that is someone's backup pack: this person's own backup is promoted, another person's needs a swap (the backup goes to the old main owner's list)
       const xo = list.find((x) => Array.isArray(x.extraLinkIds) && x.extraLinkIds.includes(linkId));
       if (xo && xo.id !== personId && !swap) return;
@@ -948,7 +948,7 @@ export function assignExtraMic(store, personId, linkId, { swap = false } = {}) {
   let ok = false;
   store.update((d) => {
     const list = peopleOf(d), p = list.find((x) => x.id === personId), link = findLink(d, linkId);
-    if (!p || !link || link.kind !== 'mic' || p.micLinkId === linkId) return;
+    if (!p || !link || link.kind !== 'mic' || link.txOf !== undefined || p.micLinkId === linkId) return;
     if ((p.extraLinkIds || []).includes(linkId)) return;
     if ((p.extraLinkIds || []).length >= PEOPLE_LIMITS.maxExtra) return;
     const other = list.find((x) => x.id !== personId && (x.micLinkId === linkId || (x.extraLinkIds || []).includes(linkId)));

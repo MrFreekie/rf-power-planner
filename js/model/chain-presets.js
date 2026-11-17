@@ -114,6 +114,31 @@ export const CHAIN_PRESETS = Object.freeze({
     flags: { gainDb: 'U', nfDb: 'U', sfdrDbHz23: 'U', fibreKm: 'S', fibreLossDbPerKm: 'I', connectorLossDb: 'U', bwMinMHz: 'U', bwMaxMHz: 'U', powerV: 'U', powerMa: 'U' },
     note: 'Module with an LNA ahead of the laser: gain about 0 to +20 dB, noise figure 5 to 15 dB, a lower SFDR. Placeholder numbers, UNVERIFIED.',
   },
+  // Protection and out-of-band filters. All figures generic classes, loss and rejection UNVERIFIED (datasheet before relying).
+  'surge-arrestor-dcpass': {
+    label: 'Surge / lightning arrestor, gas-tube, DC pass (antenna feed)', kind: 'connector',
+    item: { lossDb: 0.15, dcMode: 'pass' },
+    flags: { lossDb: 'U', dcMode: 'U' },
+    note: 'Gas discharge tube in a bulkhead body, about 0.1 to 0.2 dB insertion loss through UHF. Needs a ground bond to the entry panel to work. The DC-pass type lets antenna bias through; some types do not, so DC behaviour is unverified.',
+  },
+  'surge-arrestor-dcblock': {
+    label: 'Surge / lightning arrestor, gas-tube, DC block (antenna feed)', kind: 'dcblock',
+    item: { lossDb: 0.2, dcMode: 'block' },
+    flags: { lossDb: 'U', dcMode: 'U' },
+    note: 'Quarter-wave or capacitive-coupled arrestor: blocks DC, so it cannot pass antenna bias. About 0.1 to 0.3 dB, narrower band than the gas-tube DC-pass type. Ground bond required.',
+  },
+  'filter-highpass': {
+    label: 'High-pass filter (blocks VHF / FM / TV below the band)', kind: 'filter',
+    item: { filterType: 'bandpass', passLoMHz: 450, passHiMHz: 6000, lossDb: 0.5, rejectionDb: 40, dcMode: 'pass' },
+    flags: { passLoMHz: 'U', passHiMHz: 'U', lossDb: 'U', rejectionDb: 'U', dcMode: 'U' },
+    note: 'Generic high-pass, modelled as a pass band from 450 MHz up with 40 dB rejection below it; set the corner for your filter. Most high-pass types pass DC, check yours.',
+  },
+  'filter-lte-block': {
+    label: 'LTE / cellular filter (rejects 700-860 MHz)', kind: 'filter',
+    item: { filterType: 'notch', passLoMHz: 703, passHiMHz: 862, lossDb: 0.5, rejectionDb: 40, dcMode: 'pass' },
+    flags: { passLoMHz: 'U', passHiMHz: 'U', lossDb: 'U', rejectionDb: 'U', dcMode: 'U' },
+    note: 'Rejects the European 700 and 800 MHz LTE blocks (703-862 MHz, assumed edges): it also removes any mic or IEM channel inside that range, so use it only below 703 MHz. US 600 / 700 MHz blocks differ: set the edges yourself.',
+  },
   'booster-12': {
     label: 'Antenna booster 12 dB (rack or antenna)', kind: 'booster',
     item: { gainDb: 12, nfDb: 3, iip3Dbm: 8, dcMode: 'pass', dcNeedV: 12, dcNeedMa: 130 },

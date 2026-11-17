@@ -1,6 +1,6 @@
 // Receive rack edits (antennas, splitters, receivers and their connections). Each runs as one undo step through store.update.
 // The first edit adopts the links as they are into scene.rack (deriveRack); from then on the rack drives each mic link's receive path.
-import { deriveRack, RACK_LIMITS } from './model/rack.js';
+import { deriveRack, RACK_LIMITS, canFeedSplitter, canLoopReceiver, loopHops } from './model/rack.js';
 import { ANTENNAS, allowedPolarisations, defaultPolarisation } from './model/library.js';
 import { newId, createChainItem, createChainItemFromPreset } from './model/scene.js';
 
@@ -66,6 +66,7 @@ export function connectChannel(store, linkId, { splitterId = null, antA = null, 
   return store.update((d) => {
     const rack = adopt(d), m = chan(rack, linkId); if (!m) return;
     if (splitterId && !rack.splitters.some((s) => s.id === splitterId)) return;
+    if (loopHops(rack, m.r).hops.length) return; // a looped receiver takes its feed from the receiver it loops through
     const ok = (id) => !id || rack.antennas.some((a) => a.id === id);
     if (!ok(antA) || !ok(antB)) return;
     m.c.splitterId = splitterId || null;
@@ -91,14 +92,16 @@ export function removeRackItem(store, kind, id) {
     const rack = adopt(d);
     if (kind === 'splitters') {
       const s = rack.splitters.find((x) => x.id === id); if (!s) return;
-      for (const r of rack.receivers) for (const c of r.channels) if (c.splitterId === id) { c.splitterId = null; c.antA = s.antA; c.antB = s.antB; }
+      const up = s.fromSplitter || null; // cascaded: its outputs move up one stage; as a root they fall back to its antennas
+      for (const r of rack.receivers) for (const c of r.channels) if (c.splitterId === id) { if (up) c.splitterId = up; else { c.splitterId = null; c.antA = s.antA; c.antB = s.antB; } }
+      for (const x of rack.splitters) if (x.fromSplitter === id) { if (up) x.fromSplitter = up; else { delete x.fromSplitter; x.antA = s.antA; x.antB = s.antB; } }
       rack.splitters = rack.splitters.filter((x) => x !== s);
     } else if (kind === 'antennas') {
       if (!rack.antennas.some((a) => a.id === id) || rack.antennas.length < 2) return;
       rack.antennas = rack.antennas.filter((a) => a.id !== id);
       for (const s of rack.splitters) { if (s.antA === id) s.antA = null; if (s.antB === id) s.antB = null; }
       for (const r of rack.receivers) for (const c of r.channels) { if (c.antA === id) c.antA = null; if (c.antB === id) c.antB = null; }
-      for (const cb of rack.combiners) if (cb.antennaId === id) cb.antennaId = null;
+      for (const cb of rack.combiners) { if (cb.antennaId === id) cb.antennaId = null; if (cb.fanout) for (const o of cb.fanout.outputs) if (o.antennaId === id) o.antennaId = null; }
       for (const t of rack.transmitters) for (const c of t.channels) if (c.antennaId === id) c.antennaId = null;
     }
   });
@@ -166,6 +169,40 @@ export function removeCombiner(store, id) {
   });
 }
 
+/** setCombinerFanout(store, id, { on?, type?, ports? }): feed the combiner output into a splitter that drives several transmit antennas (on:false removes it). */
+export function setCombinerFanout(store, id, { on, type, ports } = {}) {
+  return store.update((d) => {
+    const rack = adopt(d), cb = rack.combiners.find((x) => x.id === id); if (!cb) return;
+    if (on === false) { delete cb.fanout; return; }
+    if (!cb.fanout) { if (on !== true) return; cb.fanout = { type: 'passive', outputs: cb.antennaId ? [{ antennaId: cb.antennaId, cable: null }] : [] }; }
+    if (type === 'passive' || type === 'active') cb.fanout.type = type;
+    if (ports !== undefined) { const n = Math.round(Number(ports)); if (n >= 2 && n <= 16) cb.fanout.ports = n; else delete cb.fanout.ports; }
+  });
+}
+
+/** setFanoutOutput(store, combinerId, index, { antennaId?, cableM?, cableType? } | null): set output `index` (one past the end adds it; null removes it). Each output has its own cable run. */
+export function setFanoutOutput(store, combinerId, index, patch) {
+  return store.update((d) => {
+    const rack = adopt(d), cb = rack.combiners.find((x) => x.id === combinerId); if (!cb || !cb.fanout) return;
+    const outs = cb.fanout.outputs;
+    if (patch === null) { if (outs[index]) outs.splice(index, 1); return; }
+    if (index < 0 || index > outs.length || index >= 16) return;
+    if (patch.antennaId && !rack.antennas.some((a) => a.id === patch.antennaId)) return;
+    const o = outs[index] || (outs[index] = { antennaId: null, cable: null });
+    if (patch.antennaId !== undefined) o.antennaId = patch.antennaId || null;
+    if (patch.cableM !== undefined) { const m = Math.max(0, Math.min(500, Number(patch.cableM) || 0)); o.cable = m > 0 ? { type: patch.cableType || (o.cable && o.cable.type) || 'rg58', lengthM: m } : null; }
+    else if (patch.cableType && o.cable) o.cable.type = patch.cableType;
+  });
+}
+
+/** setTxIsolator(store, linkId, on, isolationDb?): an isolator or circulator on an IEM channel, ahead of any combiner (0.5 dB loss, reverse isolation 10..60 dB, default 25). */
+export function setTxIsolator(store, linkId, on, isolationDb) {
+  return store.update((d) => {
+    const m = txChan(adopt(d), linkId); if (!m) return;
+    if (on) { m.c.isolator = true; const n = Number(isolationDb); if (isolationDb !== undefined && Number.isFinite(n)) m.c.isolatorDb = Math.min(60, Math.max(10, n)); } else { delete m.c.isolator; delete m.c.isolatorDb; }
+  });
+}
+
 /** setSplitterPorts(store, id, ports | null): the physical outputs of a splitter (null = as many as are used). Unused ones are reported as needing a 50 ohm load. */
 export const setSplitterPorts = (store, id, ports) => store.update((d) => { const s = adopt(d).splitters.find((x) => x.id === id); if (!s) return; const n = Math.round(Number(ports)); if (n >= 2 && n <= 16) s.ports = n; else delete s.ports; });
 
@@ -226,3 +263,23 @@ export function setRackAntennaAim(store, id, { az, el, gainDbi } = {}) {
     if (Number.isFinite(gainDbi)) a.antenna.gainDbi = Math.max(-30, Math.min(40, gainDbi));
   });
 }
+
+/** setSplitterFeed(store, id, parentId|null): feed a splitter from another splitter's output (a distribution tree) instead of from antennas. Refused for a cycle or past the stage limit. */
+export const setSplitterFeed = (store, id, parentId) => store.update((d) => {
+  const rack = adopt(d), s = rack.splitters.find((x) => x.id === id); if (!s) return;
+  if (!parentId) { delete s.fromSplitter; return; }
+  if (canFeedSplitter(rack, id, parentId)) s.fromSplitter = parentId;
+});
+
+/** setReceiverLoop(store, receiverId, fromReceiverId|null): this receiver takes its antenna input from the loop-through output of another (one hop each, limited chain, one receiver per output). */
+export const setReceiverLoop = (store, receiverId, fromId) => store.update((d) => {
+  const rack = adopt(d), r = rack.receivers.find((x) => x.id === receiverId); if (!r) return;
+  if (!fromId) { delete r.loopFrom; return; }
+  if (canLoopReceiver(rack, receiverId, fromId)) r.loopFrom = fromId;
+});
+
+/** setReceiverLoopLoss(store, receiverId, dB|null): insertion loss of the hop into this receiver (null = the assumed default). */
+export const setReceiverLoopLoss = (store, receiverId, db) => store.update((d) => {
+  const r = adopt(d).receivers.find((x) => x.id === receiverId); if (!r) return;
+  const v = Number(db); if (db === null || db === '' || !Number.isFinite(v)) delete r.loopLossDb; else r.loopLossDb = Math.min(20, Math.max(0, v));
+});

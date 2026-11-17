@@ -13,6 +13,7 @@ export function inventoryView(scene, selection, results) {
   const parts = [];
   if (totals.mics) parts.push(`${totals.mics} mic${totals.mics === 1 ? '' : 's'}`);
   if (totals.iems) parts.push(`${totals.iems} IEM${totals.iems === 1 ? '' : 's'}`);
+  if (totals.extraReceivers) parts.push(`${totals.extraReceivers} extra receiver${totals.extraReceivers === 1 ? '' : 's'}`);
   const p2p = rows.filter((r) => r.kind === 'p2p').length;
   if (p2p) parts.push(`${p2p} P2P`);
   if (totals.other - p2p > 0) parts.push(`${totals.other - p2p} other`);

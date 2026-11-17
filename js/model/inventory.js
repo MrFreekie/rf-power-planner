@@ -70,6 +70,7 @@ export function inventoryRows(scene, results) {
     let loss = null; try { loss = r1(chainLossDb(l.chain, l.freqMHz)); } catch { loss = null; }
     return {
       id: l.id, name: String(l.name || ''), kind: l.kind, freqMHz: l.freqMHz,
+      extraRx: l.txOf !== undefined, listensTo: (() => { const s = l.txOf !== undefined && links.find((q) => q.id === l.txOf); return s ? String(s.name || s.id) : null; })(), // an extra receiver of another mic's transmitter
       person: person ? person.name : null, personId: person ? person.id : null,
       txItem: txDeviceName(l), txPowerMw: sig3(Math.pow(10, l.tx.powerDbm / 10)), txAntenna: antennaName(l.tx.antenna),
       sharesAntennaWith: (() => { const src = l.rx.sharedAntennaOf && links.find((q) => q.id === l.rx.sharedAntennaOf); return src ? String(src.name || src.id) : null; })(),
@@ -91,7 +92,7 @@ export function inventoryTotals(rows, scene) {
   const links = (scene && scene.links) || [];
   const antennas = [];
   for (const l of links) {
-    if (l.tx.antenna && l.tx.antenna.type !== 'body') antennas.push(antennaName(l.tx.antenna));
+    if (l.txOf === undefined && l.tx.antenna && l.tx.antenna.type !== 'body') antennas.push(antennaName(l.tx.antenna));
     if (l.rx.antenna && l.rx.antenna.type !== 'body' && !l.rx.sharedAntennaOf) antennas.push(antennaName(l.rx.antenna)); // a shared antenna is packed once, with its first link
     const div = l.rx.diversity;
     if (div && div.enabled && div.antennaB) antennas.push(antennaName(div.antennaB.antenna || l.rx.antenna));
@@ -99,8 +100,8 @@ export function inventoryTotals(rows, scene) {
   const cableMap = new Map();
   for (const l of links) for (const c of chainSummary(l).cables) { const cur = cableMap.get(c.name) || { label: c.name, count: 0, lengthM: 0 }; cur.count += c.count; cur.lengthM = r1(cur.lengthM + c.lengthM); cableMap.set(c.name, cur); }
   return {
-    mics: rows.filter((r) => r.kind === 'mic').length, iems: rows.filter((r) => r.kind === 'iem').length, other: rows.filter((r) => r.kind !== 'mic' && r.kind !== 'iem').length,
-    transmitters: tally(rows, (r) => r.txItem), receivers: tally(rows, (r) => r.rxItem), antennas: tally(antennas, (a) => a),
+    mics: rows.filter((r) => r.kind === 'mic' && !r.extraRx).length, extraReceivers: rows.filter((r) => r.extraRx).length, iems: rows.filter((r) => r.kind === 'iem').length, other: rows.filter((r) => r.kind !== 'mic' && r.kind !== 'iem').length,
+    transmitters: tally(rows.filter((r) => !r.extraRx), (r) => r.txItem), receivers: tally(rows, (r) => r.rxItem), antennas: tally(antennas, (a) => a),
     loads: rackLoads(scene), cables: [...cableMap.values()].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)),
   };
 }
@@ -111,6 +112,7 @@ export function linkCard(scene, linkId, results) {
   if (!r) return null;
   const l = scene.links.find((x) => x.id === linkId);
   const lines = [];
+  if (r.listensTo) lines.push(`Extra receiver for ${r.listensTo}: it listens to that microphone's transmitter, so frequency and transmitter follow it.`);
   lines.push(`${cap(kindWord(r.kind))} link at ${r.freqMHz} MHz${r.person ? `, worn or held by ${r.person}` : ', not assigned to a person'}.`);
   lines.push(`Transmitter: ${r.txItem}, ${r.txPowerMw} mW, ${r.txAntenna} antenna, at x ${r1(l.tx.pos.x)} m, y ${r1(l.tx.pos.y)} m, height ${r1(l.tx.pos.z)} m.`);
   lines.push(`Receiver: ${r.rxItem}, ${r.rxAntenna} antenna${r.antennaB ? ` plus ${r.antennaB} on antenna B` : ''}${r.sharesAntennaWith ? ` shared with ${r.sharesAntennaWith} through a splitter` : ''}, at x ${r1(l.rx.pos.x)} m, y ${r1(l.rx.pos.y)} m, height ${r1(l.rx.pos.z)} m.`);

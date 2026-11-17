@@ -138,6 +138,7 @@ export function validatePerson(p, path, errors, scene) {
     const l = links.find((x) => x.id === p[k]);
     if (!l) errors.push(`${path}.${k} does not match an existing link`);
     else if (l.kind !== kind) errors.push(`${path}.${k} must be a ${kind} link`);
+    else if (l.txOf !== undefined) errors.push(`${path}.${k} must not be an extra receiver`);
   }
   if (p.extraLinkIds !== undefined) {
     if (!Array.isArray(p.extraLinkIds)) errors.push(`${path}.extraLinkIds must be an array`);
@@ -147,6 +148,7 @@ export function validatePerson(p, path, errors, scene) {
         const l = typeof id === 'string' ? links.find((x) => x.id === id) : null;
         if (!l) errors.push(`${path}.extraLinkIds[${i}] does not match an existing link`);
         else if (l.kind !== 'mic') errors.push(`${path}.extraLinkIds[${i}] must be a mic link`);
+        else if (l.txOf !== undefined) errors.push(`${path}.extraLinkIds[${i}] must not be an extra receiver`);
         else if (id === p.micLinkId || p.extraLinkIds.indexOf(id) !== i) errors.push(`${path}.extraLinkIds[${i}] repeats a link`);
       });
     }

@@ -207,7 +207,7 @@ export function transmittersFromScene(scene, { source = 'links' } = {}) {
   if (source === 'imd') {
     return ((scene && scene.imd && scene.imd.transmitters) || []).map((t) => ({ id: t.id, name: t.name || t.id, kind: 'mic', freqMHz: t.freqMHz, source: 'imd' }));
   }
-  return ((scene && scene.links) || []).map((l) => ({
+  return ((scene && scene.links) || []).filter((l) => l.txOf === undefined).map((l) => ({ // an extra receiver shares its mic's transmitter and frequency
     id: l.id, name: l.name || l.id, kind: l.kind === 'iem' ? 'iem' : 'mic', freqMHz: l.freqMHz, txId: l.tx && l.tx.id, source: 'link',
   }));
 }

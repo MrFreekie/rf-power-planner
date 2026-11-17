@@ -18,7 +18,7 @@ export function personOfLink(scene, linkId, owners = null) {
 export function extraChoices(scene, person) {
   const owners = linkOwners(scene.people), out = [];
   for (const l of scene.links || []) {
-    if (l.kind !== 'mic' || l.id === person.micLinkId || (person.extraLinkIds || []).includes(l.id)) continue;
+    if (l.kind !== 'mic' || l.txOf !== undefined || l.id === person.micLinkId || (person.extraLinkIds || []).includes(l.id)) continue;
     const o = owners.get(l.id);
     if (!o) out.push({ value: l.id, label: l.name, swap: false });
     else { const other = (scene.people || []).find((p) => p.id === o.personId); out.push({ value: l.id, label: `${l.name} (carried by ${other ? other.name : 'someone'}, swap)`, swap: true }); }
@@ -34,7 +34,7 @@ export function extraChoices(scene, person) {
 export function linkChoices(scene, person, which) {
   const kind = which === 'iem' ? 'iem' : 'mic', owners = linkOwners(scene.people), out = [{ value: '', label: 'None', swap: false }];
   for (const l of scene.links || []) {
-    if (l.kind !== kind) continue;
+    if (l.kind !== kind || l.txOf !== undefined) continue; // an extra receiver is not a transmitter anyone can carry
     const o = owners.get(l.id);
     if (o && o.personId === person.id) { out.push({ value: l.id, label: l.name, swap: false }); continue; }
     if (!o) out.push({ value: l.id, label: l.name, swap: false });

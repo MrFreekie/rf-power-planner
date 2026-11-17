@@ -81,6 +81,18 @@ export const CABLES = {
   // Belden 8214 RG8/foam
   'belden-8214': { name: 'Belden 8214 (RG8 foam)', velocityFactor: 0.78,
     attenDbPer100m: tab([7.5, 10.8, 15.8, 19.8, 25.0, 38.5, 45.5, 57.9, 73.0, 80.6, 82.5]) }, // approx
+  // RG8X (mini RG8, foam PE, e.g. Belden 9258 class): taken as about 0.8 x RG58 at every frequency (ASSUMED class figure,
+  // datasheets show roughly 12 dB/100 m at 100 MHz and 40 at 900 MHz). Check the datasheet of the cable you have.
+  rg8x: { name: 'RG8X (mini RG8)', velocityFactor: 0.78, assumed: true,
+    attenDbPer100m: tab([12.3, 18.1, 26.8, 34.0, 44.4, 70.4, 86.4, 111.4, 144.2, 160.9, 165.0]) }, // approx, assumed
+  // 1/2 inch corrugated-copper hardline / "heliax" class (foam dielectric, 50 ohm): a class estimate of about 8.7 dB/100 m at
+  // 900 MHz and 12.6 at 1.8 GHz, sqrt(f) scaled. ASSUMED figure, +-15 percent: use the maker's table for a real run.
+  'hardline-half': { name: '1/2 inch hardline / heliax class (assumed)', velocityFactor: 0.88, assumed: true,
+    attenDbPer100m: tab([2.9, 4.1, 5.8, 7.1, 8.7, 12.6, 14.6, 17.9, 21.6, 23.3, 23.7]) }, // approx, assumed
+  // RG6 (75 ohm foam coax, TV / satellite class, e.g. Belden 1694A class): about 5 dB/100 m at 100 MHz, 17-18 at 900 MHz.
+  // 75 OHM: in a 50 ohm chain it adds an impedance step at each end (see chain-checks.js). ASSUMED class figures, +-15 percent.
+  rg6: { name: 'RG6 (75 ohm TV coax)', velocityFactor: 0.82, impedanceOhm: 75, assumed: true,
+    attenDbPer100m: tab([5.3, 7.5, 10.8, 13.4, 17.5, 26.5, 31.0, 37.5, 45.0, 48.5, 49.3]) }, // approx, assumed
 };
 
 /**
