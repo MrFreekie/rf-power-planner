@@ -7,7 +7,7 @@
 // deriveRack(scene) describes the current links as a rack (no change to the scene) so the list can show and adopt them.
 // scene.js imports this file, so the chain-item builders come in as `mk` (no import back, the module graph has no cycles).
 
-export const RACK_LIMITS = Object.freeze({ maxAntennas: 32, maxSplitters: 16, maxReceivers: 32, maxChannels: 8, maxTransmitters: 32, maxCombiners: 16, maxSplitterDepth: 3, maxLoopHops: 3 });
+export const RACK_LIMITS = Object.freeze({ maxAntennas: 160, maxSplitters: 32, maxReceivers: 64, maxChannels: 8, maxTransmitters: 64, maxCombiners: 32, maxSplitterDepth: 3, maxLoopHops: 3 });
 export const DEFAULT_LOOP_LOSS_DB = 2; // assumed insertion loss of one receiver RF loop-through hop (typically 1 to 3 dB; not from a datasheet)
 const RACK_COMBINER = Object.freeze({ passive: 'splitter-2', active: 'active-combiner-8' });
 const RACK_SPLITTER = Object.freeze({ passive: 'splitter-2', active: 'active-splitter-4' });
