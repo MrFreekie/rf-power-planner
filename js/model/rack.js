@@ -364,16 +364,18 @@ export function rackLoads(scene) {
 
 /**
  * tuningClashes(scene, bwOf?) -> [{ a, b, same, text }] : pairs of mic or IEM transmitters on the same frequency or closer than their occupied bandwidths allow.
- * bwOf(link) gives the occupied bandwidth in kHz (default 200). Two links of different kinds can still clash, since they share the air.
+ * bwOf(link) gives the occupied bandwidth in kHz (default 200). Pairs closer than (bw1+bw2)/2 overlap; pairs closer than that plus guardKHz (default TUNING_GUARD_KHZ) are flagged with guard: true. Two links of different kinds can still clash, since they share the air.
  */
-export function tuningClashes(scene, bwOf) {
+export const TUNING_GUARD_KHZ = 100; // assumed extra spacing beyond the occupied bandwidths (receiver selectivity, filter skirts)
+export function tuningClashes(scene, bwOf, guardKHz = TUNING_GUARD_KHZ) {
+  const guard = Number.isFinite(guardKHz) && guardKHz >= 0 ? guardKHz : TUNING_GUARD_KHZ;
   const bw = (l) => { const v = bwOf ? bwOf(l) : 200; return Number.isFinite(v) && v > 0 ? v : 200; };
   const ls = ((scene && scene.links) || []).filter((l) => l.kind !== 'p2p' && l.txOf === undefined && Number.isFinite(l.freqMHz)), out = [];
   for (let i = 0; i < ls.length; i++) for (let j = i + 1; j < ls.length; j++) {
-    const a = ls[i], b = ls[j], dk = Math.abs(a.freqMHz - b.freqMHz) * 1000, need = (bw(a) + bw(b)) / 2;
-    if (dk >= need) continue;
-    const same = dk < 0.5, nm = (l) => String(l.name || l.id);
-    out.push({ a: a.id, b: b.id, same, text: same ? `${nm(a)} and ${nm(b)} are on the same frequency (${a.freqMHz} MHz): they will interfere.` : `${nm(a)} and ${nm(b)} are ${Math.round(dk)} kHz apart, inside their ${Math.round(need)} kHz combined bandwidth: they overlap.` });
+    const a = ls[i], b = ls[j], dk = Math.round(Math.abs(a.freqMHz - b.freqMHz) * 1e9) / 1e6, need = (bw(a) + bw(b)) / 2;
+    if (dk >= need + guard) continue;
+    const inGuard = dk >= need, same = !inGuard && dk < 0.5, nm = (l) => String(l.name || l.id);
+    out.push({ a: a.id, b: b.id, same, guard: inGuard, text: inGuard ? `${nm(a)} and ${nm(b)} are ${Math.round(dk)} kHz apart: their bandwidths do not overlap but they are inside the ${guard} kHz guard band (assumed receiver selectivity), so expect desensitisation.` : same ? `${nm(a)} and ${nm(b)} are on the same frequency (${a.freqMHz} MHz): they will interfere.` : `${nm(a)} and ${nm(b)} are ${Math.round(dk)} kHz apart, inside their ${Math.round(need)} kHz combined bandwidth: they overlap.` });
   }
   return out;
 }

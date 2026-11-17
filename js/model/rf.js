@@ -34,7 +34,7 @@ import { CEILING_MATERIALS, overheadPlanes, overheadZoneFraction } from './ceili
 import { antennaMatch, vswrThroughLoss, BAND_VSWR_WARN, BAND_VSWR_STRONG } from './antenna-band.js';
 export { antennaMatch, mismatchLossDb, returnLossSweep, ANTENNA_BANDS, resolveDesignBand } from './antenna-band.js';
 import { ACTIVE_CHAIN_KINDS, couplerThroughLossDb, chainDcWarnings, CHAIN_PRESETS } from './chain-presets.js';
-import { chainImpedanceWarnings } from './chain-checks.js';
+import { chainImpedanceWarnings, chainJunctionLossDb } from './chain-checks.js';
 import { hasFloorFeatures, floorHeightAt, floorSurfaceAt, absolutePos, allReflectors, chordsThrough, floorZoneFraction } from './floor.js';
 import { RX_PRESETS, RX_DEFAULTS, externalNoiseFigureDb, INTERFERENCE_RISE_DB, INTERFERENCE_LEVELS, isInterferenceBand, interferenceBandOf, cascadeIip3Dbm as stagesIip3Dbm } from './rx-params.js';
 
@@ -44,10 +44,15 @@ try { ZP = await import('./zones-params.js'); } catch { ZP = {}; }
 const C = 299792458; // m/s
 const DEG = Math.PI / 180;
 // Pattern floor policy: ANALYTIC patterns (dipole null, cardioid rear) are floored at -30 dB because a real antenna on a real stage
-// scatters energy into nulls; directional types (paddle, helical, log-periodic) use their front-to-back figure (-25, -20, -25 dB,
-// approx). TABLE patterns (library.js antennaPatternDb and custom azDb/elDb) are floored at -40 dB, the deepest value stored in any
+// scatters energy into nulls; directional types (paddle, panel, helical, log-periodic) use their front-to-back figure
+// (FRONT_TO_BACK_DB below). TABLE patterns (library.js antennaPatternDb and custom azDb/elDb) are floored at -40 dB, the deepest value stored in any
 // table. A non-finite bearing is treated as boresight (gain = gainDbi) so one bad input cannot turn a whole sweep into NaN.
 const PATTERN_FLOOR_DB = -30;
+// Front-to-back ratio (dB) of the analytic directional patterns: gain behind the antenna = main gain minus this figure, with no
+// further sidelobe structure. ASSUMED teaching figures for typical wireless-mic class antennas, not datasheet values.
+export const FRONT_TO_BACK_DB = { paddle: 15, logperiodic: 15, helical: 13, panel: 20 };
+// Half-power beamwidths (degrees) of the analytic directional patterns (assumed class figures).
+const DIRECTIONAL_HPBW_DEG = { paddle: 70, panel: 50, helical: 60, logperiodic: 65 };
 
 // ---------------------------------------------------------------- geometry basics
 
@@ -108,11 +113,12 @@ function analyticRelDb(name, f, uu) {
     case 'cardioid':
       return clampDb((1 + f) / 2);
     case 'paddle':
+    case 'panel':
     case 'helical':
     case 'logperiodic': {
-      const hpbw = name === 'paddle' ? 70 : name === 'helical' ? 60 : 65;
+      const hpbw = DIRECTIONAL_HPBW_DEG[name];
       const rel = -3 * Math.pow(psi / (hpbw / 2), 2); // parabolic main lobe, -3 dB at half HPBW
-      return Math.max(rel, name === 'helical' ? -20 : -25);
+      return Math.max(rel, -FRONT_TO_BACK_DB[name]); // rear hemisphere = main gain minus the front-to-back figure
     }
     case 'omni':
     case 'body':
@@ -575,7 +581,7 @@ export function filterStopbandExtraDb(item, freqMHz) {
 
 /** Net chain loss in dB (negative = net gain). */
 export function chainLossDb(chain, freqMHz) {
-  return (chain || []).reduce((s, it) => s + chainItemLossDb(it, freqMHz), 0);
+  return (chain || []).reduce((s, it) => s + chainItemLossDb(it, freqMHz), 0) + chainJunctionLossDb(chain);
 }
 
 function chainLabel(item) {
@@ -941,10 +947,11 @@ export function solveLink(scene, link) {
     if (stop > 0) inputWarn.push(`${chainLabel(it)} passes ${it.passLoMHz}-${it.passHiMHz} MHz but the link is at ${f} MHz: it ${it.filterType === 'notch' ? 'notches' : 'rejects'} this channel by ${stop} dB (assumed). Use a filter for the right band.`);
     step(chainLabel(it), -chainItemLossDb(it, f));
   });
+  const junctionStep = (list) => { const j = chainJunctionLossDb(list); if (j > 1e-9) step('Cable impedance junctions (75/50 ohm, assumed)', -j); };
   const iem = link.kind === 'iem';
   // IEM only: optional link.rx.chain = items between the bodypack antenna and the bodypack (cable, LNA, filter).
   const rxChain = iem && Array.isArray(link.rx.chain) ? link.rx.chain : [];
-  if (iem) chainSteps(); // transmitter -> chain -> Tx antenna
+  if (iem) { chainSteps(); junctionStep(chain); } // transmitter -> chain -> Tx antenna
   const txOutDbm = level;
   step('Tx antenna gain', direct._gt);
   // Antenna band mismatch (opt-in via antenna.designBand): power not delivered to the radiating element is reflected (mismatch loss).
@@ -971,8 +978,8 @@ export function solveLink(scene, link) {
   const fadeDb = isP2p && Number.isFinite(p2pOpt.fadeMarginDb) ? p2pOpt.fadeMarginDb : env.fadeMarginDb;
   if (fadeDb) step('Fade margin', -fadeDb);
   const rxPowerDbm = level;
-  if (iem) chainSteps(rxChain); // bodypack antenna -> optional rx chain -> bodypack
-  else chainSteps(); // Rx antenna -> chain -> receiver
+  if (iem) { chainSteps(rxChain); junctionStep(rxChain); } // bodypack antenna -> optional rx chain -> bodypack
+  else { chainSteps(); junctionStep(chain); } // Rx antenna -> chain -> receiver
   const inputPowerDbm = level;
 
   // Noise-figure cascade (Friis), the same for both link kinds. Mic: Rx antenna -> chain -> receiver. IEM: bodypack antenna ->

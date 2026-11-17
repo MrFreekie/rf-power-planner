@@ -5,7 +5,8 @@ import { CABLES } from './library.js';
 export const SYSTEM_OHM = 50;
 /**
  * Mismatch loss of one 50/75 ohm junction: |gamma| = (75-50)/(75+50) = 0.2, loss = -10 log10(1 - 0.04) = 0.18 dB (VSWR 1.5:1).
- * Two junctions (both ends of the run) cost about 0.2 to 0.5 dB depending on cable length and phase: ASSUMED, not added to the budget.
+ * Two junctions (both ends of the run) cost about 0.2 to 0.5 dB depending on cable length and phase: ASSUMED; the mean value per junction
+ * is added to the link budget (chainJunctionLossDb).
  */
 export const MISMATCH_75_50_DB = 0.18;
 
@@ -21,6 +22,23 @@ export function junctionMismatchDb(a, b) {
   return -10 * Math.log10(1 - g * g);
 }
 
+/**
+ * chainJunctionLossDb(chain) -> total mismatch loss (dB, >= 0) of the impedance steps along a chain: the run starts and ends in the
+ * 50 ohm system, and every change of cable impedance along it is one junction, each costing junctionMismatchDb (0.18 dB for 75/50).
+ * ASSUMED: each junction is treated independently (no standing-wave phase), so the figure is the mean, not a worst case.
+ */
+export function chainJunctionLossDb(chain) {
+  let z = SYSTEM_OHM, total = 0;
+  for (const it of Array.isArray(chain) ? chain : []) {
+    if (!it || it.kind !== 'cable') continue;
+    const zi = cableImpedanceOhm(it.cableType);
+    if (zi !== z) total += junctionMismatchDb(z, zi);
+    z = zi;
+  }
+  if (z !== SYSTEM_OHM) total += junctionMismatchDb(z, SYSTEM_OHM);
+  return total;
+}
+
 /** chainImpedanceWarnings(chain) -> string[]: one line per cable in the chain whose impedance is not 50 ohm. Warns only. */
 export function chainImpedanceWarnings(chain) {
   const out = [];
@@ -29,7 +47,7 @@ export function chainImpedanceWarnings(chain) {
     const z = cableImpedanceOhm(it.cableType);
     if (z === SYSTEM_OHM) continue;
     const name = (CABLES[it.cableType] && CABLES[it.cableType].name) || it.cableType;
-    out.push(`${name} is a ${z} ohm cable in a ${SYSTEM_OHM} ohm chain: each end is a ${z}/${SYSTEM_OHM} ohm step (VSWR about ${(Math.max(z, SYSTEM_OHM) / Math.min(z, SYSTEM_OHM)).toFixed(1)}:1, about ${junctionMismatchDb(z, SYSTEM_OHM).toFixed(2)} dB each). Expect roughly 0.2 to 0.5 dB extra loss (assumed, not in the budget) and reflections: use ${SYSTEM_OHM} ohm cable, or matching pads.`);
+    out.push(`${name} is a ${z} ohm cable in a ${SYSTEM_OHM} ohm chain: each end is a ${z}/${SYSTEM_OHM} ohm step (VSWR about ${(Math.max(z, SYSTEM_OHM) / Math.min(z, SYSTEM_OHM)).toFixed(1)}:1, about ${junctionMismatchDb(z, SYSTEM_OHM).toFixed(2)} dB each). Expect roughly 0.2 to 0.5 dB extra loss (the assumed mean is in the budget) and reflections: use ${SYSTEM_OHM} ohm cable, or matching pads.`);
   }
   return out;
 }

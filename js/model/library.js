@@ -60,9 +60,10 @@ export const CABLES = {
   // smoothed to a continuous sqrt-like slope (earlier values had a 0.27 slope kink at 600-900 MHz).
   'lmr-195': { name: 'LMR-195 (Times Microwave)', velocityFactor: 0.80,
     attenDbPer100m: tab([12.5, 17.2, 23.7, 28.7, 35.1, 53.0, 62.5, 75.5, 90.2, 97.2, 98.8]) },
-  // Times Microwave LMR-240 datasheet (900 MHz: 6.9 dB/100 ft approx)
+  // Times Microwave LMR-240 datasheet (900 MHz: 7.6 dB/100 ft = 24.8 dB/100 m; 1800: 10.9 dB/100 ft). Points
+  // from the published formula A = 0.24208 sqrt(f) + 0.00033 f dB/100 ft (f in MHz).
   'lmr-240': { name: 'LMR-240 (Times Microwave)', velocityFactor: 0.84,
-    attenDbPer100m: tab([8.0, 11.5, 16.5, 20.2, 24.9, 36.1, 42.6, 52.1, 63.6, 69.2, 70.5]) }, // approx
+    attenDbPer100m: tab([8.0, 11.5, 16.3, 20.1, 24.8, 35.6, 41.5, 50.7, 61.6, 66.7, 68.0]) },
   // Times Microwave LMR-400 datasheet (900 MHz: 3.9 dB/100 ft, 2400: 6.6, 5800: about 10.9 dB/100 ft)
   'lmr-400': { name: 'LMR-400 (Times Microwave)', velocityFactor: 0.85,
     attenDbPer100m: tab([4.3, 6.1, 8.7, 10.8, 13.2, 19.2, 22.2, 27.3, 33.1, 35.9, 36.6]) },
@@ -85,14 +86,15 @@ export const CABLES = {
   // datasheets show roughly 12 dB/100 m at 100 MHz and 40 at 900 MHz). Check the datasheet of the cable you have.
   rg8x: { name: 'RG8X (mini RG8)', velocityFactor: 0.78, assumed: true,
     attenDbPer100m: tab([12.3, 18.1, 26.8, 34.0, 44.4, 70.4, 86.4, 111.4, 144.2, 160.9, 165.0]) }, // approx, assumed
-  // 1/2 inch corrugated-copper hardline / "heliax" class (foam dielectric, 50 ohm): a class estimate of about 8.7 dB/100 m at
-  // 900 MHz and 12.6 at 1.8 GHz, sqrt(f) scaled. ASSUMED figure, +-15 percent: use the maker's table for a real run.
-  'hardline-half': { name: '1/2 inch hardline / heliax class (assumed)', velocityFactor: 0.88, assumed: true,
-    attenDbPer100m: tab([2.9, 4.1, 5.8, 7.1, 8.7, 12.6, 14.6, 17.9, 21.6, 23.3, 23.7]) }, // approx, assumed
-  // RG6 (75 ohm foam coax, TV / satellite class, e.g. Belden 1694A class): about 5 dB/100 m at 100 MHz, 17-18 at 900 MHz.
-  // 75 OHM: in a 50 ohm chain it adds an impedance step at each end (see chain-checks.js). ASSUMED class figures, +-15 percent.
-  rg6: { name: 'RG6 (75 ohm TV coax)', velocityFactor: 0.82, impedanceOhm: 75, assumed: true,
-    attenDbPer100m: tab([5.3, 7.5, 10.8, 13.4, 17.5, 26.5, 31.0, 37.5, 45.0, 48.5, 49.3]) }, // approx, assumed
+  // 1/2 inch corrugated-copper foam hardline (CommScope/Andrew HELIAX LDF4-50A): 6.86 dB/100 m at 894 MHz, 10.1 at 1.8 GHz,
+  // 7.3 at 1 GHz (published attenuation table). Points use A = 0.2107 sqrt(f) + 0.000623 f fitted to those; +-5 percent.
+  'hardline-half': { name: '1/2 inch hardline (LDF4-50A class)', velocityFactor: 0.88,
+    attenDbPer100m: tab([2.2, 3.1, 4.5, 5.5, 6.9, 10.1, 11.8, 14.6, 18.0, 19.7, 20.1]) }, // approx
+  // RG6 (75 ohm foam coax), Belden 1694A datasheet (dB/100 ft: 100 MHz 1.95, 540 4.5, 750 5.4, 1000 6.3, 1500 7.8,
+  // 2000 9.2, 2250 9.8), interpolated log-log between the published rows; 3.5-6 GHz from the sqrt(f)+f fit.
+  // 75 OHM: in a 50 ohm chain it adds an impedance step at each end (see chain-checks.js). Other RG6 brands differ by +-10 percent.
+  rg6: { name: 'RG6 (75 ohm TV coax, Belden 1694A)', velocityFactor: 0.82, impedanceOhm: 75,
+    attenDbPer100m: tab([6.4, 9.0, 12.8, 15.7, 19.5, 28.4, 33.3, 40.9, 49.7, 54.0, 55.0]) }, // approx
 };
 
 /**

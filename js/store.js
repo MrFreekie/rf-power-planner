@@ -20,7 +20,7 @@ export function createStore(initial = createDefaultScene()) {
   let lastCoalesce = null;
   const subs = new Set();
 
-  const emit = (type) => { for (const cb of [...subs]) cb(scene, { type }); };
+  const emit = (type, extra) => { for (const cb of [...subs]) cb(scene, extra ? { type, ...extra } : { type }); };
 
   function pushHistory(prev) {
     past.push(prev);
@@ -35,7 +35,7 @@ export function createStore(initial = createDefaultScene()) {
       if (resetHistory) { past = []; future = []; } else pushHistory(scene);
       scene = next;
       lastCoalesce = null;
-      emit('scene');
+      emit('scene', { loaded: true }); // a whole scene was swapped in (file, example, share link), not an edit
     },
 
     update(fn, { coalesce = null } = {}) {

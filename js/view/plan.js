@@ -2,7 +2,7 @@
 // Draws metre grid, stage (hatched floor), reflectors, links (coloured by status), antenna pattern
 // lobes, icons at real size, and scale bar. Drag Tx / Rx / reflector ends / reflector body / lobe tip.
 import { getLinkFocus, setLinkFocus, subscribeLinkFocus, linkIdOfItem } from './linkFocus.js';
-import { createViewport } from './viewport.js';
+import { createViewport, shouldRefit } from './viewport.js';
 import {
   createCanvasHost, activeLink, findItem, selectableIds, solveCached, fmtLen, fmtDb, fmtDbm, statusColor,
   drawGrid, drawScaleBar, haloText, setFont, readTheme, inkAlpha, strokeHatchRect, clamp, round2, DEG,
@@ -160,7 +160,9 @@ export function createPlanView(canvas, store) {
 
 
     // links: lines first, then lobes and icons on top
-    for (const link of scene.links) drawLinkLine(ctx, th, scene, link, link === link0, w);
+    // labels are placed in priority order (selected, then fail, marginal, pass), so busy plans keep the labels that matter
+    { const rank = (l) => { if (l === link0) return 0; const s = (solveCached(scene, l) || {}).status; return s === 'fail' ? 1 : s === 'marginal' ? 2 : 3; };
+      for (const link of scene.links.map((l, i) => [rank(l), i, l]).sort((p, q) => p[0] - q[0] || p[1] - q[1]).map((e) => e[2])) drawLinkLine(ctx, th, scene, link, link === link0, w); }
     for (const link of scene.links) drawLinkEnds(ctx, th, scene, link, sel, w);
     const placedLabels = [...linkLabelRects];
     for (const lk of scene.links) for (const role of ['tx', 'rx']) { if (role === 'rx' && lk.rx.sharedAntennaOf !== undefined) continue; const q = vp.worldToScreen(lk[role].pos); placedLabels.push({ x: q.x - 45, y: q.y + 8, w: 90, h: 30 }, { x: q.x - 16, y: q.y - 16, w: 32, h: 32 }); }
@@ -267,7 +269,9 @@ export function createPlanView(canvas, store) {
     if (isActive && res) txt += w < 520 ? `  ${fmtDb(res.marginDb)}` : `  ·  ${fmtDbm(res.inputPowerDbm ?? res.rxPowerDbm)}  ·  ${fmtDb(res.marginDb)} margin`;
     const mx = (t.x + r.x) / 2, my = (t.y + r.y) / 2;
     setFont(ctx, th, 12, isActive || focused ? '600' : '');
-    const ly = placer.place(ctx.measureText(txt).width, mx, my - 8);
+    const important = isActive || focused || (res && res.status !== 'pass'); // selected, hovered and FAIL/MARGINAL links always keep their label
+    const ly = placer.place(ctx.measureText(txt).width, mx, my - 8, 15, important ? null : { skip: true });
+    if (ly === null) return; // a quiet link whose label would sit on another one: its line and ends still draw
     const ltw = ctx.measureText(txt).width;
     linkLabelRects.push({ x: mx - ltw / 2 - 2, y: ly - 13, w: ltw + 4, h: 17 }); // reserved so crew and noise labels keep clear of the link status text
     haloText(ctx, th, txt, mx, ly, { align: 'center', color: th.ink, weight: isActive || focused ? '600' : '' });
@@ -588,10 +592,11 @@ export function createPlanView(canvas, store) {
   let stageSig = (() => { const st = store.getScene().stage; return st.width + 'x' + st.depth; })();
   const hasP2p = () => store.getScene().links.some((l) => l.kind === 'p2p');
   let p2pSig = hasP2p();
-  const unsub = store.subscribe(() => {
-    if (hasP2p() !== p2pSig) { p2pSig = hasP2p(); fit(); return; } // switching to or from a kilometre-scale link refits the view
-    const st = store.getScene().stage, sg = st.width + 'x' + st.depth;
-    if (sg !== stageSig) { stageSig = sg; if (!userView) { fit(); return; } }
+  const unsub = store.subscribe((_s, info) => {
+    const p2pNow = hasP2p(), st = store.getScene().stage, sg = st.width + 'x' + st.depth;
+    const d = { loaded: !!(info && info.loaded), userView, stageChanged: sg !== stageSig, p2pChanged: p2pNow !== p2pSig };
+    p2pSig = p2pNow; stageSig = sg;
+    if (shouldRefit(d)) { fit(); return; } // a loaded scene or example opens fitted; a stage or kilometre-scale change refits unless the user has framed the view
     host.invalidate();
   });
 

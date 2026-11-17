@@ -1,6 +1,8 @@
 // Plan-view overlays for multi-antenna zones: coverage heat map (offscreen, re-blitted), zone polygons,
 // branch antenna icons with cable tags, legend and label collision avoidance.
 import { haloText, setFont, strokeHatchRect } from './util.js';
+import { placeLabel } from './viewport.js';
+const PLACE_NUDGES = [0, -16, 16, -32, 32, -48, 48].map((dy) => [0, dy]);
 import { platformCorners, rotationHandleWorld } from './platformGeom.js';
 import { classify, parseColor, covView } from './coverageUi.js';
 import { chainLossDb } from '../model/rf.js';
@@ -247,7 +249,8 @@ export function drawRxCableTags(ctx, th, vp, link, placer, lengthUnit = 'm', can
     setFont(ctx, th, 11, '600');
     const w = ctx.measureText(text).width;
     const tx = Math.max(4, Math.min(p.x + 18, canvasW - w - 6)); // keep the tag inside the canvas
-    const y = placer.place(w, tx + w / 2, p.y + (a.k === 'A' ? 30 : 46), 14);
+    const y = placer.place(w, tx + w / 2, p.y + (a.k === 'A' ? 30 : 46), 14, { skip: true });
+    if (y === null) continue; // no free spot: the cable summary stays in the inspector rather than piling on other labels
     ctx.save();
     ctx.strokeStyle = th.inkSoft; ctx.lineWidth = 1; ctx.setLineDash(a.k === 'A' ? [] : [3, 3]);
     ctx.beginPath(); ctx.moveTo(p.x + 6, p.y + 8); ctx.lineTo(Math.min(p.x + 16, tx), y - 4); ctx.stroke();
@@ -323,18 +326,15 @@ export function drawElevationLegend(ctx, th, w, scene, lengthUnit = 'm') {
 /** Label collision avoidance: reserve rectangles, then find a free vertical offset for a new label. */
 export function createLabelPlacer() {
   const rects = [];
-  const hit = (r) => rects.some((q) => r.x < q.x + q.w && r.x + r.w > q.x && r.y < q.y + q.h && r.y + r.h > q.y);
   return {
     reset() { rects.length = 0; },
     reserve(r) { rects.push(r); },
-    /** Return a y (baseline) near `y` that does not overlap reserved rects; reserves it. Text is centred on x. */
-    place(width, x, y, h = 15) {
-      const offsets = [0, -16, 16, -32, 32, -48, 48];
-      for (const o of offsets) {
-        const r = { x: x - width / 2 - 2, y: y + o - h + 3, w: width + 4, h };
-        if (!hit(r)) { rects.push(r); return y + o; }
-      }
-      return y;
+    /** Return a y (baseline) near `y` that does not overlap reserved rects; reserves it. Text is centred on x.
+     *  When every spot is taken the label stays at `y`, or with opts.skip the call returns null so the caller can leave it out. */
+    place(width, x, y, h = 15, opts = null) {
+      const hit = placeLabel(rects, { x: x - width / 2 - 2, y: y - h + 3, w: width + 4, h }, PLACE_NUDGES);
+      if (hit) return hit.y + h - 3;
+      return opts && opts.skip ? null : y;
     },
   };
 }

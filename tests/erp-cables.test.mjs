@@ -55,7 +55,7 @@ test('new cables: present, loss rises with frequency, ordered by size, extras fl
     const t = CABLES[id].attenDbPer100m; assert.equal(t.length, 11);
     for (let i = 1; i < t.length; i++) assert.ok(t[i][1] > t[i - 1][1], `${id} rises`);
   }
-  for (const id of ['rg8x', 'hardline-half', 'rg6']) assert.equal(CABLES[id].assumed, true);
+  assert.equal(CABLES.rg8x.assumed, true);
   assert.ok(cableDbPer100m('hardline-half', 900) < cableDbPer100m('lmr-400', 900));
   assert.ok(cableDbPer100m('rg8x', 900) < cableDbPer100m('rg58', 900));
   assert.ok(cableDbPer100m('rg8x', 900) > cableDbPer100m('lmr-400', 900));
@@ -81,4 +81,16 @@ test('presets: arrestors and filters flagged, DC behaviour U, small loss, filter
   near(rf.chainItemLossDb(hp, 600), 0.5, 1e-9); near(rf.chainItemLossDb(hp, 100), 40.5, 1e-9);
   const lte = createChainItemFromPreset('filter-lte-block');
   near(rf.chainItemLossDb(lte, 600), 0.5, 1e-9); near(rf.chainItemLossDb(lte, 780), 40.5, 1e-9);
+});
+
+test('cable loss matches published datasheet figures within 5 percent', () => {
+  const ft = 100 / 30.48; // dB per 100 ft to dB per 100 m
+  const near = (got, want) => assert.ok(Math.abs(got / want - 1) < 0.05, `${got} vs ${want}`);
+  near(cableDbPer100m('lmr-240', 900), 7.6 * ft);
+  near(cableDbPer100m('lmr-240', 1800), 10.9 * ft);
+  near(cableDbPer100m('hardline-half', 894), 6.855);
+  near(cableDbPer100m('hardline-half', 1800), 10.06);
+  near(cableDbPer100m('rg6', 100), 1.95 * ft);
+  near(cableDbPer100m('rg6', 1000), 6.3 * ft);
+  near(cableDbPer100m('rg6', 2250), 9.8 * ft);
 });

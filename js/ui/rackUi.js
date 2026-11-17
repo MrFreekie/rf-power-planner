@@ -102,7 +102,10 @@ export function mountRack({ container, store }) {
       d.append(sum); const b = el('div', 'rack-edit'); for (const w of ws) b.append(el('p', w.level === 'warn' ? 'rack-warn-text' : 'hint', w.text)); fill(b);
       if (lk && DOCK_FOR[kind] && d.open) { // the selected link's Link, Transmitter, Receiver and cable sections live here
         const dock = getLinkDock(), act = activeLink(scene, store.getSelection());
-        if (dock && act && act.id === lid) { const host = el('div', 'rack-docked'); for (const n of DOCK_FOR[kind]) if (dock[n]) host.append(dock[n]); for (const id of LIVE_FOR[kind] || []) { const n = document.getElementById(id); if (n) host.append(n); } b.append(host); }
+        if (dock && act && act.id === lid) { const host = el('div', 'rack-docked'); const micRx = kind === 'receiver' && lk.kind === 'mic'; // a mic receiver's cable run is edited on its antenna item
+          for (const n of DOCK_FOR[kind]) { if (micRx && (n === 'chain' || n === 'chainB')) continue; if (dock[n]) host.append(dock[n]); }
+          if (micRx) host.append(el('p', 'hint', 'Cable, booster and filter between the antenna and this receiver are edited in the antenna item ("Cable run from this antenna").'));
+          for (const id of LIVE_FOR[kind] || []) { const n = document.getElementById(id); if (n) host.append(n); } b.append(host); }
       }
       d.append(b); return d;
     };

@@ -70,7 +70,7 @@ export const LATE_EXAMPLES = [
   {
     id: 'noise-dect-intercom',
     title: 'Noise: a DECT crew intercom beside a 1.9 GHz mic',
-    note: 'Problem: a DECT-type crew intercom beltpack 4.0 m from the receive antenna of a 1893 MHz mic puts -29.0 dBm at the antenna and -75.6 dBm in the 200 kHz channel at the peak (one 0.417 ms slot in every 10 ms frame, duty 4.2 percent), -89.4 dBm on average. The floor rises 21.7 dB and the margin falls to 17.8 dB, with 20.2 dB between the wanted signal and each burst; the 100 Hz buzz an audio path can demodulate is not modelled. Keep intercoms off the mic band and away from the antennas (figures assumed). The RF spectrum shows a 100 Hz flicker of the floor up to the burst level, in time with the plan rings; the slot is only 4.2 percent of the frame and the margin quoted is the average.',
+    note: 'Problem: a DECT-type crew intercom beltpack 4.0 m from the receive antenna of a 1893 MHz mic puts -29.0 dBm at the antenna and -75.6 dBm in the 200 kHz channel at the peak (one 0.417 ms slot in every 10 ms frame, duty 4.2 percent), -89.4 dBm on average. The floor rises 21.8 dB and the margin falls to 17.8 dB, with 20.2 dB between the wanted signal and each burst; the 100 Hz buzz an audio path can demodulate is not modelled. Keep intercoms off the mic band and away from the antennas (figures assumed). The RF spectrum shows a 100 Hz flicker of the floor up to the burst level, in time with the plan rings; the slot is only 4.2 percent of the frame and the margin quoted is the average.',
     build: () => ({ scene: noiseSourceScene('dect-intercom') }),
   },
   {
@@ -106,7 +106,7 @@ export const LATE_EXAMPLES = [
   {
     id: 'tv-per-channel-levels',
     title: 'TV block levels set per channel from measurements',
-    note: 'Best practice: three TV channels carry levels set by you instead of the assumed -75 dBm: channel 30 empty at -108 dBm, channel 33 weak at -85 dBm and channel 34 strong at -52 dBm (stand-ins for analyser readings at the antenna). Over the -112.0 dBm floor of this receiver a 200 kHz mic channel in each block sees a rise of 0.3, 11.5 and 44.2 dB, where the assumed level would have said about 21 dB on all three, flagging the empty channel and understating the strong one. Mic 1 on channel 33 keeps 54.9 dB of margin and mic 2 on channel 30 keeps 55.2 dB: the levels drive only the noise-rise strip of the spectrum map, never the link budget, so use the TV level controls under the map to set or clear one. This source does not pulse: the floor is a steady line in the RF spectrum.',
+    note: 'Best practice: three TV channels carry levels set by you instead of the assumed -75 dBm: channel 30 empty at -108 dBm, channel 33 weak at -85 dBm and channel 34 strong at -52 dBm (stand-ins for analyser readings at the antenna). Over the -112.0 dBm floor of this receiver a 200 kHz mic channel in each block sees a rise of 0.3, 11.5 and 44.2 dB, where the assumed level would have said about 21 dB on all three, flagging the empty channel and understating the strong one. Mic 1 on channel 33 keeps 54.9 dB of margin and mic 2 on channel 30 keeps 55.3 dB: the levels drive only the noise-rise strip of the spectrum map, never the link budget, so use the TV level controls under the map to set or clear one. This source does not pulse: the floor is a steady line in the RF spectrum.',
     build: () => ({ scene: tvLevelsScene(true) }),
   },
   {
@@ -124,7 +124,7 @@ export const LATE_EXAMPLES = [
   {
     id: 'band-four-piece-swap-person',
     title: 'Four-piece band: a spare pack assigned to a person',
-    note: 'Best practice: the bodypack on 608.9 MHz is lying in a case at stage right, 8.5 m from the drummer, and is still called Spare bodypack with 31.8 dB of margin. Assign it to Dev in the people panel as his mic: the pack jumps to his belt (0.15 m to his right, 0.05 m behind, height kept at 1.0 m), is renamed Dev mic and shows 45.4 dB of margin, because it is now 2.4 m from the receive antenna instead of 10.2 m. The other seven links do not change. Assign every pack before checking the plan, so each figure is for where the pack is worn and not where it was left (positions illustrative).',
+    note: 'Best practice: the bodypack on 608.9 MHz is lying in a case at stage right, 8.5 m from the drummer, and is still called Spare bodypack with 31.8 dB of margin. Assign it to Dev in the people panel as his mic: the pack jumps to his belt (0.15 m to his right, 0.05 m behind, height kept at 1.0 m), is renamed Dev mic and shows 45.5 dB of margin, because it is now 2.4 m from the receive antenna instead of 10.2 m. The other seven links do not change. Assign every pack before checking the plan, so each figure is for where the pack is worn and not where it was left (positions illustrative).',
     build: () => ({ scene: bandSwapScene(false) }),
   },
   {
@@ -136,7 +136,7 @@ export const LATE_EXAMPLES = [
   {
     id: 'noise-flash-trigger-24',
     title: 'Noise: a 2.4 GHz flash trigger on the channel of a 2.4 GHz mic',
-    note: 'Problem: a camera radio flash trigger (10 dBm ERP, 2 percent duty, assumed) 7.2 m from the receive antenna sits on the same 2440.0 MHz channel as a 2.4 GHz mic 19 m away. In the 200 kHz channel each packet reaches -57.4 dBm, 0.6 dB stronger than the mic at -57.9 dBm, and the average of -74.3 dBm lifts the floor by 36.5 dB and leaves 0.6 dB of margin. A 2.4 GHz mic shares its band with every trigger, Wi-Fi access point and phone in the building, which UHF does not: move the mic or the trigger channel, and compare wifi-busy-2g4. In the RF spectrum the floor pulses with each packet, in time with the plan rings; the margin quoted is the average.',
+    note: 'Problem: a camera radio flash trigger (10 dBm ERP, 2 percent duty, assumed) 7.2 m from the receive antenna sits on the same 2440.0 MHz channel as a 2.4 GHz mic 19 m away. In the 200 kHz channel each packet reaches -57.4 dBm, 0.6 dB stronger than the mic at -57.9 dBm, and the average of -74.3 dBm lifts the floor by 36.6 dB and leaves 0.5 dB of margin. A 2.4 GHz mic shares its band with every trigger, Wi-Fi access point and phone in the building, which UHF does not: move the mic or the trigger channel, and compare wifi-busy-2g4. In the RF spectrum the floor pulses with each packet, in time with the plan rings; the margin quoted is the average.',
     build: () => ({ scene: noiseSourceScene('flash-trigger-24') }),
   },
   {

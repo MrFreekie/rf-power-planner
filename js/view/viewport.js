@@ -13,6 +13,29 @@ export function niceGridStep(pxPerM, targetPx = 50) {
   return 10 * pow;
 }
 
+/**
+ * shouldRefit({ loaded, userView, stageChanged, p2pChanged }) -> boolean.
+ * A newly loaded scene (file, example, share link) always opens fitted; a stage resize refits only while the user has not panned or zoomed;
+ * switching to or from a kilometre-scale link always refits.
+ */
+export function shouldRefit({ loaded = false, userView = false, stageChanged = false, p2pChanged = false } = {}) {
+  return !!(loaded || p2pChanged || (stageChanged && !userView));
+}
+
+/**
+ * Label collision helper: rects are { x, y, w, h }. placeLabel(rects, rect, offsets) tries the rect shifted by each [dx, dy] offset in turn,
+ * returns the first free position (and records it in rects) or null when every spot is taken. Cheap: one pass over the rects per try.
+ */
+export function rectsOverlap(a, b) { return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y; }
+export const LABEL_NUDGES = Object.freeze([[0, 0], [0, -15], [0, 15], [0, -30], [0, 30]]);
+export function placeLabel(rects, rect, offsets = LABEL_NUDGES) {
+  for (const [dx, dy] of offsets) {
+    const r = { x: rect.x + dx, y: rect.y + dy, w: rect.w, h: rect.h };
+    if (!rects.some((q) => rectsOverlap(r, q))) { rects.push(r); return r; }
+  }
+  return null;
+}
+
 export function createViewport({ pxPerM = 40, origin = { x: 0, y: 0 } } = {}) {
   const vp = {
     pxPerM,
