@@ -167,7 +167,7 @@ export function rackSections(scene, formOf) {
   const rxAnts = (rack.antennas || []).filter((a) => a.role !== 'tx'), txAnts = (rack.antennas || []).filter((a) => a.role === 'tx');
   const sp = (id) => (rack.splitters || []).find((x) => x.id === id), cb = (id) => (rack.combiners || []).find((x) => x.id === id);
   const sections = [];
-  const mic = links.filter((l) => l.kind === 'mic');
+  const mic = links.filter((l) => l.kind === 'mic' && l.txOf === undefined); // an extra receiver of a mic has no transmitter item of its own
   const micItems = (list) => list.map((l) => ({ id: l.id, kind: 'mic', text: String(l.name || l.id) }));
   if (mic.length && typeof formOf !== 'function') sections.push({ key: 'mics', title: 'Microphones', items: micItems(mic) });
   else for (const [f, title] of [['handheld', 'Handheld microphones'], ['bodypack', 'Bodypack transmitters'], ['plug-on', 'Plug-on transmitters'], ['other', 'Other microphones (no model chosen)']]) {
@@ -247,7 +247,7 @@ export function rackLoads(scene) {
  */
 export function tuningClashes(scene, bwOf) {
   const bw = (l) => { const v = bwOf ? bwOf(l) : 200; return Number.isFinite(v) && v > 0 ? v : 200; };
-  const ls = ((scene && scene.links) || []).filter((l) => l.kind !== 'p2p' && Number.isFinite(l.freqMHz)), out = [];
+  const ls = ((scene && scene.links) || []).filter((l) => l.kind !== 'p2p' && l.txOf === undefined && Number.isFinite(l.freqMHz)), out = [];
   for (let i = 0; i < ls.length; i++) for (let j = i + 1; j < ls.length; j++) {
     const a = ls[i], b = ls[j], dk = Math.abs(a.freqMHz - b.freqMHz) * 1000, need = (bw(a) + bw(b)) / 2;
     if (dk >= need) continue;

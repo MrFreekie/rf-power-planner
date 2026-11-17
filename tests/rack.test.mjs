@@ -196,3 +196,24 @@ test('tuning clashes: same frequency and overlapping bandwidths warn, spaced lin
   assert.equal(tuningClashes(s, () => 1000).length, 1);
   l2.freqMHz = 600; assert.ok(rackWarnings(s).some((w) => w.level === 'warn' && /same frequency/.test(w.text)));
 });
+
+test('one transmitter, several receivers: an extra receiver follows the mic and does not clash with it', async () => {
+  const { addReceiverFor } = await import('../js/actions.js');
+  const { createStore } = await import('../js/store.js');
+  const { createDefaultScene, validateScene } = await import('../js/model/scene.js');
+  const { tuningClashes, rackSections } = await import('../js/model/rack.js');
+  const store = createStore(createDefaultScene());
+  const first = store.getScene().links[0].id;
+  const id = addReceiverFor(store, first);
+  assert.ok(id);
+  store.update((d) => { d.links[0].freqMHz = 611.5; d.links[0].tx.powerDbm = 13; });
+  const s = store.getScene(), extra = s.links.find((l) => l.id === id);
+  assert.equal(extra.freqMHz, 611.5); assert.equal(extra.tx.powerDbm, 13); assert.equal(extra.txOf, first);
+  assert.equal(tuningClashes(s).length, 0);
+  assert.ok(!rackSections(s).flatMap((x) => x.items).some((i) => i.kind === 'mic' && i.id === id));
+  assert.ok(rackSections(s).flatMap((x) => x.items).some((i) => i.kind === 'receiver' && i.id === id));
+  assert.equal(validateScene(s).ok ?? true, true);
+  assert.equal(addReceiverFor(store, id), null);
+  store.update((d) => { d.links = d.links.filter((l) => l.id !== first); });
+  assert.equal(store.getScene().links.find((l) => l.id === id).txOf, undefined);
+});

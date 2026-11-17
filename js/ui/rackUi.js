@@ -5,7 +5,7 @@ import { solveCached } from '../view/util.js';
 import { CABLES, ANTENNAS } from '../model/library.js';
 import { linkCard, txFormFactor } from '../model/inventory.js';
 import { inventoryView } from './inventoryUi.js';
-import { addLink, assignMic, assignIem, removeExtraMic, peopleLinkOwners } from '../actions.js';
+import { addLink, addReceiverFor, assignMic, assignIem, removeExtraMic, peopleLinkOwners } from '../actions.js';
 import { setLinkFocus } from '../view/linkFocus.js';
 import { getLinkDock, subscribeLinkDock } from './linkDock.js';
 import { activeLink } from '../view/util.js';
@@ -104,7 +104,12 @@ export function mountRack({ container, store }) {
     };
     const gear = (id, b, part) => { const l = scene.links.find((q) => q.id === id); if (l) b.append(gearPickers(store, l, part)); };
     const editors = {
-      mic: (it, b) => { props(it.id, b, [0, 1]); owner(it.id, b, 'mic'); gear(it.id, b, 'tx'); },
+      mic: (it, b) => {
+        props(it.id, b, [0, 1]); owner(it.id, b, 'mic'); gear(it.id, b, 'tx');
+        const extras = scene.links.filter((q) => q.txOf === it.id);
+        const add = btn('Add a receiver for this mic', () => { const id = addReceiverFor(store, it.id); msg.textContent = id ? 'Receiver added: see it under Receivers.' : 'Could not add a receiver (link limit reached).'; }, 'A second receiver listening to this transmitter, for a backup, a recording rig or another room. It has its own antenna and path.');
+        b.append(el('p', 'hint', extras.length ? `Also heard by ${extras.map((q) => q.name).join(', ')}.` : 'Heard by one receiver.'), add);
+      },
       bodypack: (it, b) => { props(it.id, b, [2]); owner(it.id, b, 'iem'); gear(it.id, b, 'rx'); },
       antenna: (it, b) => {
         const a = rack.antennas.find((x) => x.id === it.id);

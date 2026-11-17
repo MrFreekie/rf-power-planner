@@ -188,6 +188,24 @@ export function addRoomWalls(store, { material = 'concrete', widthM, depthM, hei
   return ids;
 }
 
+/**
+ * Add another receiver for a mic's transmitter (a backup, recording or second-room receiver). The new link follows the primary's frequency and
+ * transmitter; its receiver, antenna and cable path are its own. Returns the new link id, or null (not a mic, already an extra, or at the link limit).
+ */
+export function addReceiverFor(store, linkId) {
+  let id = null;
+  store.update((d) => {
+    const src = d.links.find((l) => l.id === linkId);
+    if (!src || src.kind !== 'mic' || src.txOf !== undefined || d.links.length >= SCENE_LIMITS.maxLinks) return;
+    const link = createDefaultLink('mic'), taken = new Set(d.links.map((l) => l.name));
+    let n = 2; while (taken.has(`${src.name} Rx ${n}`)) n += 1;
+    link.name = `${src.name} Rx ${n}`.slice(0, 80); link.txOf = src.id; link.freqMHz = src.freqMHz; link.tx = { ...structuredClone(src.tx), id: link.tx.id };
+    link.rx.pos = { ...src.rx.pos, x: src.rx.pos.x + 0.5 };
+    d.links.push(link); id = link.id;
+  });
+  return id;
+}
+
 export function removeReflector(store, id) {
   return store.update((d) => {
     const i = d.reflectors.findIndex((r) => r.id === id);

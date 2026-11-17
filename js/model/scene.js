@@ -225,8 +225,24 @@ export function syncSharedAntennas(scene) {
   return scene;
 }
 
+/**
+ * One transmitter heard by several receivers (mic links only): a link with txOf = <another link id> is an extra receiver for that link's
+ * transmitter. It takes the frequency and the whole transmitter from the primary link each sync and keeps its own receiver, antenna and path.
+ */
+export function syncSharedTx(scene) {
+  const links = scene && Array.isArray(scene.links) ? scene.links : [];
+  for (const l of links) {
+    if (!l || l.txOf === undefined) continue;
+    const src = links.find((q) => q && q.id === l.txOf);
+    if (!src || src === l || l.kind !== 'mic' || src.kind !== 'mic' || src.txOf !== undefined || !src.tx) { delete l.txOf; continue; }
+    const own = l.tx && l.tx.id; l.freqMHz = src.freqMHz; l.tx = structuredClone(src.tx); if (own) l.tx.id = own; // the id stays unique
+  }
+  return scene;
+}
+
 /** Run syncBranches over every link of a scene (in place), then the shared receive antennas. */
 export function syncScene(scene) {
+  syncSharedTx(scene);
   compileRack(scene, { fromPreset: createChainItemFromPreset, item: createChainItem }); // before the branch mirrors so an IEM antenna from the rack is copied into them
   if (scene && Array.isArray(scene.links)) for (const l of scene.links) syncBranches(l);
   syncSharedAntennas(scene);
@@ -847,6 +863,7 @@ export function validateScene(scene) {
         }
       }
       if (l.rx.rxPreset !== undefined && !RX_PRESET_IDS.includes(l.rx.rxPreset)) errors.push(`${p}.rx.rxPreset invalid`);
+      if (l.txOf !== undefined && !(isSafeId(l.txOf) && l.txOf !== l.id)) errors.push(`${p}.txOf must be the id of another link`);
       if (l.rx.sharedAntennaOf !== undefined && !(isSafeId(l.rx.sharedAntennaOf) && l.rx.sharedAntennaOf !== l.id)) errors.push(`${p}.rx.sharedAntennaOf must be the id of another link`);
       if (l.rx.overload !== undefined) {
         const o = l.rx.overload;
