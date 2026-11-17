@@ -14,19 +14,22 @@ no accounts. Vanilla ES modules and Canvas 2D.
 **As a link budget tool**
 - True-scale top-down plan and side views on a shared metre grid; drag transmitters, antennas, walls and zones.
 - Free-space and two-ray (floor) path loss, wall reflections, through-wall loss with thickness, and antenna patterns.
-- Cable, booster, filter, attenuator and splitter chains with a power-budget waterfall, margin and pass/marginal/fail.
+- Cable (including RG8X, hardline and 75 ohm RG6 with a mismatch warning), booster, filter, surge arrestor, attenuator and splitter chains with a power-budget waterfall, margin and pass/marginal/fail. Surge arrestor, hardline, RG8X, RG6 and filter figures are assumed class values, not datasheet numbers.
+- A "Radio items" sidebar list, grouped by category: microphones by form factor, receive antennas (model, gain, aim, cable/booster/fibre chain, zones, dummy load), splitters (cascade up to 3 stages), receivers (channels, antenna bias, RF loop-through), IEM transmitters (channels, isolator), combiners (cable, fan-out to several transmit antennas) and transmit antennas. Add mic / Add IEM, person assignment, equipment pickers, a Tuning section (frequency, band) and an extra receiver for one mic.
+- Rack checks: open-output and unused-port warnings, 50 ohm dummy loads and a what-to-pack count, a powering budget, an ERP check, and a warning when two transmitters share a frequency or overlap in bandwidth.
+- Builders for the venue (stage, platforms, audience, crowd, ceiling, noise sources, environment, floor, reflectors with Add room walls), People and a Point-to-point link.
 - Cascaded noise figure and sensitivity at the antenna terminals (booster at the antenna versus at the rack).
-- Squelch with hysteresis, RF overload and headroom, receive diversity (switching, true, ratio).
+- Squelch with hysteresis, RF overload and headroom, receive diversity (switching, true, ratio), set up inside the receiver and mic radio items.
 - Multi-antenna IEM coverage with zones, a coverage heat map and fix suggestions.
-- Intermodulation: front-end, transmitter-to-transmitter and passive products, noise floor and coordination checks.
+- Intermodulation: front-end, transmitter-to-transmitter and passive products, noise floor and coordination checks, with an Intermod demo form.
 - Venue underlay: import a venue drawing (SU4SV text) as a grey underlay with layer toggles and height shading.
-- Frequency coordination checks by region and band, a scene compare table and named scenes saved in the browser.
+- Frequency coordination checks by region and band, a scene compare table and named scenes saved in the browser (both in the Scenes pop-out in the top bar).
 - Printable report sheet, JSON save/load and shareable links (the scene is stored in the link; nothing is uploaded).
 
 **As a physics demonstration**
 - Moving ripples in plan and side views, plus a coherent "Field" mode that shows multipath fringes and nulls.
 - FM MPX stereo that degrades to mono as the signal weakens, the 19 kHz pilot, pilot-tone squelch and stray carriers.
-- Telemetry above the MPX band, battery sag and gauge error.
+- Telemetry above the MPX band, battery sag and gauge error (in the mic radio items).
 - Digital links: QAM constellation, BER curve, adaptive modulation and the cliff effect.
 - Timeline of RF level, audio level and mute events, plus audio, MPX and RF spectrum views in the bottom bar.
 - Modulation lab: animated AM, FM, digital and stereo FM demonstrations, with pre-emphasis and companding.
@@ -44,6 +47,7 @@ ES modules need an HTTP origin (not `file://`):
 
 `js/model/*` is pure (no DOM), so the physics runs under Node and is covered by unit tests with hand-computed values.
 `tests/app-wiring.test.mjs` also checks the app shell without a browser (element ids, module paths, import cycles, relative URLs).
+The scene has optional `rack` and `link.txOf` fields (schema version still 2); older scenes load unchanged.
 Tests that use local venue files in `tests/private-venues/` skip themselves when that folder is absent.
 
 ## Privacy
@@ -56,7 +60,7 @@ Share links carry the scene in the URL fragment (after `#`), which browsers do n
 - `index.html`, `css/style.css`: shell and styling
 - `js/model/`: scene schema, RF maths, parameter libraries (cables, antennas, materials, receivers, modulation, intermod)
 - `js/*Tracker.js`, `js/history.js`: live state (squelch, MPX, diversity, telemetry, digital, coverage, intermod)
-- `js/view/`, `js/ui/`: canvas views, panels and the inspector
+- `js/view/`, `js/ui/`: canvas views and panels (radio items in `js/ui/rackUi.js`; model `js/model/rack.js`, edits `js/actionsRack.js`)
 - `js/share.js`, `js/reportData.js`, `js/io.js`: share links, report data, save/load
 
 ## GitHub Pages

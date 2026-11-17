@@ -1,9 +1,9 @@
 # Physics notes: RF Bench
 
-Owner: rf-physicist. Data lives in `js/model/library.js`; maths in `js/model/rf.js`.
+Data lives in `js/model/library.js`; maths in `js/model/rf.js`.
 
 ## Assumptions
-- Far-field, narrowband, single frequency per link. 50 ohm system, matched connectors (mismatch/VSWR not modelled).
+- Far-field, narrowband, single frequency per link. 50 ohm system, matched connectors. Mismatch is modelled only as the opt-in antenna design-band mismatch loss (a budget step) and a warning for 75 ohm cable (RG6) in a 50 ohm chain (warning only, not a budget step).
 - Free-space path loss: FSPL = 32.44 + 20 log10(d_km) + 20 log10(f_MHz).
 - Two-ray / image method: direct + floor + single-wall + floor-wall paths, summed coherently as complex phasors with phase = -2 pi d / lambda plus reflection-coefficient phase.
 - Fresnel reflection coefficients for a smooth, lossy, semi-infinite dielectric with complex permittivity eps_c = epsR - j * sigma / (2 pi f eps0). Vertical polarisation (E in plane of incidence) has a Brewster dip; horizontal does not. Grazing angle is measured from the surface.
@@ -20,7 +20,7 @@ Owner: rf-physicist. Data lives in `js/model/library.js`; maths in `js/model/rf.
 - No polarisation rotation from reflections or antenna cross-polarisation; helical (circular) antennas are treated as linear with a nominal gain. Real CP-to-linear coupling costs 3 dB.
 - No fading statistics (Rician/Rayleigh) beyond the explicit `fadeMarginDb`; no Doppler for moving performers.
 - Body shadowing is a static dB figure, not geometry-dependent apart from the `body` pattern.
-- No intermodulation, co-channel or adjacent-channel interference, noise rise, or receiver desense. Margin is signal vs sensitivity only.
+- The link budget margin is signal vs sensitivity only. Intermodulation, noise floor and coordination are computed separately (see PHYSICS-IMD.md and PHYSICS-BANDS.md) and are not folded into the margin.
 - Near-field: valid for r > 2 D^2 / lambda and r >> lambda. At 470 MHz lambda is 0.64 m, so below about 1 m results are indicative only.
 
 ## Validation checklist
