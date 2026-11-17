@@ -13,6 +13,13 @@ Data lives in `js/model/library.js`; maths in `js/model/rf.js`.
 - Body-worn antenna: -3 dBi base gain, plus up to -9 dB behind the torso. `rx.bodyLossDb` / `environment.bodyLossDb` in the scene is additional and must not double count; use either the `body` antenna type with bodyLossDb = 0, or a free antenna with a bodyLossDb figure. Typical measured body loss for a bodypack at the hip is 3-10 dB.
 - `absorbDb` (SURFACES.carpet, MATERIALS.drapes) is extra per-bounce loss for porous finishes. It is optional; rf.js should add it to the reflection loss if it uses it.
 - Cable attenuation: dB/100 m from datasheets, log-log interpolated, clamped extrapolation outside 100-2400 MHz is acceptable (loss ~ sqrt(f) dominates; use slope of the nearest segment). Temperature and connector loss excluded.
+- Reflected power at a PA output passes back through the reverse path only (pad, cable, combiner), so a pad costs its loss once on the way back, not the forward loss twice. Rack splitters use port-count presets with excess loss on top of the split: 2-way 0.5 dB, 4-way 1.0 dB, 8-way 1.5 dB.
+- ERP checks use the library antenna gain (or a nominal gain for the type) and the ground-plane gain where one applies.
+- Front-to-back: directional antennas (paddle, log-periodic, helical, panel) add a rear-lobe level of about 15, 15, 13 and 20 dB below the front, applied as an analytic fallback beyond the pattern table. Pattern tables in the library are unchanged.
+- Impedance junctions: each 75/50 ohm junction in a chain adds 0.177 dB (the mismatch loss of a 1.5:1 step), shown as its own waterfall step.
+- Powering: DC loop resistance per 100 m is estimated per cable type; when the voltage at the far end falls below the device's minimum, a warning names the run. Estimates only.
+- Tuning: two transmitters closer than 100 kHz (edge to edge) are flagged as a guard-band clash even when their bandwidths do not overlap.
+- Cable tables (hardline-half, RG6, LMR-240) follow published datasheet attenuation at the standard frequencies, log-log interpolated between them.
 
 ## Model limits
 - Specular reflections only. No diffraction (knife-edge around people, stage lip, truss), no scattering from rough surfaces, no transmission through walls.
