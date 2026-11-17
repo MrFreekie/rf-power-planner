@@ -480,11 +480,13 @@ export function mountInspector({ container, store }) {
       ...(link.kind === 'mic' ? [] : [posFields('rx')]),
     );
     rb.append(
+      ...(link.kind === 'p2p' ? [
       selectField({
         key: 'rx-preset', label: 'Receiver preset', options: () => rxPresetChoices(),
         get: (cc) => cc.link.rx.rxPreset || (cc.link.kind === 'iem' ? 'iem-bodypack-typical' : 'mic-receiver-typical'),
         set: (cc, v) => { if (isFmRxPreset(v)) setRxFmPreset(store, cc.link.id, v); else setNested(cc, 'rx.rxPreset', v); },
       }),
+      ] : []), // a microphone or IEM receiver is chosen in its radio item (Receiver model)
       fmBlock((cc) => (isFmRxPreset(cc.link.rx.rxPreset) ? cc.link.rx.rxPreset : null), (cc) => cc.link, null),
       presetOffer(),
       numberField({

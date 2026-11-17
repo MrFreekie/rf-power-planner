@@ -1,7 +1,8 @@
 // Equipment pickers for one link (transmitter model, power, modulation, receiver model), shared by the Radio items list.
 // part: 'tx' (transmitter end), 'rx' (receiver end) or 'all'. Each change is one undoable step through the same actions the inspector uses.
 import { gearOptions, powerChoices } from '../model/inventory.js';
-import { setTxFmPreset, setRxFmPreset, setTxPowerOption, setModulation } from '../actions.js';
+import { setTxFmPreset, setRxFmPreset, setTxPowerOption, setModulation, setPath } from '../actions.js';
+import { RX_PRESETS } from '../model/rx-params.js';
 import { DIGITAL_PRESETS } from '../model/digital-params.js';
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
@@ -48,7 +49,18 @@ export function gearPickers(store, link, part = 'all') {
       sel.addEventListener('change', () => setTxPowerOption(store, link.id, sel.value));
       lab.append(sel); wrap.append(lab);
     }
-    if (wantRx) wrap.append(field('Receiver model', link.rx.rxPreset && opts.rx.some((o) => o.id === link.rx.rxPreset) ? link.rx.rxPreset : '', opts.rx, 'Generic (typical)', (id) => { if (id) setRxFmPreset(store, link.id, id); }));
+    if (wantRx) { // one receiver picker: the FM models first, then the generic and other presets (the model the maths uses is rx.rxPreset either way)
+      const fmIds = new Set(opts.rx.map((o) => o.id)), generic = link.kind === 'iem' ? 'iem-bodypack-typical' : 'mic-receiver-typical', cur = link.rx.rxPreset;
+      const lab = field('Receiver model', fmIds.has(cur) || (cur && RX_PRESETS[cur]) ? cur : '', opts.rx, `Generic (typical)`, (id) => {
+        if (fmIds.has(id)) setRxFmPreset(store, link.id, id);
+        else { const i = store.getScene().links.findIndex((q) => q.id === link.id); if (i >= 0) setPath(store, `links.${i}.rx.rxPreset`, id || generic); }
+      });
+      const sel = lab.querySelector('select'), og = el('optgroup'); og.label = 'Other receiver presets';
+      for (const [id, pr] of Object.entries(RX_PRESETS)) if (!fmIds.has(id) && id !== generic && (link.kind === 'p2p' || /iem|bodypack|ek\d/i.test(`${id} ${(pr && pr.label) || ''}`) === (link.kind === 'iem')) && (cur === id || id !== 'iem-bodypack-typical' && id !== 'mic-receiver-typical')) og.append(Object.assign(el('option', '', String((pr && pr.label) || id)), { value: id }));
+      if (og.children.length) sel.append(og);
+      sel.value = cur === generic || !cur ? '' : cur;
+      wrap.append(lab);
+    }
     if (wantTx || wantRx) wrap.append(el('p', 'hint', 'Class figures from published specifications; * marks a model with some assumed figures. Models are grouped by whether they tune at this link’s frequency.'));
     return wrap;
   }
