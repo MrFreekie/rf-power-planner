@@ -474,10 +474,10 @@ export function mountInspector({ container, store }) {
         key: 'rx-sq-hys', label: 'Squelch hysteresis', min: 0, max: 20, step: 0.5, unit: 'dB', decimals: 1,
         get: (cc) => cc.link.rx.squelch?.hysteresisDb ?? 3, set: (cc, v, o) => setSquelch(cc, 'hysteresisDb', v, o),
       }),
-      antennaFields('rx', 'rx'),
+      ...(link.kind === 'mic' ? [] : [antennaFields('rx', 'rx')]), // a microphone link's receive antennas are edited in the Receive antennas items
       numLink('rx-bias-v', 'Antenna bias supplied', 'rx.antennaBiasV', 0, 1000, 0.5, 'V (0 = none)', { decimals: 1, visible: (cc) => cc.link.kind !== 'iem', get: (cc) => cc.link.rx.antennaBiasV ?? 0 }),
       numLink('rx-bias-ma', 'Antenna bias current limit', 'rx.antennaBiasMa', 0, 1000, 5, 'mA (0 = not stated)', { decimals: 0, visible: (cc) => cc.link.kind !== 'iem' && (cc.link.rx.antennaBiasV ?? 0) > 0, get: (cc) => cc.link.rx.antennaBiasMa ?? 0 }),
-      posFields('rx'),
+      ...(link.kind === 'mic' ? [] : [posFields('rx')]),
     );
     rb.append(
       selectField({
@@ -504,6 +504,7 @@ export function mountInspector({ container, store }) {
         visible: (cc) => !!cc.link.rx.diversity?.enabled,
         get: (cc) => cc.link.rx.diversity?.mode || 'switching', set: (cc, v) => setNested(cc, 'rx.diversity.mode', v),
       }),
+      ...(link.kind === 'mic' ? [] : [
       ...['x', 'y', 'z'].map((ax) => numberField({
         key: `rx-b-${ax}`, label: `Antenna B ${ax}${ax === 'z' ? ' (height)' : ax === 'x' ? ' (0 = centre line)' : ' (0 = front edge)'}`, decimals: 2,
         min: (cc) => lengthToUi(dispRange(cc.scene, ax, ax === 'z' ? 0 : -50, ax === 'z' ? 50 : 100)[0], cc.lu), max: (cc) => lengthToUi(dispRange(cc.scene, ax, ax === 'z' ? 0 : -50, ax === 'z' ? 50 : 100)[1], cc.lu), step: (cc) => (cc.lu === 'ft' ? 0.5 : 0.1), unit: (cc) => cc.lu,
@@ -546,6 +547,7 @@ export function mountInspector({ container, store }) {
         visible: (cc) => !!cc.link.rx.diversity?.enabled && !!cc.link.rx.diversity?.antennaB?.orientation,
         get: (cc) => effectiveAntennaB(cc.link).orientation.el, set: (cc, v, o) => setAntennaBOrientation(store, cc.link.id, { el: v }, o),
       }),
+      ]),
       numberField({
         key: 'rx-div-hys', label: 'Switch hysteresis', min: 0, max: 20, step: 0.5, unit: 'dB', decimals: 1,
         visible: (cc) => !!cc.link.rx.diversity?.enabled && (cc.link.rx.diversity.mode || 'switching') === 'switching',

@@ -2,7 +2,8 @@
 // each item expandable to show its details and edit its connections. Edits go through js/actionsRack.js (one undo step each).
 import { rackSections, deriveRack, rackWarnings, rackLoads, channelRoute, canFeedSplitter, canLoopReceiver, loopLossOf, RACK_LIMITS, DEFAULT_LOOP_LOSS_DB } from '../model/rack.js';
 import { solveCached } from '../view/util.js';
-import { CABLES, ANTENNAS } from '../model/library.js';
+import { CABLES, ANTENNAS, GROUND_PLANE_LABELS, GROUND_PLANE_GAIN_DBI, allowedPolarisations, defaultPolarisation } from '../model/library.js';
+import { POLARISATION_LABELS } from './antennaFields.js';
 import { linkCard, txFormFactor } from '../model/inventory.js';
 import { inventoryView } from './inventoryUi.js';
 import { addLink, addReceiverFor, assignMic, assignIem, removeExtraMic, peopleLinkOwners } from '../actions.js';
@@ -17,7 +18,7 @@ import { getCoordRegion } from './region.js';
 import { gearPickers } from './gearUi.js';
 import {
   renameRackItem, addRackAntenna, addRackSplitter, setSplitterType, setSplitterInput, connectChannel, moveChannel, removeRackItem, setRackAntenna,
-  addRackCombiner, setCombiner, setSplitterPorts, setRxBias, setRackAntennaType, setRackAntennaAim, addAntennaChainItem, setAntennaChainItem, removeAntennaChainItem, setAntennaZones, connectTxChannel, moveTxChannel, removeCombiner,
+  addRackCombiner, setCombiner, setSplitterPorts, setRxBias, setRackAntennaType, setRackAntennaAim, setRackAntennaDetail, addAntennaChainItem, setAntennaChainItem, removeAntennaChainItem, setAntennaZones, connectTxChannel, moveTxChannel, removeCombiner,
   setCombinerFanout, setFanoutOutput, setTxIsolator,
   setSplitterFeed, setReceiverLoop, setReceiverLoopLoss,
 } from '../actionsRack.js';
@@ -134,7 +135,11 @@ export function mountRack({ container, store }) {
           field('Gain (dBi)', num('Gain', a.antenna.gainDbi, (v) => setRackAntennaAim(store, a.id, { gainDbi: v }), -30, 40)),
           field('Aim: azimuth (degrees)', num('Azimuth', o.az, (v) => setRackAntennaAim(store, a.id, { az: v }), 0, 360)),
           field('Aim: elevation (degrees)', num('Elevation', o.el, (v) => setRackAntennaAim(store, a.id, { el: v }), -90, 90)),
-          el('p', 'hint', 'Polarisation, tilt and the other antenna details are in the receiver radio item. Every link fed by this antenna follows.'));
+          field('Tilt (degrees, nose up)', num('Tilt', a.antenna.tiltDeg ?? 0, (v) => setRackAntennaDetail(store, a.id, { tiltDeg: v }), -90, 90)),
+          field('Roll (degrees, 0 = upright)', num('Roll', a.antenna.rollDeg ?? 0, (v) => setRackAntennaDetail(store, a.id, { rollDeg: v }), -180, 180)),
+          field('Polarisation', select('Polarisation of ' + a.name, allowedPolarisations(a.antenna.type).map((p) => [p, POLARISATION_LABELS[p] || p]), a.antenna.polarisation ?? defaultPolarisation(a.antenna.type), (v) => setRackAntennaDetail(store, a.id, { polarisation: v }))));
+        if (a.antenna.type === 'quarterwave') b.append(field('Ground plane', select('Ground plane of ' + a.name, [['', 'Not set'], ...Object.keys(GROUND_PLANE_GAIN_DBI).map((g) => [g, `${GROUND_PLANE_LABELS[g]} (${GROUND_PLANE_GAIN_DBI[g]} dBi)`])], a.antenna.groundPlane ?? '', (v) => setRackAntennaDetail(store, a.id, { groundPlane: v }))));
+        b.append(el('p', 'hint', 'Every link fed by this antenna follows these settings.'));
         if (a.role !== 'tx') {
           b.append(el('h5', '', 'Cable run from this antenna'), el('p', 'hint', 'Cable, booster, filter or fibre between the antenna and its splitter or receiver. Every receiver on this antenna shares it, in the order listed.'));
           (a.chain || []).forEach((c) => {

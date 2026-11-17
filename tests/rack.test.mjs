@@ -217,3 +217,16 @@ test('one transmitter, several receivers: an extra receiver follows the mic and 
   store.update((d) => { d.links = d.links.filter((l) => l.id !== first); });
   assert.equal(store.getScene().links.find((l) => l.id === id).txOf, undefined);
 });
+
+test('antenna detail (tilt, roll, polarisation) edited on the rack antenna reaches the link', async () => {
+  const { setRackAntennaDetail, adoptRack } = await import('../js/actionsRack.js');
+  const { createStore } = await import('../js/store.js');
+  const { createDefaultScene } = await import('../js/model/scene.js');
+  const st = createStore(createDefaultScene()); adoptRack(st);
+  const a = st.getScene().rack.antennas.find((x) => x.role !== 'tx');
+  setRackAntennaDetail(st, a.id, { tiltDeg: 20, rollDeg: -30, polarisation: 'vertical' });
+  setRackAntennaDetail(st, a.id, { tiltDeg: 500, polarisation: 'nonsense' });
+  const s = st.getScene(), link = s.links.find((l) => l.kind === 'mic');
+  assert.equal(link.rx.antenna.tiltDeg, 90); assert.equal(link.rx.antenna.rollDeg, -30);
+  assert.notEqual(link.rx.antenna.polarisation, 'nonsense');
+});

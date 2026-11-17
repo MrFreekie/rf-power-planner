@@ -253,6 +253,17 @@ export function setRackAntennaType(store, id, type) {
 }
 
 /** setRackAntennaAim(store, id, { az?, el?, gainDbi? }): where the antenna points (degrees) and its gain. */
+/** setRackAntennaDetail(store, id, { tiltDeg?, rollDeg?, polarisation?, groundPlane? }): the finer antenna properties; every link fed by the antenna follows. */
+export function setRackAntennaDetail(store, id, { tiltDeg, rollDeg, polarisation, groundPlane } = {}) {
+  return store.update((d) => {
+    const a = adopt(d).antennas.find((x) => x.id === id); if (!a) return;
+    if (Number.isFinite(tiltDeg)) a.antenna.tiltDeg = Math.max(-90, Math.min(90, tiltDeg));
+    if (Number.isFinite(rollDeg)) a.antenna.rollDeg = Math.max(-180, Math.min(180, rollDeg));
+    if (typeof polarisation === 'string' && allowedPolarisations(a.antenna.type).includes(polarisation)) a.antenna.polarisation = polarisation;
+    if (groundPlane !== undefined) { if (groundPlane === null || groundPlane === '') delete a.antenna.groundPlane; else if (typeof groundPlane === 'string' && groundPlane.length < 40) a.antenna.groundPlane = groundPlane; }
+  });
+}
+
 export function setRackAntennaAim(store, id, { az, el, gainDbi } = {}) {
   return store.update((d) => {
     const a = adopt(d).antennas.find((x) => x.id === id); if (!a) return;
