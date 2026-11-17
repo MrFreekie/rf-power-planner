@@ -165,7 +165,8 @@ export function mountRack({ container, store }) {
             for (const z of scene.zones) { const l = el('label', 'inv-field'), cb = el('input'); cb.type = 'checkbox'; cb.checked = (a.zones || []).includes(z.id); cb.addEventListener('change', () => setAntennaZones(store, a.id, scene.zones.filter((q) => (q.id === z.id ? cb.checked : (a.zones || []).includes(q.id))).map((q) => q.id))); l.append(cb, el('span', '', ` ${z.name || z.id}`)); b.append(l); }
           }
         }
-        b.append(btn('Remove antenna', () => removeRackItem(store, 'antennas', a.id)));
+        const lastRx = a.role !== 'tx' && rack.antennas.filter((x) => x.role !== 'tx').length < 2, rm = btn('Remove antenna', () => removeRackItem(store, 'antennas', a.id), lastRx ? 'The last receive antenna cannot be removed' : 'Whatever it fed is left with no antenna');
+        rm.disabled = lastRx; b.append(rm);
       },
       splitter: (it, b) => {
         const s = rack.splitters.find((x) => x.id === it.id);
@@ -203,9 +204,9 @@ export function mountRack({ container, store }) {
       transmitter: (it, b) => {
         const m = find.transmitter(it.id); if (!m) return;
         props(it.id, b, [0, 1]); owner(it.id, b, 'iem'); gear(it.id, b, 'tx');
-        const opts = [...rack.transmitters.map((r) => [r.id, r.name]), ['new', 'A new transmitter']];
-        b.append(field('Transmitter', select('Transmitter for ' + linkName(it.id), opts, m.r.id, (v) => moveTxChannel(store, it.id, v))),
-          field('Transmitter name', text('Transmitter name', m.r.name, (v) => renameRackItem(store, 'transmitters', m.r.id, v))),
+        const opts = [...rack.transmitters.map((r) => [r.id, r.name]), ['new', 'A new transmitter unit']];
+        b.append(field('Sits in transmitter unit', select('Transmitter unit for ' + linkName(it.id), opts, m.r.id, (v) => moveTxChannel(store, it.id, v))),
+          field('Transmitter unit name', text('Transmitter unit name', m.r.name, (v) => renameRackItem(store, 'transmitters', m.r.id, v))),
           field('Through', select('Combiner for ' + linkName(it.id), [['', 'Straight to an antenna'], ...rack.combiners.map((c) => [c.id, c.name])], m.c.combinerId, (v) => connectTxChannel(store, it.id, v ? { combinerId: v } : { antennaId: m.c.antennaId }))));
         if (!m.c.combinerId) b.append(field('Antenna', select('Transmit antenna for ' + linkName(it.id), antOpts('tx'), m.c.antennaId, (v) => connectTxChannel(store, it.id, { antennaId: v }))));
         else b.append(el('p', 'hint', 'The combiner sets the antenna and any cable run; each channel pays the combining loss.'));

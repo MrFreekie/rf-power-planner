@@ -16,6 +16,8 @@ function adopt(d) {
   }
   d.rack = rack; return rack;
 }
+const isTx = (rack, id) => { const a = rack.antennas.find((x) => x.id === id); return !!a && a.role === 'tx'; }; // receive and transmit antennas are separate pools
+const hasRole = (rack, id, tx) => !id || (rack.antennas.some((x) => x.id === id) && isTx(rack, id) === tx);
 const chan = (rack, linkId) => { for (const r of rack.receivers) for (const c of r.channels) if (c.linkId === linkId) return { r, c }; return null; };
 
 /** adoptRack(store) -> true when the rack was created from the current links. */
@@ -56,7 +58,7 @@ export const setSplitterType = (store, id, type) => store.update((d) => { const 
 export function setSplitterInput(store, splitterId, side, antennaId) {
   return store.update((d) => {
     const rack = adopt(d), s = rack.splitters.find((x) => x.id === splitterId);
-    if (!s || (antennaId && !rack.antennas.some((a) => a.id === antennaId))) return;
+    if (!s || !hasRole(rack, antennaId, false)) return;
     s[side === 'B' ? 'antB' : 'antA'] = antennaId || null;
   });
 }
@@ -67,10 +69,10 @@ export function connectChannel(store, linkId, { splitterId = null, antA = null, 
     const rack = adopt(d), m = chan(rack, linkId); if (!m) return;
     if (splitterId && !rack.splitters.some((s) => s.id === splitterId)) return;
     if (loopHops(rack, m.r).hops.length) return; // a looped receiver takes its feed from the receiver it loops through
-    const ok = (id) => !id || rack.antennas.some((a) => a.id === id);
+    const ok = (id) => hasRole(rack, id, false);
     if (!ok(antA) || !ok(antB)) return;
     m.c.splitterId = splitterId || null;
-    if (splitterId) { delete m.c.antA; delete m.c.antB; } else { m.c.antA = antA || (rack.antennas[0] && rack.antennas[0].id) || null; m.c.antB = antB || null; }
+    if (splitterId) { delete m.c.antA; delete m.c.antB; } else { m.c.antA = antA || (rack.antennas.find((a) => a.role !== 'tx') || {}).id || null; m.c.antB = antB || null; }
   });
 }
 
@@ -97,7 +99,7 @@ export function removeRackItem(store, kind, id) {
       for (const x of rack.splitters) if (x.fromSplitter === id) { if (up) x.fromSplitter = up; else { delete x.fromSplitter; x.antA = s.antA; x.antB = s.antB; } }
       rack.splitters = rack.splitters.filter((x) => x !== s);
     } else if (kind === 'antennas') {
-      if (!rack.antennas.some((a) => a.id === id) || rack.antennas.length < 2) return;
+      const gone = rack.antennas.find((a) => a.id === id); if (!gone || (gone.role !== 'tx' && rack.antennas.filter((a) => a.role !== 'tx').length < 2)) return; // the last receive antenna stays
       rack.antennas = rack.antennas.filter((a) => a.id !== id);
       for (const s of rack.splitters) { if (s.antA === id) s.antA = null; if (s.antB === id) s.antB = null; }
       for (const r of rack.receivers) for (const c of r.channels) { if (c.antA === id) c.antA = null; if (c.antB === id) c.antB = null; }
@@ -131,7 +133,7 @@ export function setCombiner(store, id, patch) {
     const rack = adopt(d), c = rack.combiners.find((x) => x.id === id); if (!c) return;
     if (patch.type === 'passive' || patch.type === 'active') c.type = patch.type;
     if (patch.ports !== undefined) { const n = Math.round(Number(patch.ports)); if (n >= 2 && n <= 16) c.ports = n; else delete c.ports; }
-    if (patch.antennaId !== undefined && (!patch.antennaId || rack.antennas.some((a) => a.id === patch.antennaId))) c.antennaId = patch.antennaId || null;
+    if (patch.antennaId !== undefined && hasRole(rack, patch.antennaId, true)) c.antennaId = patch.antennaId || null;
     if (patch.cableM !== undefined) { const m = Math.max(0, Math.min(500, Number(patch.cableM) || 0)); c.cable = m > 0 ? { type: patch.cableType || (c.cable && c.cable.type) || 'rg58', lengthM: m } : null; }
     else if (patch.cableType && c.cable) c.cable.type = patch.cableType;
   });
@@ -142,7 +144,7 @@ export function connectTxChannel(store, linkId, { combinerId = null, antennaId =
   return store.update((d) => {
     const rack = adopt(d), m = txChan(rack, linkId); if (!m) return;
     if (combinerId && !rack.combiners.some((x) => x.id === combinerId)) return;
-    if (antennaId && !rack.antennas.some((a) => a.id === antennaId)) return;
+    if (!hasRole(rack, antennaId, true)) return;
     m.c.combinerId = combinerId || null;
     if (combinerId) delete m.c.antennaId; else m.c.antennaId = antennaId || (rack.antennas.find((a) => a.role === 'tx') || {}).id || null;
   });
@@ -164,7 +166,7 @@ export function moveTxChannel(store, linkId, transmitterId) {
 export function removeCombiner(store, id) {
   return store.update((d) => {
     const rack = adopt(d), cb = rack.combiners.find((x) => x.id === id); if (!cb) return;
-    for (const t of rack.transmitters) for (const c of t.channels) if (c.combinerId === id) { c.combinerId = null; c.antennaId = cb.antennaId; }
+    for (const t of rack.transmitters) for (const c of t.channels) if (c.combinerId === id) { c.combinerId = null; c.antennaId = cb.antennaId || ((cb.fanout && cb.fanout.outputs.find((o) => o && o.antennaId)) || {}).antennaId || null; }
     rack.combiners = rack.combiners.filter((x) => x !== cb);
   });
 }
@@ -187,7 +189,7 @@ export function setFanoutOutput(store, combinerId, index, patch) {
     const outs = cb.fanout.outputs;
     if (patch === null) { if (outs[index]) outs.splice(index, 1); return; }
     if (index < 0 || index > outs.length || index >= 16) return;
-    if (patch.antennaId && !rack.antennas.some((a) => a.id === patch.antennaId)) return;
+    if (!hasRole(rack, patch.antennaId, true)) return;
     const o = outs[index] || (outs[index] = { antennaId: null, cable: null });
     if (patch.antennaId !== undefined) o.antennaId = patch.antennaId || null;
     if (patch.cableM !== undefined) { const m = Math.max(0, Math.min(500, Number(patch.cableM) || 0)); o.cable = m > 0 ? { type: patch.cableType || (o.cable && o.cable.type) || 'rg58', lengthM: m } : null; }

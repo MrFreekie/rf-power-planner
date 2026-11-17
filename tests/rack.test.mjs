@@ -249,3 +249,21 @@ test('an extra IEM bodypack shares the transmitter, has no transmitter item and 
   assert.equal(tuningClashes(s).filter((c) => c.a === id || c.b === id).length, 0);
   const v = validateScene(s); assert.ok(v.ok, (v.errors || []).join());
 });
+
+test('rack actions keep receive and transmit antennas in their own pools, and survive a link changing kind and back', async () => {
+  const { createStore } = await import('../js/store.js');
+  const { createDefaultScene, createDefaultLink, validateScene } = await import('../js/model/scene.js');
+  const A = await import('../js/actions.js'), R = await import('../js/actionsRack.js');
+  const sc = createDefaultScene(); sc.links = [createDefaultLink('mic'), createDefaultLink('iem')];
+  const st = createStore(sc), [mic, iem] = st.getScene().links;
+  const tx = R.addRackAntenna(st, { role: 'tx' }), rxA = st.getScene().rack.antennas.find((a) => a.role !== 'tx').id;
+  R.connectChannel(st, mic.id, { antA: tx }); // a transmit antenna is refused as a receive feed
+  assert.notEqual(st.getScene().rack.receivers[0].channels[0].antA, tx);
+  R.connectTxChannel(st, iem.id, { antennaId: rxA }); // and the other way round
+  assert.notEqual(st.getScene().rack.transmitters[0].channels[0].antennaId, rxA);
+  R.removeRackItem(st, 'antennas', rxA); // the last receive antenna stays
+  assert.ok(st.getScene().rack.antennas.some((a) => a.id === rxA));
+  // kind change and back must not duplicate the derived antenna or receiver ids
+  A.setLinkKind(st, mic.id, 'iem'); A.setLinkKind(st, mic.id, 'mic'); A.setLinkKind(st, iem.id, 'mic'); A.setLinkKind(st, iem.id, 'iem');
+  assert.deepEqual(validateScene(st.getScene()), { ok: true, errors: [] });
+});

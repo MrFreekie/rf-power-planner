@@ -114,7 +114,8 @@ export function compileRack(scene, mk) {
   const placed = new Set(rack.receivers.flatMap((r) => r.channels.map((c) => c.linkId)));
   for (const l of links) { // a mic link added after the rack was made gets its own receiver and antenna
     if (l.kind !== 'mic' || placed.has(l.id) || rack.receivers.length >= RACK_LIMITS.maxReceivers || rack.antennas.length >= RACK_LIMITS.maxAntennas) continue;
-    rack.antennas.push({ id: `ra_${l.id}`, name: `Rx antenna for ${l.name || 'mic'}`, pos: structuredClone(l.rx.pos), antenna: structuredClone(l.rx.antenna) });
+    if (!rack.antennas.some((x) => x.id === `ra_${l.id}`)) rack.antennas.push({ id: `ra_${l.id}`, name: `Rx antenna for ${l.name || 'mic'}`, pos: structuredClone(l.rx.pos), antenna: structuredClone(l.rx.antenna) }); // reuse one left behind by the same link
+    if (rack.receivers.some((r) => r.id === `rr_${l.id}` || r.channels.some((c) => c.id === `rc_${l.id}`))) continue;
     rack.receivers.push({ id: `rr_${l.id}`, name: `Rx ${rack.receivers.length + 1}`, channels: [{ id: `rc_${l.id}`, linkId: l.id, splitterId: null, antA: `ra_${l.id}`, antB: null }] });
   }
   for (const r of rack.receivers) if (r.loopFrom && !rack.receivers.some((x) => x.id === r.loopFrom)) delete r.loopFrom; // the receiver it looped from is gone
@@ -154,7 +155,8 @@ function compileTxRack(scene, rack, links, mk) {
   const placed = new Set(rack.transmitters.flatMap((t) => t.channels.map((c) => c.linkId)));
   for (const l of links) {
     if (l.kind !== 'iem' || l.txOf !== undefined || placed.has(l.id) || rack.transmitters.length >= RACK_LIMITS.maxTransmitters || rack.antennas.length >= RACK_LIMITS.maxAntennas) continue;
-    rack.antennas.push({ id: `ta_${l.id}`, role: 'tx', name: `Tx antenna for ${l.name || 'IEM'}`, pos: structuredClone(l.tx.pos), antenna: structuredClone(l.tx.antenna) });
+    if (!rack.antennas.some((x) => x.id === `ta_${l.id}`)) rack.antennas.push({ id: `ta_${l.id}`, role: 'tx', name: `Tx antenna for ${l.name || 'IEM'}`, pos: structuredClone(l.tx.pos), antenna: structuredClone(l.tx.antenna) }); // an antenna left behind by a link that changed kind or was deleted is reused
+    if (rack.transmitters.some((t) => t.id === `rt_${l.id}` || t.channels.some((c) => c.id === `tc_${l.id}`))) continue;
     rack.transmitters.push({ id: `rt_${l.id}`, name: `IEM Tx ${rack.transmitters.length + 1}`, channels: [{ id: `tc_${l.id}`, linkId: l.id, combinerId: null, antennaId: `ta_${l.id}` }] });
   }
   const used = new Map();

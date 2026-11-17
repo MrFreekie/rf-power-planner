@@ -156,6 +156,7 @@ export function setLinkKind(store, linkId, kind) {
     next.id = cur.id;
     next.freqMHz = cur.freqMHz;
     d.links[i] = next;
+    if (Array.isArray(d.people)) prunePeople(d); // a person can no longer carry a link of the wrong kind
   });
 }
 
