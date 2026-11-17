@@ -486,7 +486,7 @@ export function createPlanView(canvas, store) {
 
   /** A dragged pack changes its owner's stored offset, so a later group move keeps the new arrangement. */
   function syncPersonOffset(s, link) {
-    const o = linkOwners(s.people).get(link.id); if (!o) return;
+    const o = linkOwners(s.people, s.links).get(link.id); if (!o) return;
     const person = s.people.find((q) => q.id === o.personId); if (!person || !person.pos) return;
     const e = o.which === 'iem' ? link.rx : link.tx;
     if (o.extra) { (person.extraOffsets || (person.extraOffsets = {}))[link.id] = offsetFromPack(person, e.pos); return; } // a dragged backup pack updates its own offset

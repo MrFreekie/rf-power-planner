@@ -48,7 +48,7 @@ export function frequencyPlanRows(scene, results) {
   const w = tvWidthOf(scene), rows = [];
   const solved = links.map((l, i) => resultAt(results, scene, i) || solveLink(scene, l));
   const conf = new Map(confidenceSummary(scene, solved).map((c) => [c.linkId, c]));
-  const owners = linkOwners(scene && scene.people), peopleById = new Map(((scene && scene.people) || []).map((p) => [p.id, p]));
+  const owners = linkOwners(scene && scene.people, scene && scene.links), peopleById = new Map(((scene && scene.people) || []).map((p) => [p.id, p]));
   links.forEach((l, i) => {
     const res = solved[i], c = conf.get(l.id), ch = tvChannelOf(l.freqMHz, w), notes = [];
     const digital = l.modulation && l.modulation.type === 'digital';

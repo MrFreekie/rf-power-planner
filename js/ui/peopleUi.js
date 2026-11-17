@@ -5,7 +5,7 @@ const fin = Number.isFinite;
 
 /** The person who carries a link, or null: { person, which: 'mic' | 'iem' }. */
 export function personOfLink(scene, linkId, owners = null) {
-  const o = (owners || linkOwners(scene && scene.people)).get(linkId); // pass `owners` (linkOwners(people)) to build the map once per draw
+  const o = (owners || linkOwners(scene && scene.people, scene && scene.links)).get(linkId); // pass `owners` (linkOwners(people)) to build the map once per draw
   if (!o) return null;
   const person = (scene.people || []).find((p) => p.id === o.personId);
   if (!person) return null;
@@ -16,9 +16,9 @@ export function personOfLink(scene, linkId, owners = null) {
 
 /** Options for adding a backup mic pack to a person: [{ value, label, swap }] of mic links that are not already theirs (main or backup). Links carried by someone else are flagged swap:true. */
 export function extraChoices(scene, person) {
-  const owners = linkOwners(scene.people), out = [];
+  const owners = linkOwners(scene.people, scene.links), out = [];
   for (const l of scene.links || []) {
-    if (l.kind !== 'mic' || l.txOf !== undefined || l.id === person.micLinkId || (person.extraLinkIds || []).includes(l.id)) continue;
+    if ((l.kind !== 'mic' && l.kind !== 'iem') || (l.txOf !== undefined && l.kind === 'mic') || l.id === person.micLinkId || l.id === person.iemLinkId || (person.extraLinkIds || []).includes(l.id)) continue;
     const o = owners.get(l.id);
     if (!o) out.push({ value: l.id, label: l.name, swap: false });
     else { const other = (scene.people || []).find((p) => p.id === o.personId); out.push({ value: l.id, label: `${l.name} (carried by ${other ? other.name : 'someone'}, swap)`, swap: true }); }
@@ -32,7 +32,7 @@ export function extraChoices(scene, person) {
  * The first entry is "none".
  */
 export function linkChoices(scene, person, which) {
-  const kind = which === 'iem' ? 'iem' : 'mic', owners = linkOwners(scene.people), out = [{ value: '', label: 'None', swap: false }];
+  const kind = which === 'iem' ? 'iem' : 'mic', owners = linkOwners(scene.people, scene.links), out = [{ value: '', label: 'None', swap: false }];
   for (const l of scene.links || []) {
     if (l.kind !== kind || (l.txOf !== undefined && kind !== 'iem')) continue; // an extra mic receiver is not a transmitter anyone can carry; an extra in-ear bodypack is worn
     const o = owners.get(l.id);
@@ -55,7 +55,7 @@ export function groupPoints(scene, person) {
   }
   for (const id of person.extraLinkIds || []) { // backup mic packs stay inside the outline too
     const l = (scene.links || []).find((q) => q.id === id);
-    if (l) pts.push({ x: l.tx.pos.x, y: l.tx.pos.y, what: 'mic', extra: true, linkId: l.id, itemId: l.tx.id });
+    if (l) { const e = l.kind === 'iem' ? l.rx : l.tx; pts.push({ x: e.pos.x, y: e.pos.y, what: l.kind === 'iem' ? 'iem' : 'mic', extra: true, linkId: l.id, itemId: e.id }); }
   }
   return pts;
 }
@@ -89,7 +89,8 @@ export function personMargins(scene, person, solve) {
     const l = (scene.links || []).find((q) => q.id === id); if (!l) return;
     let r = null; try { r = solve(l); } catch { r = null; }
     const m = r && fin(r.marginDb) ? r.marginDb : NaN, st = r && r.status ? String(r.status).toUpperCase() : 'UNKNOWN';
-    rows.push({ which: 'mic', extra: true, linkId: l.id, name: l.name, marginDb: m, status: st, text: `Mic ${i + 2} ${marginWord(m)} ${st}` });
+    const w = l.kind === 'iem' ? 'iem' : 'mic';
+    rows.push({ which: w, extra: true, linkId: l.id, name: l.name, marginDb: m, status: st, text: `${w === 'iem' ? 'IEM' : 'Mic'} ${(person.extraLinkIds || []).slice(0, i).filter((x) => ((scene.links || []).find((q) => q.id === x) || {}).kind === l.kind).length + 2} ${marginWord(m)} ${st}` });
   });
   return rows;
 }
@@ -101,7 +102,7 @@ export function peopleBudgetRows(scene, link, solve) {
   const m = personMargins(scene, o.person, solve);
   if (!m.length) return [];
   const worst = m.reduce((a, b) => (fin(b.marginDb) && (!fin(a.marginDb) || b.marginDb < a.marginDb) ? b : a), m[0]);
-  return [{ label: o.person.name, value: m.map((x) => x.text).join('  |  ') + (m.length > 1 ? `. Weaker: ${worst.extra ? 'backup mic' : worst.which === 'iem' ? 'IEM' : 'mic'}` : ''), severity: m.some((x) => x.status === 'FAIL' || x.status === 'DEAD') ? 'warning' : m.some((x) => x.status === 'MARGINAL') ? 'info' : 'ok' }];
+  return [{ label: o.person.name, value: m.map((x) => x.text).join('  |  ') + (m.length > 1 ? `. Weaker: ${worst.extra ? (worst.which === 'iem' ? 'extra IEM' : 'backup mic') : worst.which === 'iem' ? 'IEM' : 'mic'}` : ''), severity: m.some((x) => x.status === 'FAIL' || x.status === 'DEAD') ? 'warning' : m.some((x) => x.status === 'MARGINAL') ? 'info' : 'ok' }];
 }
 
 /** Paths-table rows for the active link's carrier: one row with both margins side by side ({ kind, length, delayNs, relDb } strings). */

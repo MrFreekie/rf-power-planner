@@ -98,7 +98,7 @@ export function createSideView(canvas, store) {
 
   function draw(ctx, w, h, th) {
     const scene = store.getScene(), sel = store.getSelection(), link = activeLink(scene, sel);
-    frameOwners = linkOwners(scene.people); // once per frame
+    frameOwners = linkOwners(scene.people, scene.links); // once per frame
     handles = [];
     ctx.fillStyle = th.paper; ctx.fillRect(0, 0, w, h);
     if (!link) { haloText(ctx, th, 'No link in scene', w / 2, h / 2, { align: 'center', color: th.inkSoft }); return; }

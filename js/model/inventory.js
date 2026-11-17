@@ -61,7 +61,7 @@ function chainSummary(link) {
 
 export function inventoryRows(scene, results) {
   const links = (scene && Array.isArray(scene.links)) ? scene.links : [];
-  const owners = linkOwners(scene && scene.people), people = new Map(((scene && scene.people) || []).map((p) => [p.id, p]));
+  const owners = linkOwners(scene && scene.people, scene && scene.links), people = new Map(((scene && scene.people) || []).map((p) => [p.id, p]));
   return links.map((l, i) => {
     const res = resultAt(results, scene, i) || solveLink(scene, l);
     const o = owners.get(l.id), person = o && people.get(o.personId);

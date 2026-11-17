@@ -11,12 +11,12 @@
 //   hip). Moving or turning the person moves and turns both packs together and keeps these offsets.
 //   contact / dampness (library keys, antenna contact and dampness) are the body coupling of the person: they are written onto the mic transmitter
 //   antenna and the IEM bodypack antenna, so the loss follows the person.
-//   extraLinkIds / extraOffsets (optional, backup bodypacks): extraLinkIds = [linkId, ...] of further MIC links the person carries (at most PEOPLE_LIMITS.maxExtra, never
+//   extraLinkIds / extraOffsets (optional, backup bodypacks): extraLinkIds = [linkId, ...] of further MIC links or IEM bodypack links the person carries (at most PEOPLE_LIMITS.maxExtra, never
 //   the main micLinkId, each link owned once across main and extra); extraOffsets = { [linkId]: { dx, dy, dz } } the same kind of offset as micOffset. They move,
 //   turn and take the contact / dampness with the person. Absent = unchanged older files.
 //   Deleting a person never deletes a link. prunePeople(scene) removes references to links that no longer exist.
 
-export const PEOPLE_LIMITS = Object.freeze({ max: 64, coord: [-5000, 5000], offsetM: [-10, 10], heightM: [0, 5], nameChars: 80, maxExtra: 4 });
+export const PEOPLE_LIMITS = Object.freeze({ max: 64, coord: [-5000, 5000], offsetM: [-10, 10], heightM: [0, 5], nameChars: 80, maxExtra: 8 });
 export const PERSON_ROLES = Object.freeze(['singer', 'instrumentalist', 'presenter', 'crew', 'other']);
 export const PERSON_COLOURS = Object.freeze(['red', 'orange', 'amber', 'green', 'teal', 'cyan', 'blue', 'indigo', 'violet', 'pink', 'brown', 'grey']);
 /** Default pack offsets (metres, ASSUMED teaching figures): handheld in the right hand, bodypack at the belt, IEM pack at the other hip. */
@@ -37,8 +37,8 @@ export function createPerson(overrides = {}) {
 /** The name shared with a person's links, for example "Anna mic" or "Anna IEM". */
 export const personLinkName = (person, which) => `${person.name} ${which === 'iem' ? 'IEM' : 'mic'}`;
 
-/** The name of the i-th extra mic link of a person (0 = the first backup): "Presenter mic 2". */
-export const extraLinkName = (person, i) => `${person.name} mic ${i + 2}`;
+/** The name of the i-th extra link of a kind (0 = the first extra): "Presenter mic 2", "Presenter IEM 2". */
+export const extraLinkName = (person, i, kind = 'mic') => `${person.name} ${kind === 'iem' ? 'IEM' : 'mic'} ${i + 2}`;
 
 /** Rotate a pack offset (dx, dy) of a person facing facingDeg: the offsets are stored for facing 0. */
 export function rotateOffset(o, facingDeg) {
@@ -75,13 +75,13 @@ export function personPackPositions(person) {
 }
 
 /** Link ids assigned across people: Map id -> { personId, which }. A duplicate keeps the first owner. */
-export function linkOwners(people) {
-  const m = new Map();
+export function linkOwners(people, links) {
+  const m = new Map(), kindOf = new Map((Array.isArray(links) ? links : []).map((l) => [l.id, l.kind]));
   for (const p of Array.isArray(people) ? people : []) {
     if (!isObj(p)) continue;
     if (p.micLinkId && !m.has(p.micLinkId)) m.set(p.micLinkId, { personId: p.id, which: 'mic' });
     if (p.iemLinkId && !m.has(p.iemLinkId)) m.set(p.iemLinkId, { personId: p.id, which: 'iem' });
-    if (Array.isArray(p.extraLinkIds)) for (const id of p.extraLinkIds) if (id && !m.has(id)) m.set(id, { personId: p.id, which: 'mic', extra: true });
+    if (Array.isArray(p.extraLinkIds)) for (const id of p.extraLinkIds) if (id && !m.has(id)) m.set(id, { personId: p.id, which: kindOf.get(id) === 'iem' ? 'iem' : 'mic', extra: true });
   }
   return m;
 }
@@ -105,7 +105,7 @@ export function prunePeople(scene) {
     if (p.extraLinkIds !== undefined) {
       const keep = [];
       for (const id of Array.isArray(p.extraLinkIds) ? p.extraLinkIds : []) {
-        if (typeof id === 'string' && kinds.get(id) === 'mic' && !seen.has(id) && keep.length < PEOPLE_LIMITS.maxExtra) { keep.push(id); seen.add(id); }
+        if (typeof id === 'string' && (kinds.get(id) === 'mic' || kinds.get(id) === 'iem') && !seen.has(id) && keep.length < PEOPLE_LIMITS.maxExtra) { keep.push(id); seen.add(id); }
       }
       if (keep.length) {
         p.extraLinkIds = keep;
@@ -147,9 +147,9 @@ export function validatePerson(p, path, errors, scene) {
       p.extraLinkIds.forEach((id, i) => {
         const l = typeof id === 'string' ? links.find((x) => x.id === id) : null;
         if (!l) errors.push(`${path}.extraLinkIds[${i}] does not match an existing link`);
-        else if (l.kind !== 'mic') errors.push(`${path}.extraLinkIds[${i}] must be a mic link`);
-        else if (l.txOf !== undefined) errors.push(`${path}.extraLinkIds[${i}] must not be an extra receiver`);
-        else if (id === p.micLinkId || p.extraLinkIds.indexOf(id) !== i) errors.push(`${path}.extraLinkIds[${i}] repeats a link`);
+        else if (l.kind !== 'mic' && l.kind !== 'iem') errors.push(`${path}.extraLinkIds[${i}] must be a mic or IEM link`);
+        else if (l.txOf !== undefined && l.kind === 'mic') errors.push(`${path}.extraLinkIds[${i}] must not be an extra receiver`);
+        else if (id === p.micLinkId || id === p.iemLinkId || p.extraLinkIds.indexOf(id) !== i) errors.push(`${path}.extraLinkIds[${i}] repeats a link`);
       });
     }
   }

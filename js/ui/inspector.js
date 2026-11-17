@@ -912,19 +912,19 @@ export function mountInspector({ container, store }) {
       selectField({ key: 'ppl-damp', label: 'Dampness (both packs)', options: Object.entries(ANTENNA_DAMPNESS_LABELS), get: (cc) => P(cc)?.dampness ?? 'dry', set: (cc, v) => upd({ dampness: v }) }),
     );
     // backup mic packs: a list with Remove buttons and an "Add" select (same swap confirm as the main links)
-    const extraBox = el('div', 'ppl-extra'); extraBox.setAttribute('role', 'group'); extraBox.setAttribute('aria-label', 'Backup mic packs');
-    extraBox.append(el('p', 'hint', `Backup mic packs (up to ${PEOPLE_LIMITS.maxExtra}): further mic links this person carries. They move with the person and drag to set their own offset.`));
+    const extraBox = el('div', 'ppl-extra'); extraBox.setAttribute('role', 'group'); extraBox.setAttribute('aria-label', 'Extra mic and IEM packs');
+    extraBox.append(el('p', 'hint', `Extra packs (up to ${PEOPLE_LIMITS.maxExtra}): further mic links or IEM bodypacks this person carries, beyond the two above. They move with the person and drag to set their own offset.`));
     const exList = el('ul', 'ppl-extra-list');
     for (const lid of p0.extraLinkIds || []) {
       const l = c.scene.links.find((q) => q.id === lid); if (!l) continue;
       const li = el('li', null, null); const nm = el('span', 'ppl-extra-name', l.name);
-      const rm = button('Remove', `ppl-extra-rm-${lid}`, () => { removeExtraMic(store, id, lid); announce(`${l.name} is no longer a backup pack of ${p0.name}; the link stays`, { key: 'ppl', delay: 100 }); }, { label: `Remove ${l.name} from this person (the link stays in the scene)` });
+      const rm = button('Remove', `ppl-extra-rm-${lid}`, () => { removeExtraMic(store, id, lid); announce(`${l.name} is no longer an extra pack of ${p0.name}; the link stays`, { key: 'ppl', delay: 100 }); }, { label: `Remove ${l.name} from this person (the link stays in the scene)` });
       li.append(nm, rm); exList.append(li);
     }
-    if (!exList.children.length) exList.append(el('li', 'hint', 'No backup packs.'));
+    if (!exList.children.length) exList.append(el('li', 'hint', 'No extra packs.'));
     const addSel = selectField({
-      key: 'ppl-extra-add', label: 'Add a backup mic pack',
-      options: (cc) => [['', (P(cc)?.extraLinkIds || []).length >= PEOPLE_LIMITS.maxExtra ? 'Limit reached' : 'Choose a mic link...'], ...extraChoices(cc.scene, P(cc) || p0).map((x) => [x.value, x.label])],
+      key: 'ppl-extra-add', label: 'Add an extra mic or IEM pack',
+      options: (cc) => [['', (P(cc)?.extraLinkIds || []).length >= PEOPLE_LIMITS.maxExtra ? 'Limit reached' : 'Choose a mic or IEM link...'], ...extraChoices(cc.scene, P(cc) || p0).map((x) => [x.value, x.label])],
       get: () => '',
       set: async (cc, v) => {
         if (!v) return;
@@ -936,7 +936,7 @@ export function mountInspector({ container, store }) {
           swap = true;
         }
         const done = assignExtraMic(store, id, v, { swap });
-        announce(done ? `${p0.name} now carries a backup mic pack` : 'Could not add the backup pack (limit reached or not allowed)', { key: 'ppl', delay: 200 });
+        announce(done ? `${p0.name} now carries an extra pack` : 'Could not add the extra pack (limit reached or not allowed)', { key: 'ppl', delay: 200 });
         sync();
       },
     });

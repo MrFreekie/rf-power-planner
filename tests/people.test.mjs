@@ -7,7 +7,7 @@ import { createStore } from '../js/store.js';
 import { createDefaultScene, createDefaultLink, validateScene, migrateScene, SCENE_LIMITS } from '../js/model/scene.js';
 import { solveLink } from '../js/model/rf.js';
 import * as A from '../js/actions.js';
-import { PEOPLE_LIMITS, personPackPositions, rotateOffset, offsetFromPack, prunePeople, createPerson } from '../js/model/people.js';
+import { PEOPLE_LIMITS, personPackPositions, rotateOffset, offsetFromPack, prunePeople, createPerson, linkOwners } from '../js/model/people.js';
 import { bandPeopleScene, EXAMPLES, buildExample } from '../js/examples.js';
 
 const near = (a, b, tol = 1e-9, m = '') => assert.ok(Math.abs(a - b) <= tol, `${m} got ${a}, expected ${b}`);
@@ -268,7 +268,7 @@ test('extra mic: validation errors, migrate prunes dangling and duplicate entrie
   const good = st.getScene();
   const bad = (fn) => { const s = structuredClone(good); fn(s); return validateScene(s).errors.join(';'); };
   assert.match(bad((s) => { s.people[0].extraLinkIds = ['nope']; }), /extraLinkIds\[0\] does not match/);
-  assert.match(bad((s) => { s.people[0].extraLinkIds = [i.id]; }), /must be a mic link/);
+  assert.match(bad((s) => { s.links.find((l) => l.id === i.id).kind = 'p2p'; s.people[0].extraLinkIds = [i.id]; }), /must be a mic or IEM link/);
   assert.match(bad((s) => { s.people[0].extraLinkIds = [m.id]; }), /repeats a link/);
   assert.match(bad((s) => { s.people[0].extraLinkIds = 'x'; }), /must be an array/);
   assert.match(bad((s) => { s.people[0].extraLinkIds = new Array(PEOPLE_LIMITS.maxExtra + 1).fill(sp.id); }), /at most/);
@@ -276,7 +276,7 @@ test('extra mic: validation errors, migrate prunes dangling and duplicate entrie
   assert.match(bad((s) => { s.people[0].extraOffsets = { zzz: { dx: 0, dy: 0, dz: 1 } }; }), /not in extraLinkIds/);
   assert.match(bad((s) => { s.people.push(createPerson({ name: 'Two', extraLinkIds: [sp.id] })); }), /already assigned to another person/);
   // migrate: dangling, wrong kind, duplicate and over-cap entries are dropped, offsets of dropped ones too
-  const dirty = structuredClone(good);
+  const dirty = structuredClone(good); dirty.links.find((l) => l.id === i.id).kind = 'p2p';
   dirty.people[0].extraLinkIds = ['gone', i.id, sp.id, sp.id, m.id];
   dirty.people[0].extraOffsets = { gone: { dx: 0, dy: 0, dz: 1 }, [sp.id]: dirty.people[0].extraOffsets[sp.id] };
   const mig = migrateScene(dirty);
@@ -318,4 +318,25 @@ test('swap follows the jump rule for the displaced owner too; re-assigning the s
   assert.ok(dist(at(m2.id), ann.pos) <= 1.5, 'the new link jumps to Ann');
   assert.ok(dist(at(m1.id), bob.pos) <= 1.5, `the displaced owner Bob gets the link at his body, not 28 m away (${dist(at(m1.id), bob.pos).toFixed(1)} m)`);
   assert.ok(validateScene(st.getScene()).ok);
+});
+
+test('one person can carry several mics and several IEM bodypacks', () => {
+  const sc = createDefaultScene(); sc.links = [createDefaultLink('mic'), createDefaultLink('mic'), createDefaultLink('iem'), createDefaultLink('iem'), createDefaultLink('iem')];
+  const st = createStore(sc), id = A.addPerson(st, { name: 'Sam', pos: { x: 1, y: 1 } });
+  const [m1, m2, i1, i2, i3] = st.getScene().links;
+  assert.ok(A.assignMic(st, id, m1.id)); assert.ok(A.assignIem(st, id, i1.id));
+  assert.ok(A.assignExtraMic(st, id, m2.id)); assert.ok(A.assignExtraMic(st, id, i2.id)); assert.ok(A.assignExtraMic(st, id, i3.id));
+  const s = st.getScene(), p = s.people[0];
+  assert.deepEqual(validateScene(s), { ok: true, errors: [] });
+  assert.deepEqual(p.extraLinkIds, [m2.id, i2.id, i3.id]);
+  const ow = linkOwners(s.people, s.links);
+  assert.equal(ow.get(i2.id).which, 'iem'); assert.equal(ow.get(m2.id).which, 'mic');
+  const byId = (x) => s.links.find((l) => l.id === x);
+  assert.equal(byId(m2.id).name, 'Sam mic 2'); assert.equal(byId(i2.id).name, 'Sam IEM 2'); assert.equal(byId(i3.id).name, 'Sam IEM 3');
+  // the bodypack of an extra IEM moves with the person
+  A.updatePerson(st, id, { facingDeg: 90 });
+  const s2 = st.getScene(), pos = s2.links.find((l) => l.id === i2.id).rx.pos;
+  assert.ok(Math.hypot(pos.x - 1, pos.y - 1) < 1.5);
+  // the same IEM cannot be both the main and an extra
+  assert.equal(A.assignExtraMic(st, id, i1.id), false);
 });

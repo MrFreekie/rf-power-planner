@@ -6,7 +6,7 @@ import { CABLES, ANTENNAS, GROUND_PLANE_LABELS, GROUND_PLANE_GAIN_DBI, allowedPo
 import { POLARISATION_LABELS } from './antennaFields.js';
 import { linkCard, txFormFactor } from '../model/inventory.js';
 import { inventoryView } from './inventoryUi.js';
-import { addLink, addReceiverFor, assignMic, assignIem, removeExtraMic, peopleLinkOwners } from '../actions.js';
+import { addLink, addReceiverFor, assignMic, assignIem, assignExtraMic, removeExtraMic, peopleLinkOwners } from '../actions.js';
 import { setLinkFocus } from '../view/linkFocus.js';
 import { getLinkDock, subscribeLinkDock } from './linkDock.js';
 import { activeLink } from '../view/util.js';
@@ -111,10 +111,13 @@ export function mountRack({ container, store }) {
       const people = scene.people || [], o = peopleLinkOwners(scene).get(id), cur = o ? o.personId : '';
       if (!people.length) { b.append(el('p', 'hint', 'No people in the show yet. Add one in the People section, then assign this link here.')); return; }
       const has = (p) => (which === 'mic' ? p.micLinkId : p.iemLinkId);
-      const opts = [['', 'No one'], ...people.map((p) => [p.id, has(p) && has(p) !== id ? `${p.name} (replaces ${(scene.links.find((l) => l.id === has(p)) || {}).name || 'their link'})` : p.name])];
+      const opts = [['', 'No one'], ...people.map((p) => [p.id, has(p) && has(p) !== id ? `${p.name} (already has ${(scene.links.find((l) => l.id === has(p)) || {}).name || 'one'}; this becomes an extra)` : p.name])];
       b.append(field(which === 'mic' ? 'Worn or held by' : 'Worn by', select('Person for ' + linkName(id), opts, cur, (v) => {
         if (!v) { if (o && o.extra) removeExtraMic(store, o.personId, id); else if (o) (which === 'mic' ? assignMic : assignIem)(store, o.personId, null); return; }
-        (which === 'mic' ? assignMic : assignIem)(store, v, id, { swap: !!o && o.personId !== v });
+        if (o && o.personId === v) return; // already theirs (main or extra)
+        const swap = !!o && o.personId !== v, pe = people.find((x) => x.id === v);
+        if (pe && has(pe) && has(pe) !== id) assignExtraMic(store, v, id, { swap }); // a person can carry several: the second and later ones are extras
+        else (which === 'mic' ? assignMic : assignIem)(store, v, id, { swap });
       })));
     };
     const gear = (id, b, part) => { const l = scene.links.find((q) => q.id === id); if (l) b.append(gearPickers(store, l, part)); };
