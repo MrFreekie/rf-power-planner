@@ -341,8 +341,9 @@ import { noiseBudgetRows, noisePathRows } from './ui/noiseUi.js';
 import { crowdBudgetRows, crowdPathRows } from './ui/crowdUi.js';
 import { addCrowd } from './actionsAreas.js';
 import { newCrowdPartial } from './ui/crowdUi.js';
-import { mountBuildStamp } from './ui/buildStamp.js';
+import { mountBuildStamp, watchForUpdate } from './ui/buildStamp.js';
 mountBuildStamp();
+watchForUpdate();
 function renderExtras(r, scene = null, link = null) {
   const dl = $('readout-extra');
   const rows = budgetExtras(r, fresnelView.on && scene && link ? fresnelFor(scene, link) : null, scene && link ? [...peopleBudgetRows(scene, link, (l) => solveLink(scene, l)), ...noiseBudgetRows(r && r.noiseSources), ...crowdBudgetRows(r)] : []);

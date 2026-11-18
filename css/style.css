@@ -92,6 +92,12 @@ h2 { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: 
 .brand-build { flex: none; margin-left: auto; display: inline-flex; align-items: baseline; gap: 6px; padding: 2px 9px; border: 1px solid currentColor; border-radius: 999px; font-size: 11px; letter-spacing: 0.02em; color: var(--on-brand); opacity: 0.92; white-space: nowrap; }
 .brand-build b { font-weight: 700; font-variant-numeric: tabular-nums; }
 .brand-build span { opacity: 0.75; font-variant-numeric: tabular-nums; }
+.brand-update { flex: none; margin-left: 8px; padding: 2px 10px; border: 1px solid #ffd24a; border-radius: 999px; background: #ffd24a; color: #1b1400; font: inherit; font-size: 11px; font-weight: 700; cursor: pointer; }
+.brand-update[hidden] { display: none; }
+.brand-update:hover { filter: brightness(1.08); }
+.brand-update:focus-visible { outline: 2px solid var(--on-brand); outline-offset: 2px; }
+.brand-build + .brand-update { margin-left: 8px; }
+.brand-build + .brand-update + .brand-alpha, .brand-update + .brand-alpha { margin-left: 8px; }
 .brand-build + .brand-alpha { margin-left: 0; }
 .brand-alpha { flex: none; margin-left: auto; padding: 1px 8px; border-radius: 4px; background: #ffd24a; color: #1b1400; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
 .brand-support { flex: none; font-size: 12px; color: var(--on-brand); text-decoration: underline; text-underline-offset: 2px; white-space: nowrap; }

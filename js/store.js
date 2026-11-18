@@ -1,5 +1,6 @@
 // Observable scene store with undo/redo history, selection and copy-on-write updates.
 import { createDefaultScene, syncScene } from './model/scene.js';
+import { adoptLinkEdits } from './model/rack.js';
 
 const HISTORY_LIMIT = 50;
 
@@ -45,6 +46,7 @@ export function createStore(initial = createDefaultScene()) {
       if (heldVenue !== undefined) draft.venue = heldVenue;
       const result = fn(draft);
       const next = result === undefined ? draft : result;
+      adoptLinkEdits(scene, next); // an edit to a link end fed by a rack antenna moves that antenna, so the rack does not put it back
       syncScene(next); // keeps IEM branch 0 mirrored to the legacy tx/chain fields
       const { venue: nv, ...nrest } = next;
       if (nv === heldVenue && JSON.stringify(nrest) === JSON.stringify(rest)) return false; // no-op

@@ -28,3 +28,38 @@ export function mountBuildStamp(root = document) {
     el.title = `Software release ${r.version}, deployed ${BUILD_TIME} UTC (shown in your local time).`;
   } else el.textContent = 'Local build';
 }
+
+/** isNewerBuild(current, latest) -> true when `latest` is a later ISO time than `current`. Either missing or unreadable gives false. Pure. */
+export function isNewerBuild(current, latest) {
+  const a = Date.parse(current), b = Date.parse(latest);
+  return Number.isFinite(a) && Number.isFinite(b) && b > a;
+}
+
+/** buildTimeFrom(text) -> the BUILD_TIME string in the text of js/build-info.js, or null. Pure. */
+export function buildTimeFrom(text) {
+  const m = /BUILD_TIME\s*=\s*['"]([^'"]+)['"]/.exec(String(text || ''));
+  return m ? m[1] : null;
+}
+
+/**
+ * Watches for a newer deploy: fetches js/build-info.js fresh (no cache) on a timer, when the tab becomes visible again, and once at start. When it names a later build than the one
+ * running, the "Update available" button next to the release label is shown; pressing it reloads the page. Does nothing for a local build or when fetch fails.
+ */
+export function watchForUpdate({ button = document.getElementById('brand-update'), current = BUILD_TIME, everyMs = 5 * 60 * 1000, fetchFn = (typeof fetch === 'function' ? fetch : null), reload = () => location.reload() } = {}) {
+  if (!button || !current || !fetchFn) return () => {};
+  let stopped = false, timer = null;
+  const check = async () => {
+    if (stopped || !button.hidden) return;
+    try {
+      const res = await fetchFn(new URL('./js/build-info.js', document.baseURI).href + '?t=' + Date.now(), { cache: 'no-store' });
+      if (!res.ok) return;
+      const latest = buildTimeFrom(await res.text());
+      if (isNewerBuild(current, latest)) { button.hidden = false; button.title = 'A newer version has been published. Reload to get it; your work is kept if you Save first.'; }
+    } catch { /* offline or blocked: try again later */ }
+  };
+  button.addEventListener('click', () => reload());
+  const onVis = () => { if (document.visibilityState === 'visible') check(); };
+  document.addEventListener('visibilitychange', onVis);
+  timer = setInterval(check, everyMs); check();
+  return () => { stopped = true; clearInterval(timer); document.removeEventListener('visibilitychange', onVis); };
+}

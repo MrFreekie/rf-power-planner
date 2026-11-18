@@ -170,3 +170,18 @@ test('newScene gives an empty valid plan with the stage, keeps units, and undoes
   assert.equal(validateScene(sc).ok, true);
   st.undo(); assert.equal(st.getScene().links.length, 1);
 });
+
+test('a rack-fed antenna can be moved by editing the link end, and a new mic reuses the rack antenna', async () => {
+  const { adoptRack } = await import('../js/actionsRack.js');
+  const { addLink } = await import('../js/actions.js');
+  const st = createStore(createDefaultScene()); adoptRack(st);
+  const x0 = st.getScene().links[0].rx.pos.x;
+  st.update((d) => { d.links[0].rx.pos.x = x0 + 2; });
+  assert.equal(st.getScene().links[0].rx.pos.x, x0 + 2, 'the move sticks');
+  assert.equal(st.getScene().rack.antennas[0].pos.x, x0 + 2, 'the rack antenna moved');
+  const n = st.getScene().rack.antennas.length;
+  const id = addLink(st, 'mic');
+  assert.ok(id);
+  assert.equal(st.getScene().rack.antennas.length, n, 'no extra antenna for the new mic');
+  assert.equal(st.getScene().links.find((l) => l.id === id).rx.pos.x, x0 + 2, 'the new mic listens on the same antenna');
+});

@@ -105,6 +105,52 @@ export function channelRoute(rack, ch, r) {
   return { splitter: sp, stages, antA: ant(root ? root.antA : feed.antA), antB: ant(root ? root.antB : feed.antB), hops, loopLossDb: hops.reduce((t, h) => t + loopLossOf(h), 0) };
 }
 
+/** feedAntenna(rack, linkId, which) -> the rack antenna that sets where a link's end sits ('rx' / 'rxB': the receive antennas of a mic link, 'tx': the transmit antenna of an IEM link), or null. Dragging that end on the plan must move this antenna, or the next compile puts it back. */
+export function feedAntenna(rack, linkId, which) {
+  if (!rack) return null;
+  const ant = (id) => (rack.antennas || []).find((a) => a.id === id) || null;
+  if (which === 'tx') {
+    for (const t of rack.transmitters || []) for (const c of t.channels || []) {
+      if (c.linkId !== linkId) continue;
+      const cb = c.combinerId ? (rack.combiners || []).find((x) => x.id === c.combinerId) : null;
+      return ant(cb ? cb.antennaId : c.antennaId);
+    }
+    return null;
+  }
+  for (const r of rack.receivers || []) for (const c of r.channels || []) {
+    if (c.linkId !== linkId) continue;
+    const route = channelRoute(rack, c, r);
+    return which === 'rxB' ? route.antB : route.antA;
+  }
+  return null;
+}
+
+/**
+ * adoptLinkEdits(prev, next): a link end that feeds from a rack antenna cannot be moved or re-aimed by editing the link, because the rack puts the antenna's place and type back
+ * on every update. So when an update changed a link's end (a plan or side drag, a nudge, an inspector field) and left the rack antenna alone, the change is written to the rack
+ * antenna instead. If the same update also changed the rack antenna, the rack wins. In place on `next`; no-op without a rack.
+ */
+export function adoptLinkEdits(prev, next) {
+  const rack = next && next.rack;
+  if (!rack || !prev || !Array.isArray(prev.links) || !Array.isArray(next.links)) return;
+  const was = new Map(prev.links.map((l) => [l.id, l])), wasAnt = new Map(((prev.rack && prev.rack.antennas) || []).map((a) => [a.id, a]));
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const pull = (fa, end, prevEnd) => {
+    if (!fa || !end || !prevEnd) return;
+    const pa = wasAnt.get(fa.id);
+    if (pa && !same(pa, fa)) return; // the rack side changed in this update: it wins
+    if (end.pos && typeof end.pos === 'object' && !same(end.pos, prevEnd.pos)) fa.pos = structuredClone(end.pos);
+    if (end.antenna && typeof end.antenna === 'object' && !same(end.antenna, prevEnd.antenna)) fa.antenna = structuredClone(end.antenna);
+  };
+  for (const l of next.links) {
+    const p = was.get(l.id); if (!p) continue;
+    pull(feedAntenna(rack, l.id, 'rx'), l.rx, p.rx);
+    pull(feedAntenna(rack, l.id, 'tx'), l.tx, p.tx);
+    const b = l.rx && l.rx.diversity && l.rx.diversity.antennaB, pb = p.rx && p.rx.diversity && p.rx.diversity.antennaB;
+    if (b && pb) pull(feedAntenna(rack, l.id, 'rxB'), b, pb);
+  }
+}
+
 const freeId = (base, taken) => { let id = base, n = 2; while (taken.includes(id)) id = `${base}_${n++}`; return id; };
 
 /** compileRack(scene): in place, no-op without scene.rack. Dangling channels are left alone; a splitter with no antenna A leaves its links' antennas untouched. */

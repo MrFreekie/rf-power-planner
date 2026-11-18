@@ -1,5 +1,6 @@
 // Scene mutations. Every action takes the store first and goes through store.update,
 // so undo/redo and subscribers behave uniformly. Pure of the DOM.
+import { RACK_LIMITS } from './model/rack.js';
 import { AUDIO_SOURCE_IDS, TONE_HZ_LIMITS } from './model/audio-source.js';
 import { buildExample } from './examples.js';
 import { findLockable } from './model/lock.js';
@@ -1104,6 +1105,14 @@ export function addLink(store, kind, partial = {}) {
       if (kind === 'iem') syncBranches(link);
     }
     d.links.push(link); id = link.id;
+    if (kind === 'mic' && d.rack && Array.isArray(d.rack.receivers)) { // with a rack, a new mic listens on the receive antenna already there instead of getting an antenna of its own
+      const ants = (d.rack.antennas || []).filter((a) => a.role !== 'tx'), host = ants[ants.length - 1];
+      if (host && d.rack.receivers.length < RACK_LIMITS.maxReceivers) {
+        const taken = (list) => new Set(list), rids = taken(d.rack.receivers.map((r) => r.id)), cids = taken(d.rack.receivers.flatMap((r) => r.channels.map((c) => c.id)));
+        let rid = `rr_${link.id}`, cid = `rc_${link.id}`; while (rids.has(rid)) rid += '_'; while (cids.has(cid)) cid += '_';
+        d.rack.receivers.push({ id: rid, name: `Rx ${d.rack.receivers.length + 1}`, channels: [{ id: cid, linkId: link.id, splitterId: null, antA: host.id, antB: null }] });
+      }
+    }
   });
   return id;
 }
