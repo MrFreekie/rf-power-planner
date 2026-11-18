@@ -3,14 +3,33 @@
 import { groupPoints, groupCircle, personOfLink } from '../ui/peopleUi.js';
 import { haloText, setFont } from './util.js';
 import { placeLabel } from '../ui/antennaFields.js';
+import { drawPerson } from './icons.js';
 
 const TAG = { red: '#c0392b', orange: '#d9741a', amber: '#c99a00', green: '#2e8b57', teal: '#1f8a8a', cyan: '#2a9dc4', blue: '#2f5fb3', indigo: '#4b4bb0', violet: '#7b4bb0', pink: '#c2517d', brown: '#7a5230', grey: '#777777' };
 export const personTag = (c) => TAG[c] || TAG.grey;
 const ROLE_MARK = { singer: 'S', instrumentalist: 'I', presenter: 'P', crew: 'C', other: 'O' };
 export const roleMark = (r) => ROLE_MARK[r] || 'O';
 
-/** Draw every placed person on the plan. Pushes a { kind: 'person' } handle per person. Returns the label rectangles drawn. */
-export function drawPeoplePlan(ctx, th, vp, scene, sel, handles, hoverKey, w, placed = []) {
+/**
+ * People whose packs are drawn as one bundled icon on the plan: everyone who carries at least one pack, unless the person or one of their pack items is selected
+ * (then the packs show individually so they can be dragged, aimed and read). Returns a Set of person ids.
+ */
+export function collapsedPeople(scene, sel) {
+  const out = new Set();
+  for (const person of scene.people || []) {
+    const pts = groupPoints(scene, person);
+    if (!pts || pts.length < 2 || sel === person.id) continue;
+    if (pts.some((q) => q.itemId && q.itemId === sel)) continue;
+    out.add(person.id);
+  }
+  return out;
+}
+
+/**
+ * Draw every placed person on the plan. Pushes a { kind: 'person' } handle per person. Returns the label rectangles drawn.
+ * opts.collapsed (Set of person ids) draws that person as one icon with a count of their packs; opts.statusOf(linkIds) -> { color, word } adds a status dot.
+ */
+export function drawPeoplePlan(ctx, th, vp, scene, sel, handles, hoverKey, w, placed = [], opts = {}) {
   const rects = [];
   for (const person of scene.people || []) {
     const pts = groupPoints(scene, person);
@@ -23,16 +42,26 @@ export function drawPeoplePlan(ctx, th, vp, scene, sel, handles, hoverKey, w, pl
     // person floor point with a leader to each pack
     const pp = vp.worldToScreen(person.pos.x, person.pos.y);
     ctx.lineWidth = 1; ctx.strokeStyle = th.inkSoft;
-    for (const q of pts) { if (q.what === 'person') continue; const s = vp.worldToScreen(q.x, q.y); ctx.beginPath(); ctx.moveTo(pp.x, pp.y); ctx.lineTo(s.x, s.y); ctx.stroke(); }
-    ctx.fillStyle = th.paper; ctx.strokeStyle = th.ink; ctx.lineWidth = 1.4;
-    ctx.beginPath(); ctx.moveTo(pp.x, pp.y - 4); ctx.lineTo(pp.x + 4, pp.y); ctx.lineTo(pp.x, pp.y + 4); ctx.lineTo(pp.x - 4, pp.y); ctx.closePath(); ctx.fill(); ctx.stroke();
+    const packs = pts.filter((q) => q.what !== 'person'), bundled = !!(opts.collapsed && opts.collapsed.has(person.id));
+    const nMic = packs.filter((q) => q.what === 'mic').length, nIem = packs.filter((q) => q.what === 'iem').length;
+    if (bundled) { // one icon for the whole kit: the person, with a status dot and the pack counts in the label
+      ctx.restore(); ctx.save();
+      drawPerson(ctx, vp, person.pos.x, person.pos.y, { view: 'plan', ink: th.ink, fill: th.paper });
+      const st = opts.statusOf ? opts.statusOf(packs.map((q) => q.linkId)) : null;
+      if (st && st.color) { ctx.fillStyle = st.color; ctx.strokeStyle = th.ink; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(pp.x + 11, pp.y - 11, 4.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
+    } else {
+      for (const q of packs) { const s = vp.worldToScreen(q.x, q.y); ctx.beginPath(); ctx.moveTo(pp.x, pp.y); ctx.lineTo(s.x, s.y); ctx.stroke(); }
+      ctx.fillStyle = th.paper; ctx.strokeStyle = th.ink; ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.moveTo(pp.x, pp.y - 4); ctx.lineTo(pp.x + 4, pp.y); ctx.lineTo(pp.x, pp.y + 4); ctx.lineTo(pp.x - 4, pp.y); ctx.closePath(); ctx.fill(); ctx.stroke();
+    }
     // grip: square at the top of the outline
     const gx = cs.x, gy = cs.y - rpx;
     ctx.fillStyle = hot || selected ? th.ink : th.paper; ctx.lineWidth = 1.6; ctx.strokeStyle = th.ink;
     ctx.beginPath(); ctx.rect(gx - 5, gy - 5, 10, 10); ctx.fill(); ctx.stroke();
     ctx.restore();
     // label: tag dot, role letter and name, to the right of the grip
-    const text = `${roleMark(person.role)} ${person.name}`;
+    const kit = bundled ? `  ${[nMic && `${nMic} mic${nMic > 1 ? 's' : ''}`, nIem && `${nIem} IEM`].filter(Boolean).join(' + ')}` : '';
+    const text = `${roleMark(person.role)} ${person.name}${kit}`;
     if (w >= 420 || selected) {
       setFont(ctx, th, 12, selected ? '600' : '');
       const tw = Math.ceil(ctx.measureText(text).width);
@@ -43,6 +72,7 @@ export function drawPeoplePlan(ctx, th, vp, scene, sel, handles, hoverKey, w, pl
       rects.push(box); placed.push(box);
     }
     handles.push({ kind: 'person', itemId: person.id, sx: gx, sy: gy, r: 16, wx: person.pos.x, wy: person.pos.y, pri: 1 });
+    if (bundled) handles.push({ kind: 'person', itemId: person.id, sx: pp.x, sy: pp.y, r: 15, wx: person.pos.x, wy: person.pos.y, pri: 1 }); // the bundled icon drags and selects the whole person
   }
   return rects;
 }

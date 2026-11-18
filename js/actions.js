@@ -894,7 +894,10 @@ function assignedOffset(person, which, here) {
   const o = packOffset(person, here);
   if (Math.hypot(o.dx, o.dy) <= NEAR_PERSON_M) return o;
   const base = which === 'iem' ? DEFAULT_IEM_OFFSET : (Number.isFinite(here.z) && here.z >= 1.2 ? DEFAULT_MIC_OFFSET.handheld : DEFAULT_MIC_OFFSET.bodypack);
-  return { dx: base.dx, dy: base.dy, dz: o.dz }; // o.dz is the pack height, already clamped to the validator limits
+  const taken = [person.micOffset, person.iemOffset, ...Object.values(person.extraOffsets || {})].filter(Boolean);
+  const r = { dx: base.dx, dy: base.dy, dz: o.dz }; // o.dz is the pack height, already clamped to the validator limits
+  for (let i = 1; i <= PEOPLE_LIMITS.maxExtra + 2 && taken.some((t) => Math.hypot(t.dx - r.dx, t.dy - r.dy) < 0.08); i++) r.dx = base.dx + (which === 'iem' ? -1 : 1) * 0.12 * i; // a second pack fans out sideways instead of sitting on the first
+  return r;
 }
 
 function assign(store, personId, linkId, which, { swap = false } = {}) {
