@@ -5,7 +5,9 @@
 // opts: {
 //   hitTest(sx, sy, isTouch) -> handle | null    handle = {kind, itemId, wx, wy, ...} (wx/wy world pos for offset-free drags)
 //   dragStart(handle), dragMove(handle, pointerWorld, targetWorld, state), dragEnd(handle),
+//   isLocked(handle) -> true when the handle's item is position-locked (selectable, not draggable),
 //   select(id|null), hover(handle|null), onView() after zoom/pan, fit(), nudge(dx, dy, big), rotate(dAz, dEl, big), cycle(dir), escape()
+//   toggleLock() on L,
 //   Keyboard: arrows move the selection (Shift = 10x), Alt+arrows or R / Shift+R aim the selected antenna, [ ] cycle, + - zoom, 0 fit.
 // }
 import { clamp } from './util.js';
@@ -37,8 +39,9 @@ export function attachInteraction(canvas, vp, opts) {
     if (hit) {
       opts.select?.(hit.itemId ?? null);
       const w = vp.screenToWorld(p.x, p.y);
-      drag = { handle: hit, offX: (hit.wx ?? w.x) - w.x, offY: (hit.wy ?? w.y) - w.y, state: opts.dragStart?.(hit, w) };
-      mode = 'drag'; setCursor('grabbing');
+      const pinned = !!opts.isLocked?.(hit); // a position-locked item can be selected but not dragged
+      drag = { handle: hit, pinned, offX: (hit.wx ?? w.x) - w.x, offY: (hit.wy ?? w.y) - w.y, state: pinned ? null : opts.dragStart?.(hit, w) };
+      mode = 'drag'; setCursor(pinned ? 'not-allowed' : 'grabbing');
     } else {
       mode = 'pan'; panLast = p; drag = { moved: 0, clickAt: p, button: e.button };
       setCursor('grabbing');
@@ -52,7 +55,7 @@ export function attachInteraction(canvas, vp, opts) {
       const hit = opts.hitTest(p.x, p.y, e.pointerType === 'touch');
       const key = hit ? hit.kind + ':' + hit.itemId : null;
       if (key !== hoverKey) { hoverKey = key; opts.hover?.(hit); }
-      setCursor(spaceDown ? 'grab' : hit ? 'grab' : 'default');
+      setCursor(spaceDown ? 'grab' : hit ? (opts.isLocked?.(hit) ? 'not-allowed' : 'grab') : 'default');
       return;
     }
     pointers.set(e.pointerId, p);
@@ -63,7 +66,7 @@ export function attachInteraction(canvas, vp, opts) {
       if (pinch.d > 0 && d > 0) vp.zoomAt(mx, my, d / pinch.d);
       pinch = { d, mx, my };
       opts.onView?.();
-    } else if (mode === 'drag' && drag) {
+    } else if (mode === 'drag' && drag && !drag.pinned) {
       const w = vp.screenToWorld(p.x, p.y);
       opts.dragMove?.(drag.handle, w, { x: w.x + drag.offX, y: w.y + drag.offY }, drag.state);
     } else if (mode === 'pan' && panLast) {
@@ -77,7 +80,7 @@ export function attachInteraction(canvas, vp, opts) {
   function onUp(e) {
     const wasPan = mode === 'pan' && drag;
     if (wasPan && drag.moved < 4 && drag.button === 0) opts.select?.(null); // click on empty space deselects
-    if (mode === 'drag' && drag) opts.dragEnd?.(drag.handle);
+    if (mode === 'drag' && drag && !drag.pinned) opts.dragEnd?.(drag.handle);
     pointers.delete(e.pointerId);
     canvas.releasePointerCapture?.(e.pointerId);
     if (pointers.size === 0) { mode = null; drag = null; panLast = null; pinch = null; setCursor(spaceDown ? 'grab' : 'default'); }
@@ -104,6 +107,7 @@ export function attachInteraction(canvas, vp, opts) {
     else if (e.key === '+' || e.key === '=') { vp.zoomAt(canvas.clientWidth / 2, canvas.clientHeight / 2, 1.2); opts.onView?.(); }
     else if (e.key === '-' || e.key === '_') { vp.zoomAt(canvas.clientWidth / 2, canvas.clientHeight / 2, 1 / 1.2); opts.onView?.(); }
     else if (e.key === '0') opts.fit?.();
+    else if (e.key === 'l' || e.key === 'L') opts.toggleLock?.(); // lock or unlock the selected item's position
     else if (e.key === ']' || e.key === '.') opts.cycle?.(1);
     else if (e.key === '[' || e.key === ',') opts.cycle?.(-1);
     else if (e.key === 'PageUp' || e.key === 'PageDown') opts.tiltBy?.(e.key === 'PageUp' ? 1 : -1, e.shiftKey);

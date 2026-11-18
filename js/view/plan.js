@@ -33,6 +33,8 @@ import { drawCrowds } from './crowdDraw.js';
 import { crowdAria, polygonSetPoint } from '../ui/crowdUi.js';
 import { updateCrowd, moveCrowd } from '../actionsAreas.js';
 import { drawPeoplePlan, collapsedPeople } from './peopleDraw.js';
+import { isLocked } from '../model/lock.js';
+import { drawLockBadges, toggleSelectionLock } from './lockDraw.js';
 import { drawNoiseSources } from './noiseDraw.js';
 import { drawNoiseWaves } from './noiseWaves.js';
 import { drawMeasurementsPlan, drawPlaceBanner } from './measureDraw.js';
@@ -182,6 +184,7 @@ export function createPlanView(canvas, store) {
     if (cov && cov.grid && covView.show) drawHeatLegend(ctx, th, w, h, cov, covView.tint);
 
     // legend + scale
+    drawLockBadges(ctx, th, scene, handles);
     drawScaleBar(ctx, vp, h, th);
     drawAxesLegend(ctx, th, w, h);
     if (isPlacing()) drawPlaceBanner(ctx, th, w, placeMessage());
@@ -505,6 +508,7 @@ export function createPlanView(canvas, store) {
     const id = store.getSelection(); const f = findItem(store.getScene(), id);
     if (!f) { cycle(1); return; } // nothing selected yet: the first arrow press selects the first item
     const step = big ? 0.5 : 0.05;
+    if (f.item && f.item.locked === true) { announce(`${f.item.name || 'Item'} is position-locked`, { key: 'move', delay: 350 }); return; }
     if (f.type === 'noise') {
       if (f.item.pos) moveNoiseSource(store, id, { x: f.item.pos.x + dx * step, y: f.item.pos.y + dy * step }, { coalesce: `plan-nudge-${id}` });
       announce(`${f.item.name} moved`, { key: 'move', delay: 350 });
@@ -556,10 +560,11 @@ export function createPlanView(canvas, store) {
 
   const detach = attachInteraction(canvas, vp, {
     hitTest, dragStart, dragMove,
+    isLocked: (hd) => !/Rot$|^tilt/.test(hd.kind) && isLocked(store.getScene(), hd.itemId), // aiming a locked antenna is still allowed; only its position is pinned
     select: (id) => store.select(id),
     hover: (hd) => { hoverKey = hd ? hd.kind + ':' + hd.itemId : null; setLinkFocus(hd ? linkIdOfItem(store.getScene(), hd.itemId) : null); host.invalidate(); },
     onView: () => { userView = true; host.invalidate(); },
-    fit, nudge, rotate, cycle, escape: () => store.select(null),
+    fit, nudge, rotate, cycle, escape: () => store.select(null), toggleLock: () => toggleSelectionLock(store, announce),
   });
   // pointer readout in stage coordinates (hover and drag)
   let cursor = null;

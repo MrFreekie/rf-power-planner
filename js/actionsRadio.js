@@ -24,6 +24,7 @@ function copyGear(n, r) {
   n.tx = { ...structuredClone(r.tx), ...keep('tx') };
   const rxB = r.rx.diversity && r.rx.diversity.antennaB && r.rx.diversity.antennaB.pos, rx0 = r.rx.pos;
   n.rx = { ...structuredClone(r.rx), ...keep('rx') }; delete n.rx.sharedAntennaOf;
+  delete n.tx.locked; delete n.rx.locked; // a copy has its own place, so it starts unlocked
   if (rxB && n.rx.diversity && n.rx.diversity.antennaB) n.rx.diversity.antennaB.pos = { x: n.rx.pos.x + rxB.x - rx0.x, y: n.rx.pos.y + rxB.y - rx0.y, z: rxB.z };
   for (const k of COPY_KEYS) if (r[k]) n[k] = structuredClone(r[k]);
   if (r.telemetry) n.telemetry = { ...structuredClone(r.telemetry), deviceName: n.telemetry && n.telemetry.deviceName };

@@ -80,7 +80,7 @@ const KEY_LABELS = {
   externalNoise: 'external noise', interference: 'interference level', xpdDb: 'cross-polar floor (dB)', wallLossAdjustDb: 'extra wall loss (dB)', material: 'material', name: 'name', enabled: 'on or off',
   thresholdDbm: 'squelch threshold (dBm)', hysteresisDb: 'hysteresis (dB)', mode: 'mode', width: 'width (m)', depth: 'depth (m)', heightM: 'height (m)', zMin: 'bottom height (m)', zMax: 'top height (m)',
   tvChannelWidthMHz: 'TV channel width (MHz)', rxDbm: 'measured level (dBm)', op1dBDbm: 'output P1dB (dBm)', iip3Dbm: 'input IP3 (dBm)', type: 'type', kind: 'kind', preset: 'preset', rxPreset: 'receiver preset',
-  az: 'azimuth (deg)', polygon: 'outline', densityPerM2: 'density (people per m2)', headHeightM: 'head height (m)', kDbPerM: 'loss slope (dB per m)', lMaxDb: 'loss cap (dB)', el: 'elevation (deg)', note: 'note',
+  az: 'azimuth (deg)', polygon: 'outline', densityPerM2: 'density (people per m2)', headHeightM: 'head height (m)', kDbPerM: 'loss slope (dB per m)', lMaxDb: 'loss cap (dB)', el: 'elevation (deg)', note: 'note', locked: 'position lock',
 };
 const SECTION = { links: 'Link', environment: 'Environment', reflectors: 'Reflector', zones: 'Zone', people: 'Person', noiseSources: 'Noise source', measurements: 'Measurement', platforms: 'Platform', crowds: 'Crowd', stage: 'Stage', imd: 'IMD', coverage: 'Coverage' };
 const human = (k) => String(k).replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase();

@@ -13,6 +13,8 @@ import { tracePaths, antennaFrame } from '../model/rf.js';
 import { tiltFromPointer, stepTilt, tiltText, tiltHandleLength, placeLabel, TILT_COARSE_STEP, TILT_FINE_STEP } from '../ui/antennaFields.js';
 import { drawTiltGauge, tiltForPointer } from './tiltGauge.js';
 import { drawPersonSide } from './peopleDraw.js';
+import { isLocked } from '../model/lock.js';
+import { drawLockBadges, toggleSelectionLock } from './lockDraw.js';
 import { linkOwners } from '../model/people.js';
 import { setAntennaField, ensureOwnAntennaB } from '../actions.js';
 import { SURFACES } from '../model/library.js';
@@ -242,6 +244,7 @@ export function createSideView(canvas, store) {
     // ends
     for (const role of ['tx', 'rx']) drawEnd(ctx, th, link, role, role === 'tx' ? sTx : sRx, u, sel, w, sTx > sRx);
 
+    drawLockBadges(ctx, th, scene, handles);
     drawScaleBar(ctx, vp, h, th);
     const brg = ((Math.atan2(iem ? u.x : -u.x, iem ? u.y : -u.y) / DEG) + 360) % 360;
     if (w >= 520) haloText(ctx, th, `${link.name}: Tx → Rx bearing ${brg.toFixed(0)}°, horizontal ${fmtLen(D, scene.units)}`, w - 8, h - 10, { align: 'right', color: th.inkSoft });
@@ -354,6 +357,7 @@ export function createSideView(canvas, store) {
     const id = store.getSelection(), f = findItem(store.getScene(), id);
     if (!f) { cycle(1); return; }
     if ((f.type !== 'tx' && f.type !== 'rx') || !dy) return;
+    if (f.item.locked === true) { announce(`${f.item.name} is position-locked`, { key: 'move', delay: 350 }); return; }
     store.update((s) => { const g = findItem(s, id); g.item.pos.z = round2(clamp(g.item.pos.z - dy * (big ? 0.5 : 0.05), 0, 5)); }, { coalesce: `side-nudge-${id}` });
     const g = findItem(store.getScene(), id);
     announce(`${g.item.name} height ${g.item.pos.z.toFixed(2)} m`, { key: 'move', delay: 350 });
@@ -399,11 +403,11 @@ export function createSideView(canvas, store) {
   }
 
   const detach = attachInteraction(canvas, vp, {
-    hitTest, dragStart: (hd) => { bSel = !!hd && (hd.kind === 'rxB' || hd.kind === 'tiltB'); return { key: `side-drag-${++dragCounter}` }; }, dragMove,
+    hitTest, isLocked: (hd) => (hd.kind === 'tx' || hd.kind === 'rx') && isLocked(store.getScene(), hd.itemId), dragStart: (hd) => { bSel = !!hd && (hd.kind === 'rxB' || hd.kind === 'tiltB'); return { key: `side-drag-${++dragCounter}` }; }, dragMove,
     select: (id) => store.select(id),
     hover: (hd) => { hoverKey = hd ? hd.kind + ':' + hd.itemId : null; host.invalidate(); },
     onView: () => { userView = true; host.invalidate(); },
-    fit, nudge, rotate, cycle, escape: () => store.select(null),
+    fit, nudge, rotate, cycle, escape: () => store.select(null), toggleLock: () => toggleSelectionLock(store, announce),
     tiltBy, tiltReset: () => tiltReset(),
     dblclick: (hd) => { if (hd && (hd.kind === 'tilt' || hd.kind === 'tiltB')) { bSel = hd.kind === 'tiltB'; tiltReset(hd.itemId); } },
     dragEnd: () => { if (tiltDrag) { tiltDrag = null; host.invalidate(); } },

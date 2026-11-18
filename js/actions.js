@@ -2,6 +2,7 @@
 // so undo/redo and subscribers behave uniformly. Pure of the DOM.
 import { AUDIO_SOURCE_IDS, TONE_HZ_LIMITS } from './model/audio-source.js';
 import { buildExample } from './examples.js';
+import { findLockable } from './model/lock.js';
 import { IMD_PRESETS, COMBINER_PRESETS } from './model/imd-params.js';
 import { startWalk, stopWalk } from './walk.js';
 import { effectiveAntennaB } from './model/diversity.js';
@@ -799,9 +800,10 @@ const extras = (d, person) => (Array.isArray(person.extraLinkIds) ? person.extra
 /** Write the pack positions of a person onto the linked mic transmitter and IEM bodypack. */
 function placePacks(d, person) {
   const at = personPackPositions(person), { mic, iem } = pack(d, person);
-  if (mic && at.mic) mic.tx.pos = { ...mic.tx.pos, ...at.mic };
-  if (iem && at.iem) iem.rx.pos = { ...iem.rx.pos, ...at.iem };
-  for (const l of extras(d, person)) { const pos = at.extra && at.extra[l.id]; if (pos) packOf(l).pos = { ...packOf(l).pos, ...pos }; }
+  // a position-locked pack stays where it is when its person moves
+  if (mic && at.mic && mic.tx.locked !== true) mic.tx.pos = { ...mic.tx.pos, ...at.mic };
+  if (iem && at.iem && iem.rx.locked !== true) iem.rx.pos = { ...iem.rx.pos, ...at.iem };
+  for (const l of extras(d, person)) { const pos = at.extra && at.extra[l.id]; if (pos && packOf(l).locked !== true) packOf(l).pos = { ...packOf(l).pos, ...pos }; }
 }
 
 /** Copy the person's body coupling (contact, dampness) onto the antennas of the packs. */
@@ -1004,9 +1006,18 @@ export function reorderPerson(store, id, toIndex) {
 export function movePerson(store, id, pos, o = {}) {
   return store.update((d) => {
     const p = peopleOf(d).find((x) => x.id === id);
-    if (!p || !pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.y)) return;
+    if (!p || !pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.y) || p.locked === true) return;
     p.pos = { x: clampCoord(pos.x), y: clampCoord(pos.y) };
     placePacks(d, p);
+  }, opts(o));
+}
+
+/** setLocked(store, id, locked): pin (true) or free (false) the position of any placeable item (antenna end, person, platform, reflector, crowd, noise source, IMD transmitter...). Unlocked items drop the field. */
+export function setLocked(store, id, locked, o = {}) {
+  return store.update((d) => {
+    const it = findLockable(d, id);
+    if (!it) return;
+    if (locked === true) it.locked = true; else delete it.locked;
   }, opts(o));
 }
 
@@ -1016,7 +1027,7 @@ export function movePeople(store, ids, delta, o = {}) {
     if (!delta || !Number.isFinite(delta.dx) || !Number.isFinite(delta.dy)) return;
     const set = new Set(ids || []);
     for (const p of peopleOf(d)) {
-      if (!set.has(p.id) || !p.pos) continue;
+      if (!set.has(p.id) || !p.pos || p.locked === true) continue;
       p.pos = { x: clampCoord(p.pos.x + delta.dx), y: clampCoord(p.pos.y + delta.dy) };
       placePacks(d, p);
     }

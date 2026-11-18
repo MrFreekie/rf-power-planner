@@ -37,6 +37,7 @@ import { CROWD_MODES, CROWD_LIMITS } from './crowd.js';
 import { ANTENNA_BANDS } from './antenna-band.js';
 import { TV_BLOCK_LEVEL_LIMITS } from './spectrum-map.js';
 import { compileRack, validateRack } from './rack.js';
+import { validateLocks } from './lock.js';
 import { MEASUREMENT_LIMITS, validateMeasurement, CALIBRATION_FIELDS, WALL_ADJUST_BY_MATERIAL } from './measurement-schema.js';
 
 // Stage and platform limits. Item pos.z everywhere stays the height above the LOCAL floor (deck or platform top).
@@ -902,6 +903,7 @@ export function validateScene(scene) {
     else if (l.chain.length > SL.maxChain) errors.push(`${p}.chain has more than ${SL.maxChain} entries`);
     else l.chain.forEach((c, j) => checkChainItem(c, `${p}.chain[${j}]`, errors)); // id is optional on load (older scenes); migrateScene fills it in
   });
+  validateLocks(scene, errors);
   return { ok: errors.length === 0, errors };
 }
 

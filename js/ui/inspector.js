@@ -6,7 +6,8 @@ import { findItem, activeLink, solveCached } from '../view/util.js';
 import { setLinkDock, LINK_DOCK_SECTIONS, setVenueDock, VENUE_DOCK_SECTIONS } from './linkDock.js';
 import { chainItemLossDb } from '../model/rf.js';
 import { CABLES, ANTENNAS, SURFACES, MATERIALS, BANDS, GROUND_PLANE_LABELS, GROUND_PLANE_GAIN_DBI, ANTENNA_CONTACT_LABELS, ANTENNA_DAMPNESS_LABELS, allowedPolarisations, defaultPolarisation } from '../model/library.js';
-import { setAntennaField, setAntennaType, antennaOf } from '../actions.js';
+import { setAntennaField, setAntennaType, antennaOf, setLocked } from '../actions.js';
+import { findLockable } from '../model/lock.js';
 import { POLARISATION_LABELS, ORIENTATION_HINT, POLARISATION_HINT } from './antennaFields.js';
 import { CHAIN_PRESETS, DC_MODES, FILTER_TYPES } from '../model/chain-presets.js';
 import { announce } from '../view/a11y.js';
@@ -377,6 +378,14 @@ export function mountInspector({ container, store }) {
         : c.found.type === 'link' ? `Selected: link "${link.name}"` : `Selected: ${c.found.type === 'tx' ? 'transmitter' : 'receiver'} "${c.found.item.name}"`)
       : el('p', 'insp-who', `Nothing selected: editing link "${link.name}"`);
     container.append(heading, who);
+    if (c.found && c.found.type !== 'link' && findLockable(c.scene, c.found.item.id)) { // position lock: the item can still be selected, edited and aimed, but not dragged or nudged
+      const row = el('label', 'insp-lock'), box = document.createElement('input');
+      box.type = 'checkbox'; box.checked = c.found.item.locked === true; box.id = 'insp-lock-box';
+      box.addEventListener('change', () => setLocked(store, c.found.item.id, box.checked));
+      row.append(box, document.createTextNode(' Lock position (stops dragging and arrow-key moves; L toggles)'));
+      container.append(row);
+      updaters.push((cc) => { const it = cc.found && cc.found.item; box.checked = !!(it && it.locked === true); }); // follows the L key
+    }
 
     // Stage and platforms
     const sb = section('stage', 'Stage', `Item heights are measured from the floor beneath them: the deck, or the top of the platform they stand on. ${COORD_HINT}`);
