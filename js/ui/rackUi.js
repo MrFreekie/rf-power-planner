@@ -14,7 +14,7 @@ import { formatPower, formatDb } from '../model/units.js';
 import { getCoordRegion } from './region.js';
 import { setLinkFocus } from '../view/linkFocus.js';
 import { getLinkDock, subscribeLinkDock } from './linkDock.js';
-import { peopleLinkOwners, addReceiverFor } from '../actions.js';
+import { peopleLinkOwners, addReceiverFor, removeLink } from '../actions.js';
 import { removeRackItem, removeCombiner } from '../actionsRack.js';
 import { duplicateRadioLink, moveRadioItem } from '../actionsRadio.js';
 import { makeEditors, runLossDb } from './rackEditors.js';
@@ -161,6 +161,9 @@ export function mountRack({ container, store }) {
       const l = LINK_KINDS.includes(kind) && linkOf(id);
       if (l && l.txOf === undefined && (kind === 'mic' || kind === 'transmitter')) row.append(btn('Duplicate', () => { const nid = duplicateRadioLink(store, id); if (nid) { const n = store.getScene().links.find((q) => q.id === nid); say(`Added ${n.name} at ${n.freqMHz.toFixed(3)} MHz, a copy of ${l.name}.`); reveal([`${kind}:${nid}`], n.tx.id); } else say('Could not duplicate (link limit reached).'); }, `A copy of ${name} at the next clean frequency, fed the same way`));
       if (l && l.txOf !== undefined) row.append(btn('Duplicate', () => { const nid = addReceiverFor(store, l.txOf); say(nid ? `Added another ${l.kind === 'iem' ? 'bodypack' : 'receiver'} on ${linkName(l.txOf)}.` : 'Could not add (link limit reached).'); if (nid) reveal([`${kind}:${nid}`]); }, `Another ${l.kind === 'iem' ? 'bodypack' : 'receiver'} listening to ${linkName(l.txOf)}`));
+      if (l) {
+        row.append(btn('Remove', () => { if (removeLink(store, id)) say(`Removed ${name}. Undo brings it back.`); }, 'Removes it from the plan; people and walk-test readings that used it are cleared', 'danger'));
+      }
       if (kind === 'antenna' || kind === 'txantenna') { const rm = btn('Remove', () => removeRackItem(store, 'antennas', id), kind === 'antenna' && lastRxAnt ? 'The last receive antenna cannot be removed' : 'Whatever it fed is left with no antenna', 'danger'); rm.disabled = kind === 'antenna' && lastRxAnt; row.append(rm); }
       if (kind === 'splitter') row.append(btn('Remove', () => removeRackItem(store, 'splitters', id), 'Receivers on it connect straight to its antennas', 'danger'));
       if (kind === 'combiner') row.append(btn('Remove', () => removeCombiner(store, id), 'Its channels go straight to the antenna', 'danger'));

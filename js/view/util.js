@@ -1,6 +1,7 @@
 // Shared helpers for the canvas views: theme, canvas host (DPR, resize, rAF), scene lookups, grid, scale bar.
 import { niceGridStep } from './viewport.js';
 import { solveLink } from '../model/rf.js';
+import { createDefaultLink } from '../model/scene.js';
 import { initTheme, isForcedLight, effectiveTheme, LIGHT_TOKENS } from './theme.js';
 
 if (typeof document !== 'undefined') initTheme(); // apply the stored theme as soon as any view module loads
@@ -116,11 +117,14 @@ export function findItem(scene, id) {
   for (const n of scene.noiseSources || []) if (n.id === id) return { type: 'noise', item: n };
   return null;
 }
-/** The link the side view and detail overlays follow: the selection's link, else the first link. */
+let blank = null;
+/** A stand-in link for an empty plan (not part of any scene) so panels that need one keep working; its name is empty. */
+export const blankLink = () => blank || (blank = Object.assign(createDefaultLink('mic'), { name: '', id: 'blank-link' }));
+/** The link the side view and detail overlays follow: the selection's link, else the first link, else a blank stand-in (an empty plan). */
 export function activeLink(scene, selection) {
   const f = findItem(scene, selection);
   if (f && f.type === 'person') { const id = f.item.micLinkId || f.item.iemLinkId, l = id && (scene.links || []).find((q) => q.id === id); if (l) return l; }
-  return (f && f.link) || (scene.links && scene.links[0]) || null;
+  return (f && f.link) || (scene.links && scene.links[0]) || blankLink();
 }
 export function selectableIds(scene) {
   const ids = [];

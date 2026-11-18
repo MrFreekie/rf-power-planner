@@ -1,7 +1,7 @@
 // Side-view tilt gauge: arc with 15 degree ticks, half-power beam wedge, polarisation element line. Pure geometry plus one canvas drawer.
 import { antennaFrame, antennaGainDb } from '../model/rf.js';
 import { DEG } from './util.js';
-import { tiltGaugeTicks, tiltText, snapTilt } from '../ui/antennaFields.js';
+import { tiltGaugeTicks, tiltText, snapTilt, withPitch, pitchWord, isRingAntenna } from '../ui/antennaFields.js';
 
 /** Bearing {az, el} (deg) of the in-slice direction at angle `theta` (deg from straight up, positive toward +s); u = slice axis in plan (x, y). */
 function sliceBearing(theta, u) {
@@ -49,7 +49,7 @@ export function tiltForPointer(antenna, u, dxPx, dyUpPx, step = 1) {
   if (!Number.isFinite(dxPx) || !Number.isFinite(dyUpPx) || (dxPx === 0 && dyUpPx === 0)) return null;
   const cand = [];
   for (let t = -90; t <= 90; t += 0.5) {
-    const { b } = antennaFrame({ ...antenna, tiltDeg: t });
+    const { b } = antennaFrame(withPitch(antenna, t));
     const bs = b[0] * u.x + b[1] * u.y, bz = b[2];
     if (Math.hypot(bs, bz) >= 0.05) cand.push({ t, th: Math.atan2(bs, bz), bs });
   }
@@ -124,7 +124,7 @@ export function drawTiltGauge(ctx, th, p, o) {
       ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(c.x, c.y); ctx.stroke();
     }
     // zero-tilt (level) reference
-    const z0 = pt(R + 14, el), zr = pt(R - 4, el);
+    const lvl = isRingAntenna(antenna) ? el : 0, z0 = pt(R + 14, lvl), zr = pt(R - 4, lvl);
     ctx.strokeStyle = th.ink; ctx.lineWidth = 1.4; ctx.setLineDash([2, 2]); ctx.beginPath(); ctx.moveTo(zr.x, zr.y); ctx.lineTo(z0.x, z0.y); ctx.stroke(); ctx.setLineDash([]);
   }
   // boresight line
@@ -141,5 +141,5 @@ export function drawTiltGauge(ctx, th, p, o) {
     ctx.moveTo(tip.x - ta.x * 13, tip.y - ta.y * 13); ctx.lineTo(tip.x - ta.x * 19, tip.y - ta.y * 19); ctx.stroke();
   }
   ctx.restore();
-  return { tip, wedge, text: `tilt ${tiltText(tilt)}` };
+  return { tip, wedge, text: `${pitchWord(antenna)} ${tiltText(tilt)}` };
 }

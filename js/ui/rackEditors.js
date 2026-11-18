@@ -7,7 +7,7 @@ import { CHAIN_PRESETS } from '../model/chain-presets.js';
 import { chainItemLossDb } from '../model/rf.js';
 import { bandOf, nextFreeFrequency } from '../model/radio-items.js';
 import { linkCard } from '../model/inventory.js';
-import { POLARISATION_LABELS } from './antennaFields.js';
+import { POLARISATION_LABELS, isRingAntenna } from './antennaFields.js';
 import { gearPickers } from './gearUi.js';
 import { addReceiverFor, assignMic, assignIem, assignExtraMic, removeExtraMic, peopleLinkOwners, setLinkField } from '../actions.js';
 import {
@@ -96,10 +96,10 @@ export function makeEditors(ctx) {
   };
   const antennaAdvanced = (a, adv) => {
     const o = a.antenna.orientation || { az: 0, el: 0 };
-    adv.append(field('Aim: azimuth', num('Azimuth', o.az, (v) => setRackAntennaAim(store, a.id, { az: v }), 0, 360, 1), 'deg'),
+    adv.append(field('Aim: azimuth', num('Azimuth', o.az, (v) => setRackAntennaAim(store, a.id, { az: v }), 0, 360, 1, 360), 'deg'),
       field('Aim: elevation', num('Elevation', o.el, (v) => setRackAntennaAim(store, a.id, { el: v }), -90, 90, 1), 'deg'),
-      field('Tilt (nose up)', num('Tilt', a.antenna.tiltDeg ?? 0, (v) => setRackAntennaDetail(store, a.id, { tiltDeg: v }), -90, 90, 1), 'deg'),
-      field('Roll (0 = upright)', num('Roll', a.antenna.rollDeg ?? 0, (v) => setRackAntennaDetail(store, a.id, { rollDeg: v }), -180, 180, 1), 'deg'),
+      ...(isRingAntenna(a.antenna) ? [field('Lean of element', num('Lean of element', a.antenna.tiltDeg ?? 0, (v) => setRackAntennaDetail(store, a.id, { tiltDeg: v }), -90, 90, 1), 'deg')] : []), // other types use Aim: elevation
+      field('Roll (0 = upright)', num('Roll', a.antenna.rollDeg ?? 0, (v) => setRackAntennaDetail(store, a.id, { rollDeg: v }), -180, 180, 1, 360), 'deg'),
       field('Polarisation', select('Polarisation of ' + a.name, allowedPolarisations(a.antenna.type).map((p) => [p, POLARISATION_LABELS[p] || p]), a.antenna.polarisation ?? defaultPolarisation(a.antenna.type), (v) => setRackAntennaDetail(store, a.id, { polarisation: v }))));
     if (a.antenna.type === 'quarterwave') adv.append(field('Ground plane', select('Ground plane of ' + a.name, [['', 'Not set'], ...Object.keys(GROUND_PLANE_GAIN_DBI).map((g) => [g, `${GROUND_PLANE_LABELS[g]} (${GROUND_PLANE_GAIN_DBI[g]} dBi)`])], a.antenna.groundPlane ?? '', (v) => setRackAntennaDetail(store, a.id, { groundPlane: v }))));
     adv.append(el('p', 'hint', 'Every link fed by this antenna follows these settings. Positions are in stage coordinates: x from the centre line, y from the stage front.'));

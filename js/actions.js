@@ -10,7 +10,7 @@ import { migrateScene, validateScene, createDefaultScene, createDefaultLink, syn
 import { applyFmPreset } from './model/fm-presets.js';
 import { DEFAULT_MIC_OFFSET, DEFAULT_IEM_OFFSET, PEOPLE_LIMITS, PERSON_ROLES, PERSON_COLOURS, createPerson, personLinkName, extraLinkName, personPackPositions, offsetFromPack, linkOwners, prunePeople } from './model/people.js';
 import { validateVenue } from './model/venue-underlay.js';
-import { SURFACES, ANTENNAS, GROUND_PLANE_GAIN_DBI, allowedPolarisations, defaultPolarisation, ANTENNA_CONTACT_LOSS_DB, ANTENNA_DAMPNESS_LOSS_DB } from './model/library.js';
+import { SURFACES, ANTENNAS, RING_TYPES, GROUND_PLANE_GAIN_DBI, allowedPolarisations, defaultPolarisation, ANTENNA_CONTACT_LOSS_DB, ANTENNA_DAMPNESS_LOSS_DB } from './model/library.js';
 
 const UNSAFE = new Set(['__proto__', 'prototype', 'constructor']);
 
@@ -581,6 +581,27 @@ export function setAntennaField(store, linkId, target, field, value, o = {}) {
   return changed;
 }
 
+/**
+ * setAntennaPitch(store, linkId, target, deg, { coalesce }): the one pitch control. A directional antenna's pitch is its aim elevation
+ * (0 = level, nose up positive; any old tilt is folded away); a ring-pattern antenna (omni, dipole, quarter-wave, body) ignores elevation,
+ * so its pitch is the lean of the element (tiltDeg). Antenna B keeps its own aim. Clamped to -90..90. Returns true when the scene changed.
+ */
+export function setAntennaPitch(store, linkId, target, deg, o = {}) {
+  if (!Number.isFinite(deg)) return false;
+  const v = Math.max(-90, Math.min(90, Math.round(deg * 10) / 10));
+  let changed = false;
+  store.update((d) => {
+    const link = findLink(d, linkId), a = antennaOf(link, target);
+    if (!a) return;
+    changed = true;
+    if (RING_TYPES.includes(a.type)) { if (v === 0) delete a.tiltDeg; else a.tiltDeg = v; return; }
+    delete a.tiltDeg;
+    if (target === 'antennaB') { const cur = effectiveAntennaB(link).orientation; link.rx.diversity.antennaB.orientation = { az: cur.az, el: v }; return; }
+    a.orientation = { az: (a.orientation && a.orientation.az) || 0, el: v };
+  }, opts(o));
+  return changed;
+}
+
 /** setAntennaType(store, linkId, target, type): change the model, take its library gain and drop a ground plane that no longer applies. */
 export function setAntennaType(store, linkId, target, type) {
   if (!ANTENNAS[type]) return false;
@@ -588,7 +609,9 @@ export function setAntennaType(store, linkId, target, type) {
   store.update((d) => {
     const a = antennaOf(findLink(d, linkId), target);
     if (!a) return;
+    const was = a.type;
     a.type = type; a.gainDbi = ANTENNAS[type].gainDbi;
+    if (type === 'paddle' && was !== 'paddle' && a.orientation) a.orientation = { ...a.orientation, el: 0 }; // a paddle defaults to level aim (elevation 0)
     if (type !== 'quarterwave') delete a.groundPlane;
     if (!allowedPolarisations(type).includes(a.polarisation)) a.polarisation = defaultPolarisation(type); // linear <-> circular
     changed = true;
@@ -1120,16 +1143,24 @@ export function unshareRxAntenna(store, linkId) {
   });
 }
 
-/** removeLink(store, linkId) -> true when removed. The last link cannot be removed. People lose their reference to it and its walk-test readings are deleted, in one undo step. */
+/** removeLink(store, linkId) -> true when removed; any link can go, including the last (an empty plan is valid). Extra receivers of a removed mic or IEM become links of their own. Rack channels, people references and walk-test readings are cleaned up in one undo step. */
 export function removeLink(store, linkId) {
   return store.update((d) => {
-    if (!Array.isArray(d.links) || d.links.length < 2) return;
-    const i = d.links.findIndex((l) => l.id === linkId);
-    if (i < 0) return;
-    const gone = d.links[i];
-    d.links.splice(i, 1);
-    for (const q of d.links) if (q.rx.sharedAntennaOf === linkId) { delete q.rx.sharedAntennaOf; q.chain = (q.chain || []).filter((it) => !isShareItem(it)); } // the source went: followers keep their own copy, minus the splitter
-    if (gone.rx.sharedAntennaOf) rebalanceShare(d, gone.rx.sharedAntennaOf); // a follower went: resize the splitter for the rest
+    if (!Array.isArray(d.links)) return;
+    const first = d.links.find((l) => l.id === linkId);
+    if (!first) return;
+    const gone = new Set([linkId]);
+    const removed = d.links.filter((l) => gone.has(l.id));
+    d.links = d.links.filter((l) => !gone.has(l.id));
+    for (const q of d.links) if (q.txOf === linkId) delete q.txOf; // an extra receiver becomes a link of its own
+    for (const q of d.links) if (gone.has(q.rx.sharedAntennaOf)) { delete q.rx.sharedAntennaOf; q.chain = (q.chain || []).filter((it) => !isShareItem(it)); } // the source went: followers keep their own antenna
+    for (const g of removed) if (g.rx.sharedAntennaOf && !gone.has(g.rx.sharedAntennaOf)) rebalanceShare(d, g.rx.sharedAntennaOf); // a follower went: resize the splitter for the rest
+    if (d.rack) {
+      for (const r of d.rack.receivers || []) r.channels = r.channels.filter((c) => !gone.has(c.linkId));
+      d.rack.receivers = (d.rack.receivers || []).filter((r) => r.channels.length);
+      for (const t of d.rack.transmitters || []) t.channels = t.channels.filter((c) => !gone.has(c.linkId));
+      d.rack.transmitters = (d.rack.transmitters || []).filter((t) => t.channels.length);
+    }
     if (Array.isArray(d.people)) prunePeople(d);
     pruneMeasurements(d);
   });

@@ -796,7 +796,7 @@ export const DEFAULT_CIRCULAR_XPD_DB = 20;
 /** Linear-to-circular loss (dB), at any angle, standard result: 3 dB. */
 export const LINEAR_TO_CIRCULAR_DB = 3.0103;
 /** Antenna types with a ring (rotationally symmetric) pattern about the element axis: their polarisation is referenced to the ground, not to the boresight. */
-const RING_TYPES = ['omni', 'dipole', 'quarterwave', 'body'];
+import { RING_TYPES } from './library.js';
 
 /**
  * wavePolarisation(scene, link) -> the polarisation of the radiated wave = the TRANSMIT antenna's polarisation ('vertical' when unset;

@@ -643,3 +643,6 @@ export const isCircularType = (type) => !!(ANTENNAS[type] && ANTENNAS[type].circ
 export const allowedPolarisations = (type) => (isCircularType(type) ? CIRCULAR_POLARISATIONS : LINEAR_POLARISATIONS);
 /** Default polarisation of an antenna type: 'rhcp' for circular types, 'vertical' otherwise. */
 export const defaultPolarisation = (type) => (isCircularType(type) ? 'rhcp' : 'vertical');
+
+/** Antenna types with a ring (donut) pattern about their element: their stored elevation is a convention and ignored by the maths; only tilt leans the element. */
+export const RING_TYPES = Object.freeze(['omni', 'dipole', 'quarterwave', 'body']);

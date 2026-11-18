@@ -10,13 +10,13 @@ import {
 } from './util.js';
 import { attachInteraction } from './interact.js';
 import { tracePaths, antennaFrame } from '../model/rf.js';
-import { tiltFromPointer, stepTilt, tiltText, tiltHandleLength, placeLabel, TILT_COARSE_STEP, TILT_FINE_STEP } from '../ui/antennaFields.js';
+import { tiltFromPointer, stepTilt, tiltText, tiltHandleLength, placeLabel, TILT_COARSE_STEP, TILT_FINE_STEP, pitchOf, pitchWord, isRingAntenna } from '../ui/antennaFields.js';
 import { drawTiltGauge, tiltForPointer } from './tiltGauge.js';
 import { drawPersonSide } from './peopleDraw.js';
 import { isLocked } from '../model/lock.js';
 import { drawLockBadges, toggleSelectionLock } from './lockDraw.js';
 import { linkOwners } from '../model/people.js';
-import { setAntennaField, ensureOwnAntennaB } from '../actions.js';
+import { setAntennaPitch, ensureOwnAntennaB } from '../actions.js';
 import { SURFACES } from '../model/library.js';
 import * as icons from './icons.js';
 import { squelch } from '../squelchTracker.js';
@@ -222,7 +222,7 @@ export function createSideView(canvas, store) {
         const eff = effectiveAntennaB(link), o = eff.orientation;
         const bAnt = { ...link.rx.antenna, ...(link.rx.diversity?.antennaB?.antenna || {}), orientation: o }, fbB = antennaFrame(bAnt).b, dS = fbB[0] * u.x + fbB[1] * u.y, dZ = fbB[2];
         icons.drawAntenna(ctx, vp, sOf(inf.B.pos), -bAbs.z, { view: 'side', ink: th.ink, fill: th.paper, type: eff.type, pol: bAnt.polarisation, rollDeg: bAnt.rollDeg, groundPlane: bAnt.groundPlane, angleDeg: Math.atan2(dS, dZ) / DEG });
-        const bTilt = Number.isFinite(bAnt.tiltDeg) ? bAnt.tiltDeg : 0, bSelected = bSel && sel === link.rx.id;
+        const bTilt = pitchOf(bAnt), bSelected = bSel && sel === link.rx.id;
         handles.push({ kind: 'rxB', itemId: link.rx.id, linkId: link.id, sx: bp.x, sy: bp.y, r: 14, wx: sOf(inf.B.pos), wy: -bAbs.z });
         if (bSelected || bTilt !== 0) {
           const g = drawTiltGauge(ctx, th, bp, { len: tiltHandleLength(vp.pxPerM) * 0.8, selected: bSelected, tilt: bTilt, el: o.el, u, antenna: bAnt, hot: hoverKey === 'tiltB:' + link.rx.id, active: tiltDrag === 'B' + link.rx.id });
@@ -302,12 +302,12 @@ export function createSideView(canvas, store) {
     if (selected) { ctx.save(); ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.arc(p.x, p.y, 14, 0, Math.PI * 2); ctx.stroke(); ctx.restore(); }
     handles.push({ kind: role, itemId: e.id, linkId: link.id, sx: p.x, sy: p.y, r: 16, wx: s, wy: -(z + fl), fl });
     // tilt tool: arc gauge, boresight, half-power wedge and element line; the handle is visible when selected, a dashed aim when tilted
-    const tilt = Number.isFinite(e.antenna.tiltDeg) ? e.antenna.tiltDeg : 0;
+    const tilt = pitchOf(e.antenna);
     if (selected || tilt !== 0) {
       const len = tiltHandleLength(vp.pxPerM), g = drawTiltGauge(ctx, th, p, {
         len, selected, tilt, el, u, antenna: e.antenna, flipS: dirS < 0, hot: hoverKey === 'tilt:' + e.id, active: tiltDrag === e.id,
       });
-      const txt = tiltDrag === e.id ? `tilt ${tiltText(tilt)}` : g.text;
+      const txt = g.text;
       setFont(ctx, th, 12, '600');
       const size = { w: Math.ceil(ctx.measureText(txt).width) + 6, h: 16 };
       avoid.push({ x: p.x - 16, y: p.y - 16, w: 32, h: 32 }, { x: g.tip.x - 12, y: g.tip.y - 12, w: 24, h: 24 });
@@ -333,8 +333,8 @@ export function createSideView(canvas, store) {
       // the drawn tip follows the pointer (solved against the antenna frame); 1 degree resolution, Shift snaps to 5
       const tilt = tiltForPointer(hd.ant, hd.u, ptr.x - hd.wx, -(ptr.y - hd.wy), shiftDown ? TILT_COARSE_STEP : TILT_FINE_STEP);
       if (tilt === null) return;
-      if (ensureOwnAntennaB(store, hd.linkId)) setAntennaField(store, hd.linkId, 'antennaB', 'tiltDeg', tilt, { coalesce: state.key });
-      announce(`Antenna B tilt ${tilt} degrees`, { key: 'tilt', delay: 350 });
+      if (ensureOwnAntennaB(store, hd.linkId)) setAntennaPitch(store, hd.linkId, 'antennaB', tilt, { coalesce: state.key });
+      announce(`Antenna B ${pitchWord(hd.ant)} ${tilt} degrees`, { key: 'tilt', delay: 350 });
       host.invalidate();
       return;
     }
@@ -344,8 +344,8 @@ export function createSideView(canvas, store) {
       // the drawn tip follows the pointer (solved against the antenna frame); 1 degree resolution, Shift snaps to 5
       const tilt = tiltForPointer(hd.ant, hd.u, ptr.x - hd.wx, -(ptr.y - hd.wy), shiftDown ? TILT_COARSE_STEP : TILT_FINE_STEP);
       if (tilt === null) return;
-      setAntennaField(store, hd.linkId, hd.role, 'tiltDeg', tilt, { coalesce: state.key });
-      announce(`${hd.role === 'tx' ? 'Transmit' : 'Receive'} antenna tilt ${tilt} degrees`, { key: 'tilt', delay: 350 });
+      setAntennaPitch(store, hd.linkId, hd.role, tilt, { coalesce: state.key });
+      announce(`${hd.role === 'tx' ? 'Transmit' : 'Receive'} antenna ${pitchWord(hd.ant)} ${tilt} degrees`, { key: 'tilt', delay: 350 });
       host.invalidate();
       return;
     }
@@ -377,25 +377,24 @@ export function createSideView(canvas, store) {
     for (const l of sc.links) for (const role of ['tx', 'rx']) if (l[role].id === id) return { link: l, role, item: l[role] };
     return null;
   }
-  function tiltBy(dir, fine) {
+  /** The aim and pitch of the selected end's antenna, or antenna B's when B is the selected one. */
+  const antennaFor = (f, forB) => (forB ? { ...f.link.rx.antenna, ...(f.link.rx.diversity.antennaB.antenna || {}), orientation: effectiveAntennaB(f.link).orientation } : f.item.antenna);
+  const bIsSelected = (f) => bSel && f.role === 'rx' && !!f.link.rx.diversity?.antennaB;
+  function tiltBy(dir, fine) { // Page Up / Page Down step the elevation (the lean, for an omni-type antenna)
     const f = selectedEnd(); if (!f) return;
-    if (bSel && f.role === 'rx' && f.link.rx.diversity?.antennaB) {
-      const cur = f.link.rx.diversity.antennaB.antenna?.tiltDeg ?? f.link.rx.antenna.tiltDeg, next = stepTilt(cur, dir, fine);
-      if (ensureOwnAntennaB(store, f.link.id)) setAntennaField(store, f.link.id, 'antennaB', 'tiltDeg', next, { coalesce: `side-tilt-B${f.item.id}` });
-      announce(`Antenna B tilt ${tiltText(next)}`, { key: 'tilt', delay: 150 });
-      return;
-    }
-    const next = stepTilt(f.item.antenna.tiltDeg, dir, fine);
-    setAntennaField(store, f.link.id, f.role, 'tiltDeg', next, { coalesce: `side-tilt-${f.item.id}` });
-    announce(`${f.item.name} tilt ${tiltText(next)}`, { key: 'tilt', delay: 150 });
+    const forB = bIsSelected(f), ant = antennaFor(f, forB), next = stepTilt(pitchOf(ant), dir, fine);
+    if (forB) { if (ensureOwnAntennaB(store, f.link.id)) setAntennaPitch(store, f.link.id, 'antennaB', next, { coalesce: `side-tilt-B${f.item.id}` }); announce(`Antenna B ${pitchWord(ant)} ${tiltText(next)}`, { key: 'tilt', delay: 150 }); return; }
+    setAntennaPitch(store, f.link.id, f.role, next, { coalesce: `side-tilt-${f.item.id}` });
+    announce(`${f.item.name} ${pitchWord(ant)} ${tiltText(next)}`, { key: 'tilt', delay: 150 });
   }
-  function tiltReset(itemId) {
+  function tiltReset(itemId) { // End key, double-click or the reset button: level (0 degrees)
     const sc = store.getScene(); let f = null;
     for (const l of sc.links) for (const role of ['tx', 'rx']) if (l[role].id === (itemId ?? store.getSelection())) f = { link: l, role, item: l[role] };
     if (!f) return;
-    if (bSel && f.role === 'rx' && f.link.rx.diversity?.antennaB) { if (ensureOwnAntennaB(store, f.link.id)) setAntennaField(store, f.link.id, 'antennaB', 'tiltDeg', 0); announce('Antenna B tilt reset to 0 degrees', { key: 'tilt', delay: 0 }); return; }
-    setAntennaField(store, f.link.id, f.role, 'tiltDeg', 0);
-    announce(`${f.item.name} tilt reset to 0 degrees`, { key: 'tilt', delay: 0 });
+    const forB = bIsSelected(f), word = pitchWord(antennaFor(f, forB));
+    if (forB) { if (ensureOwnAntennaB(store, f.link.id)) setAntennaPitch(store, f.link.id, 'antennaB', 0); announce(`Antenna B ${word} reset to 0 degrees`, { key: 'tilt', delay: 0 }); return; }
+    setAntennaPitch(store, f.link.id, f.role, 0);
+    announce(`${f.item.name} ${word} reset to 0 degrees`, { key: 'tilt', delay: 0 });
   }
   function cycle(dir) {
     const ids = selectableIds(store.getScene()); if (!ids.length) return;
@@ -413,7 +412,7 @@ export function createSideView(canvas, store) {
     dragEnd: () => { if (tiltDrag) { tiltDrag = null; host.invalidate(); } },
   });
   const resetBtn = typeof document !== 'undefined' ? document.getElementById('btn-side-tilt-reset') : null;
-  const syncReset = () => { if (resetBtn) { const f = selectedEnd(); resetBtn.disabled = !f || !(bSel && f.role === 'rx' && f.link.rx.diversity?.antennaB ? (f.link.rx.diversity.antennaB.antenna?.tiltDeg ?? f.link.rx.antenna.tiltDeg) : f.item.antenna.tiltDeg); } };
+  const syncReset = () => { if (resetBtn) { const f = selectedEnd(); resetBtn.disabled = !f || !pitchOf(antennaFor(f, bIsSelected(f))); } };
   const onReset = () => { tiltReset(); canvas.focus({ preventScroll: true }); };
   resetBtn?.addEventListener('click', onReset);
   syncReset();

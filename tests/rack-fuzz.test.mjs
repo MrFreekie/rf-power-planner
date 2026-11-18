@@ -51,7 +51,7 @@ for (let n = 0; n < steps; n++) {
     for (const x of r.splitters) for (const id of [x.antA, x.antB]) if (id && role.get(id) === 'tx') flag('splitter on tx antenna');
     for (const x of r.transmitters) for (const c of x.channels) if (c.antennaId && role.get(c.antennaId) === 'rx') flag('tx channel on rx antenna');
     for (const cb of r.combiners) { if (cb.antennaId && role.get(cb.antennaId) === 'rx') flag('combiner on rx antenna'); for (const o of (cb.fanout ? cb.fanout.outputs : [])) if (o.antennaId && role.get(o.antennaId) === 'rx') flag('fanout on rx antenna'); }
-    if (![...role.values()].includes('rx') && sc.links.some((l) => l.kind === 'mic')) flag('no rx antenna left'); } }
+    } }
   try { for (const l of sc.links) { const r = solveLink(sc, l); if (r && !Number.isFinite(r.marginDb) && r.status !== 'n/a') { const k = 'NaN margin after ' + name; bad.set(k, (bad.get(k) || 0) + 1); } } rackWarnings(sc, () => 200); tuningClashes(sc, () => 200); } catch (e) { const k = 'CALC THROW after ' + name + ': ' + e.message.slice(0, 80); bad.set(k, (bad.get(k) || 0) + 1); }
 }
   return [...bad.keys()];

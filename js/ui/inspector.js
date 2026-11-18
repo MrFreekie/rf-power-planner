@@ -8,7 +8,8 @@ import { chainItemLossDb } from '../model/rf.js';
 import { CABLES, ANTENNAS, SURFACES, MATERIALS, BANDS, GROUND_PLANE_LABELS, GROUND_PLANE_GAIN_DBI, ANTENNA_CONTACT_LABELS, ANTENNA_DAMPNESS_LABELS, allowedPolarisations, defaultPolarisation } from '../model/library.js';
 import { setAntennaField, setAntennaType, antennaOf, setLocked } from '../actions.js';
 import { findLockable } from '../model/lock.js';
-import { POLARISATION_LABELS, ORIENTATION_HINT, POLARISATION_HINT } from './antennaFields.js';
+import { wrapAngle } from './angleWrap.js';
+import { POLARISATION_LABELS, ORIENTATION_HINT, POLARISATION_HINT, isRingAntenna } from './antennaFields.js';
 import { CHAIN_PRESETS, DC_MODES, FILTER_TYPES } from '../model/chain-presets.js';
 import { announce } from '../view/a11y.js';
 import { NOISE_CATALOGUE, NOISE_SOURCE_LIMITS, dutyOf } from '../model/noise-sources.js';
@@ -128,18 +129,18 @@ export function mountInspector({ container, store }) {
     input.addEventListener('input', () => {
       const c = getCtx();
       if (!c.link) return;
-      const v = parseNumber(input.value);
       const { lo, hi } = range(c);
-      const bad = !Number.isFinite(v) || v < lo || v > hi;
+      const v = wrapAngle(parseNumber(input.value), spec.wrap, lo, hi);
+      const bad =!Number.isFinite(v) || v < lo || v > hi;
       input.setAttribute('aria-invalid', String(bad));
       if (!bad) spec.set(c, v, opts());
     });
     input.addEventListener('change', () => {
       const c = getCtx();
       if (!c.link) return;
-      const v = parseNumber(input.value);
+      const { lo, hi } = range(c);
+      const v = wrapAngle(parseNumber(input.value), spec.wrap, lo, hi);
       if (Number.isFinite(v)) {
-        const { lo, hi } = range(c);
         spec.set(c, clamp(v, lo, hi), opts());
       }
       input.setAttribute('aria-invalid', 'false');
@@ -147,7 +148,8 @@ export function mountInspector({ container, store }) {
     });
     updaters.push((c) => {
       const { lo, hi } = range(c);
-      input.min = lo; input.max = hi; input.step = val(spec.step, c) ?? 'any';
+      if (!spec.wrap) { input.min = lo; input.max = hi; } // an angle field wraps, so typed values outside the range are fine
+      input.step = val(spec.step, c) ?? 'any';
       unitEl.textContent = val(spec.unit, c) || '';
       row.hidden = spec.visible ? !spec.visible(c) : false;
       if (document.activeElement !== input) {
@@ -266,7 +268,7 @@ export function mountInspector({ container, store }) {
         set: (c, v) => setAntennaType(store, c.link.id, who, v),
       }),
       numLink(`${who}-gain`, 'Antenna gain', `${prefix}.antenna.gainDbi`, -20, 40, 0.5, 'dBi', { decimals: 1 }),
-      numLink(`${who}-az`, 'Azimuth', `${prefix}.antenna.orientation.az`, 0, 360, 1, '° (0 = toward audience, clockwise)', { decimals: 1 }),
+      numLink(`${who}-az`, 'Azimuth', `${prefix}.antenna.orientation.az`, 0, 360, 1, '° (0 = toward audience, clockwise)', { decimals: 1, wrap: 360 }),
       numLink(`${who}-el`, 'Elevation', `${prefix}.antenna.orientation.el`, -90, 90, 1, '° (0 = horizontal)', { decimals: 1 }),
       detailFields(who, who, () => true),
     );
@@ -293,11 +295,11 @@ export function mountInspector({ container, store }) {
     const label = key === 'antennaB' ? 'Antenna B ' : '';
     frag.append(
       numberField({
-        key: `${key}-tilt`, label: `${label}Tilt (deg, nose up)`, min: -90, max: 90, step: 1, unit: '\u00b0 (0 = as aimed)', decimals: 1,
-        visible: vis, get: (c) => A(c)?.tiltDeg ?? 0, set: (c, v, o) => setAntennaField(store, c.link.id, target, 'tiltDeg', v, o),
+        key: `${key}-tilt`, label: `${label}Lean of element (deg)`, min: -90, max: 90, step: 1, unit: '\u00b0 (0 = upright; omni-type antennas only, others use Elevation)', decimals: 1,
+        visible: (c) => vis(c) && isRingAntenna(A(c)), get: (c) => A(c)?.tiltDeg ?? 0, set: (c, v, o) => setAntennaField(store, c.link.id, target, 'tiltDeg', v, o),
       }),
       numberField({
-        key: `${key}-roll`, label: `${label}Roll (deg)`, min: -180, max: 180, step: 1, unit: '\u00b0 (0 = upright)', decimals: 1,
+        key: `${key}-roll`, label: `${label}Roll (deg)`, min: -180, max: 180, step: 1, unit: '\u00b0 (0 = upright)', decimals: 1, wrap: 360,
         visible: vis, get: (c) => A(c)?.rollDeg ?? 0, set: (c, v, o) => setAntennaField(store, c.link.id, target, 'rollDeg', v, o),
       }),
       selectField({
@@ -550,7 +552,7 @@ export function mountInspector({ container, store }) {
         set: (cc, v) => setAntennaBOrientation(store, cc.link.id, v === 'same' ? null : { ...effectiveAntennaB(cc.link).orientation }),
       }),
       numberField({
-        key: 'rx-b-az', label: 'Antenna B azimuth', min: 0, max: 360, step: 1, unit: '\u00b0 (0 = toward audience, clockwise)', decimals: 1,
+        key: 'rx-b-az', label: 'Antenna B azimuth', min: 0, max: 360, step: 1, unit: '\u00b0 (0 = toward audience, clockwise)', decimals: 1, wrap: 360,
         visible: (cc) => !!cc.link.rx.diversity?.enabled && !!cc.link.rx.diversity?.antennaB?.orientation,
         get: (cc) => effectiveAntennaB(cc.link).orientation.az, set: (cc, v, o) => setAntennaBOrientation(store, cc.link.id, { az: v }, o),
       }),
@@ -796,7 +798,7 @@ export function mountInspector({ container, store }) {
         get: (cc) => P(cc)?.material, set: (cc, v) => updatePlatform(store, id, { material: v }),
       }),
       numberField({
-        key: 'plat-rot', label: 'Rotation', decimals: 1, min: -180, max: 180, step: 5, unit: 'degrees',
+        key: 'plat-rot', label: 'Rotation', decimals: 1, min: -180, max: 180, step: 5, unit: 'degrees', wrap: 360,
         get: (cc) => P(cc)?.rotationDeg ?? 0, set: (cc, v, o) => updatePlatform(store, id, { rotationDeg: v }, o),
       }),
       len('x', 'Left edge x (0 = centre line)', 'x', -500, 1000, 'x'), len('y', 'Back edge y (0 = front edge)', 'y', -500, 1000, 'y'),

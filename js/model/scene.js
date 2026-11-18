@@ -38,6 +38,7 @@ import { ANTENNA_BANDS } from './antenna-band.js';
 import { TV_BLOCK_LEVEL_LIMITS } from './spectrum-map.js';
 import { compileRack, validateRack } from './rack.js';
 import { validateLocks } from './lock.js';
+import { RING_TYPES } from './library.js';
 import { MEASUREMENT_LIMITS, validateMeasurement, CALIBRATION_FIELDS, WALL_ADJUST_BY_MATERIAL } from './measurement-schema.js';
 
 // Stage and platform limits. Item pos.z everywhere stays the height above the LOCAL floor (deck or platform top).
@@ -925,6 +926,36 @@ export function migrateAntennaPolarisation(s) {
 }
 
 /** Migration hook: bring an older scene up to SCHEMA_VERSION. Unknown future versions throw. */
+/**
+ * Tilt and elevation were two controls for the same pitch. On load, a non-ring antenna's tiltDeg is folded into its aim elevation and dropped
+ * (ring-pattern antennas ignore elevation, so their tilt, the lean of the element, stays). Antenna B follows A's aim unless it has its own.
+ */
+function foldTiltIntoElevation(s) {
+  const clampEl = (v) => Math.max(-90, Math.min(90, Math.round(v * 10) / 10));
+  const num = (v, d) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
+  const fold = (a) => {
+    if (!isObj(a) || a.tiltDeg === undefined || typeof a.tiltDeg !== 'number' || !Number.isFinite(a.tiltDeg) || RING_TYPES.includes(a.type)) return;
+    const t = a.tiltDeg; delete a.tiltDeg;
+    if (t === 0) return;
+    const o = isObj(a.orientation) ? a.orientation : {};
+    a.orientation = { ...o, az: num(o.az, 0), el: clampEl(num(o.el, 0) + t) };
+  };
+  for (const l of Array.isArray(s.links) ? s.links : []) {
+    if (!isObj(l)) continue;
+    for (const end of [l.tx, l.rx]) if (isObj(end)) fold(end.antenna);
+    const ab = isObj(l.rx) && isObj(l.rx.diversity) ? l.rx.diversity.antennaB : null;
+    if (isObj(ab) && isObj(ab.antenna) && typeof ab.antenna.tiltDeg === 'number') {
+      const A = isObj(l.rx.antenna) ? l.rx.antenna : {};
+      if (!RING_TYPES.includes({ ...A, ...ab.antenna }.type)) { // B's aim: its own orientation, else A's
+        const t = ab.antenna.tiltDeg; delete ab.antenna.tiltDeg;
+        const o = isObj(ab.orientation) ? ab.orientation : isObj(ab.antenna.orientation) ? ab.antenna.orientation : isObj(A.orientation) ? A.orientation : {};
+        if (t !== 0) ab.orientation = { az: num(o.az, 0), el: clampEl(num(o.el, 0) + t) };
+      }
+    }
+  }
+  if (isObj(s.rack) && Array.isArray(s.rack.antennas)) for (const a of s.rack.antennas) if (isObj(a)) fold(a.antenna);
+}
+
 export function migrateScene(raw) {
   if (!isObj(raw)) throw new Error('Scene must be an object');
   // cheap size guards before any per-item work (validateScene repeats them for scenes that do not come through here)
@@ -943,6 +974,7 @@ export function migrateScene(raw) {
   // Version 1 -> 2: scene.venue is new. Older files have none; a saved venue (packed shades) is unpacked into memory.
   if (s.version < 2) { delete s.venue; s.version = 2; }
   if (s.venue === null) delete s.venue;
+  foldTiltIntoElevation(s);
   if (s.venue !== undefined) {
     const packed = isObj(s.venue) && Array.isArray(s.venue.layers) && s.venue.layers.some((L) => isObj(L) && Array.isArray(L.shades) && L.shades.some((sh) => isObj(sh) && typeof sh.packed === 'string'));
     if (packed) {

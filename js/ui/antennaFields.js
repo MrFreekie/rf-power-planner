@@ -70,3 +70,23 @@ export function placeLabel(anchor, size, avoid = [], bounds = null) {
   }
   return { ...best, clear: false };
 }
+
+// ---- one pitch control: elevation -------------------------------------------------------------------------------
+// Directional antennas have a single pitch, their elevation (0 = level, positive = nose up). Ring-pattern antennas (omni, dipole,
+// quarter-wave, body) ignore elevation, so for them the same control is the lean of the element from upright (the stored tiltDeg).
+import { RING_TYPES } from '../model/library.js';
+
+export const isRingAntenna = (a) => !!(a && RING_TYPES.includes(a.type));
+const clamp90 = (v) => Math.max(-90, Math.min(90, v));
+/** Pitch the gauge, keys and fields show for an antenna record (orientation is the effective aim). */
+export function pitchOf(a) {
+  const t = a && Number.isFinite(a.tiltDeg) ? a.tiltDeg : 0;
+  if (isRingAntenna(a)) return clamp90(t);
+  return clamp90((a && a.orientation && Number.isFinite(a.orientation.el) ? a.orientation.el : 0) + t);
+}
+/** The antenna with that pitch applied (for solving the drag), tilt folded away for directional types. */
+export function withPitch(a, deg) {
+  if (isRingAntenna(a)) return { ...a, tiltDeg: deg };
+  return { ...a, tiltDeg: 0, orientation: { az: (a.orientation && a.orientation.az) || 0, el: deg } };
+}
+export const pitchWord = (a) => (isRingAntenna(a) ? 'lean' : 'elevation');

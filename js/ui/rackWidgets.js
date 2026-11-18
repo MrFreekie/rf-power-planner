@@ -3,6 +3,7 @@
 import { formatPower, formatDb } from '../model/units.js';
 import { dispAxis, internalAxis } from './coords.js';
 import { lengthToUi, lengthFromUi } from './fields.js';
+import { wrapAngle } from './angleWrap.js';
 
 export const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 
@@ -27,10 +28,11 @@ export function text(label, value, onSet, maxLength = 40) {
   const i = el('input'); i.type = 'text'; i.value = value || ''; i.maxLength = maxLength; i.setAttribute('aria-label', label);
   i.addEventListener('change', () => onSet(i.value)); return i;
 }
-export function num(label, value, onSet, min = -1000, max = 1000, step = 0.1) {
-  const i = el('input'); i.type = 'number'; i.step = String(step); i.min = String(min); i.max = String(max); i.value = String(Math.round(value * 1000) / 1000); i.setAttribute('aria-label', label);
+/** wrap (degrees, e.g. 360) makes it an angle field: typed values outside min..max fold round the circle (-90 -> 270) instead of clamping. */
+export function num(label, value, onSet, min = -1000, max = 1000, step = 0.1, wrap = 0) {
+  const i = el('input'); i.type = 'number'; i.step = String(step); if (!wrap) { i.min = String(min); i.max = String(max); } i.value = String(Math.round(value * 1000) / 1000); i.setAttribute('aria-label', label);
   i.inputMode = 'decimal';
-  i.addEventListener('change', () => { const v = Number(i.value); if (Number.isFinite(v) && i.value !== '') onSet(Math.min(max, Math.max(min, v))); else i.value = String(Math.round(value * 1000) / 1000); }); return i;
+  i.addEventListener('change', () => { const v = wrapAngle(Number(i.value), wrap, min, max); if (Number.isFinite(v) && i.value !== '') onSet(Math.min(max, Math.max(min, v))); else i.value = String(Math.round(value * 1000) / 1000); }); return i;
 }
 export function btn(label, onClick, title, cls) { const b = el('button', cls || '', label); b.type = 'button'; if (title) b.title = title; b.addEventListener('click', onClick); return b; }
 

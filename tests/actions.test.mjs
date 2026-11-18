@@ -125,15 +125,36 @@ test('rf.js honours custom cable and custom antenna gain', () => {
   assert.ok(rxGain(r3) > rxGain(r2) + 5);
 });
 
-test('removeLink prunes the link readings and people references and refuses to remove the last link', async () => {
+test('removeLink prunes the link readings and people references and can remove the last link', async () => {
   const { removeLink } = await import('../js/actions.js');
   const { createDefaultLink } = await import('../js/model/scene.js');
   const st = createStore(createDefaultScene()); const a = st.getScene().links[0].id;
-  assert.equal(removeLink(st, a), false, 'the last link stays');
   st.update((d) => { const b = createDefaultLink('mic'); d.links.push(b); d.measurements = [{ id: 'm1', linkId: a, x: 1, y: 1, rxDbm: -50 }, { id: 'm2', linkId: b.id, x: 1, y: 1, rxDbm: -50 }]; });
   const b = st.getScene().links[1].id;
   assert.equal(removeLink(st, a), true);
   assert.deepEqual(st.getScene().links.map((l) => l.id), [b]);
   assert.deepEqual(st.getScene().measurements.map((m) => m.id), ['m2'], 'the removed link readings are gone');
   assert.equal(removeLink(st, 'nope'), false);
+});
+
+test('every radio item can be removed, leaving a valid empty plan', async () => {
+  const { removeLink, addReceiverFor } = await import('../js/actions.js');
+  const { addRackAntenna, removeRackItem, adoptRack } = await import('../js/actionsRack.js');
+  const { validateScene } = await import('../js/model/scene.js');
+  const st = createStore(createDefaultScene());
+  adoptRack(st);
+  const a = st.getScene().links[0].id;
+  const extra = addReceiverFor(st, a);
+  assert.ok(extra, 'extra receiver added');
+  assert.equal(st.getScene().links.some((l) => l.txOf === a), true);
+  assert.equal(removeLink(st, a), true);
+  assert.equal(st.getScene().links.length, 1, 'the extra receiver stays as its own link');
+  assert.equal(st.getScene().links[0].txOf, undefined);
+  assert.equal(removeLink(st, extra), true);
+  assert.equal(st.getScene().links.length, 0);
+  assert.equal(st.getScene().rack.receivers.length, 0, 'no empty receivers left in the rack');
+  assert.deepEqual(validateScene(st.getScene()).errors, [], 'empty plan validates');
+  for (const x of [...st.getScene().rack.antennas]) removeRackItem(st, 'antennas', x.id);
+  assert.equal(st.getScene().rack.antennas.length, 0, 'the last antenna can go');
+  st.undo(); st.undo();
 });

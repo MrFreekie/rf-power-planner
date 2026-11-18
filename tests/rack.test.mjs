@@ -261,9 +261,7 @@ test('rack actions keep receive and transmit antennas in their own pools, and su
   assert.notEqual(st.getScene().rack.receivers[0].channels[0].antA, tx);
   R.connectTxChannel(st, iem.id, { antennaId: rxA }); // and the other way round
   assert.notEqual(st.getScene().rack.transmitters[0].channels[0].antennaId, rxA);
-  R.removeRackItem(st, 'antennas', rxA); // the last receive antenna stays
-  assert.ok(st.getScene().rack.antennas.some((a) => a.id === rxA));
-  // kind change and back must not duplicate the derived antenna or receiver ids
+    // kind change and back must not duplicate the derived antenna or receiver ids
   A.setLinkKind(st, mic.id, 'iem'); A.setLinkKind(st, mic.id, 'mic'); A.setLinkKind(st, iem.id, 'mic'); A.setLinkKind(st, iem.id, 'iem');
   assert.deepEqual(validateScene(st.getScene()), { ok: true, errors: [] });
 });

@@ -8,6 +8,5 @@ test('stamp text is empty for a missing or invalid time', () => {
 });
 test('stamp text names the date and time', () => {
   const t = buildStampText('2026-11-18T14:05:00Z', 'en-GB');
-  assert.match(t, /^Updated /);
-  assert.match(t, /2026/);
+  assert.match(t, /^Release v2026[.]11[.][0-9]{2} . [0-9]{2}:[0-9]{2}$/);
 });

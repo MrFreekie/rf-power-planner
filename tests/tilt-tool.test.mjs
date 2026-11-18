@@ -69,7 +69,7 @@ test('half-power wedge follows the tilt and the gauge draws for every selection 
     const g = fakeCtx();
     const a = { type, orientation: { az: 90, el: 0 }, tiltDeg: tilt, polarisation: 'slant45', rollDeg: 10 };
     const r = drawTiltGauge(g, { ink: '#000', inkSoft: '#555', paper: '#fff' }, { x: 100, y: 100 }, { len: 80, selected, tilt, el: 0, u, antenna: a, hot: true, active: true });
-    assert.ok(r.tip && /tilt/.test(r.text));
+    assert.ok(r.tip && /tilt|elevation|lean/.test(r.text));
     assert.equal(g.calls.filter((c) => c[0] === 'save').length, g.calls.filter((c) => c[0] === 'restore').length);
     if (selected) assert.ok(g.calls.filter((c) => c[0] === 'moveTo').length >= 13, 'ticks drawn');
   }

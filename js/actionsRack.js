@@ -104,7 +104,7 @@ export function removeRackItem(store, kind, id) {
       for (const x of rack.splitters) if (x.fromSplitter === id) { if (up) x.fromSplitter = up; else { delete x.fromSplitter; x.antA = s.antA; x.antB = s.antB; } }
       rack.splitters = rack.splitters.filter((x) => x !== s);
     } else if (kind === 'antennas') {
-      const gone = rack.antennas.find((a) => a.id === id); if (!gone || (gone.role !== 'tx' && rack.antennas.filter((a) => a.role !== 'tx').length < 2)) return; // the last receive antenna stays
+      const gone = rack.antennas.find((a) => a.id === id); if (!gone) return;
       rack.antennas = rack.antennas.filter((a) => a.id !== id);
       for (const s of rack.splitters) { if (s.antA === id) s.antA = null; if (s.antB === id) s.antB = null; }
       for (const r of rack.receivers) for (const c of r.channels) { if (c.antA === id) c.antA = null; if (c.antB === id) c.antB = null; }
@@ -254,7 +254,9 @@ export function setRxBias(store, linkId, { on, volts, ma } = {}) {
 export function setRackAntennaType(store, id, type) {
   return store.update((d) => {
     const a = adopt(d).antennas.find((x) => x.id === id), lib = ANTENNAS[type]; if (!a || !lib) return;
+    const was = a.antenna.type;
     a.antenna.type = type; a.antenna.gainDbi = lib.gainDbi;
+    if (type === 'paddle' && was !== 'paddle') a.antenna.orientation = { az: a.antenna.orientation?.az ?? 0, el: 0 }; // a paddle defaults to level aim
     if (!allowedPolarisations(type).includes(a.antenna.polarisation)) a.antenna.polarisation = defaultPolarisation(type);
   });
 }
