@@ -79,5 +79,5 @@ test('restoreScene migrates then validates, refuses an invalid or link-less scen
   assert.equal(restoreScene(store, old), true, 'an older version is migrated, then accepted');
   store.select('zone-that-is-gone'); assert.equal(restoreScene(store, snap), true); assert.equal(store.getSelection(), null, 'the dangling selection is cleared');
   store.select(snap.links[0].id); assert.equal(restoreScene(store, snap), true); assert.equal(store.getSelection(), snap.links[0].id, 'a selection that still exists is kept');
-  const before = store.getScene(); assert.equal(restoreScene(store, { ...snap, links: [] }), false); assert.equal(store.getScene(), before);
+  const before = store.getScene(); assert.equal(restoreScene(store, { links: [] }), false); assert.equal(store.getScene(), before); assert.equal(restoreScene(store, { ...snap, links: [] }), true, 'an empty plan with a stage is allowed');
 });

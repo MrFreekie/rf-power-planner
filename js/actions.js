@@ -217,6 +217,13 @@ export function removeReflector(store, id) {
 }
 
 /** Replace the scene with a fresh default (undoable). Keeps the user's display units. */
+/** newScene(store): an empty plan with the stage and no radio items (units kept), one undo step. */
+export function newScene(store) {
+  const units = store.getScene().units;
+  store.update(() => ({ ...createDefaultScene(), units: { ...units }, links: [] }));
+  store.select(null);
+}
+
 export function resetScene(store) {
   const units = store.getScene().units;
   store.update(() => ({ ...createDefaultScene(), units: { ...units } }));
@@ -1194,8 +1201,8 @@ function sceneIds(scene) {
   return ids;
 }
 
-/** restorable(scene) -> true when restoreScene would accept this object at all (an object with at least one link). The Compare snapshot Take uses the same rule. */
-export const restorable = (scene) => !!scene && typeof scene === 'object' && Array.isArray(scene.links) && scene.links.length > 0;
+/** restorable(scene) -> true when restoreScene would accept this object at all (an object with a links list and a stage; an empty plan is allowed). The Compare snapshot Take uses the same rule. */
+export const restorable = (scene) => !!scene && typeof scene === 'object' && Array.isArray(scene.links) && !!scene.stage;
 
 /**
  * Replace the whole scene with a copy of `scene` (a Compare snapshot): one undo step, the walk is stopped first. The copy is migrated (older versions are read)

@@ -158,3 +158,15 @@ test('every radio item can be removed, leaving a valid empty plan', async () => 
   assert.equal(st.getScene().rack.antennas.length, 0, 'the last antenna can go');
   st.undo(); st.undo();
 });
+
+test('newScene gives an empty valid plan with the stage, keeps units, and undoes', async () => {
+  const { newScene } = await import('../js/actions.js');
+  const { validateScene } = await import('../js/model/scene.js');
+  const st = createStore(createDefaultScene());
+  st.update((d) => { d.units.length = 'ft'; });
+  newScene(st);
+  const sc = st.getScene();
+  assert.equal(sc.links.length, 0); assert.ok(sc.stage.width > 0); assert.equal(sc.units.length, 'ft');
+  assert.equal(validateScene(sc).ok, true);
+  st.undo(); assert.equal(st.getScene().links.length, 1);
+});

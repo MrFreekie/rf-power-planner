@@ -5,7 +5,7 @@ import { createStore } from './store.js';
 import { createDefaultScene, createDefaultLink, deserialize, serialize } from './model/scene.js';
 import { solveLink } from './model/rf.js';
 import { SURFACES } from './model/library.js';
-import { setUnits, setPath, loadExample, resetScene } from './actions.js';
+import { setUnits, setPath, loadExample, resetScene, newScene } from './actions.js';
 import { EXAMPLES } from './examples.js';
 import { rxState } from './rxTracker.js';
 import { telemetry } from './telemetryTracker.js';
@@ -260,6 +260,17 @@ $('batt-scale').addEventListener('change', (e) => {
   else { const tl = activeLink().telemetry; if (tl && tl.battery) e.target.value = tl.battery.timeScale; }
 });
 // Reset to the default scene (asks first; undoable) and let the autosave overwrite the stored copy.
+$('btn-new').addEventListener('click', async () => {
+  const ok = await confirmDialog({ title: 'Start a new empty plan?', message: 'Your current scene is replaced by the stage with no radio items. You can press Undo straight afterwards, or use Save first to keep a copy.', confirmText: 'New plan', opener: $('btn-new') });
+  if (!ok) return;
+  stopWalk();
+  newScene(store);
+  history.clear();
+  loadError = '';
+  $('example-note').hidden = true;
+  renderWalk();
+  showStatus('New empty plan with the stage. Add radio items from the Radio panel. Undo brings the previous scene back.', 5000);
+});
 $('btn-reset').addEventListener('click', async () => {
   const ok = await confirmDialog({ title: 'Reset to the default scene?', message: 'Your current scene is replaced. You can press Undo straight afterwards, or use Save first to keep a copy.', confirmText: 'Reset', opener: $('btn-reset') });
   if (!ok) return;

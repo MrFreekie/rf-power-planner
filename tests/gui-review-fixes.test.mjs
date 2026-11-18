@@ -177,8 +177,7 @@ test('compare dialog: option lists are rebuilt only when structural, the same sn
   const empty = createStore(ex('band-four-piece-people')); empty.update((s) => { s.links = []; });
   const m2 = mountCompare({ doc: fakeDoc(), button: doc.createElement('button'), store: empty, hostFactory: noHost, storage: null, confirm: null, defer: (f) => f() });
   m2.zoom.open('compare', null); m2.refresh(true);
-  byText(m2.zoom.dialog, 'Take snapshot').fire('click'); assert.equal(m2.snaps.count(), 0);
-  assert.match(m2.zoom.dialog.find((n) => n.className === 'meas-status')[0].textContent, /Nothing to snapshot/);
+  byText(m2.zoom.dialog, 'Take snapshot').fire('click'); assert.equal(m2.snaps.count(), 1, 'an empty plan can be snapshotted');
   m.destroy(); m2.destroy();
 });
 
