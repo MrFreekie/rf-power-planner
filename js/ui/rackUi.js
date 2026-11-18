@@ -1,59 +1,68 @@
-// Radio items panel: every mic, receive antenna, splitter, receiver, IEM transmitter, combiner and transmit antenna in categories,
-// each item expandable to show its details and edit its connections. Edits go through js/actionsRack.js (one undo step each).
-import { rackSections, deriveRack, rackWarnings, rackLoads, channelRoute, canFeedSplitter, canLoopReceiver, loopLossOf, RACK_LIMITS, DEFAULT_LOOP_LOSS_DB } from '../model/rack.js';
-import { solveCached } from '../view/util.js';
-import { CABLES, ANTENNAS, GROUND_PLANE_LABELS, GROUND_PLANE_GAIN_DBI, allowedPolarisations, defaultPolarisation } from '../model/library.js';
-import { POLARISATION_LABELS } from './antennaFields.js';
-import { linkCard, txFormFactor } from '../model/inventory.js';
-import { inventoryView } from './inventoryUi.js';
-import { addLink, addReceiverFor, assignMic, assignIem, assignExtraMic, removeExtraMic, peopleLinkOwners } from '../actions.js';
-import { setLinkFocus } from '../view/linkFocus.js';
-import { getLinkDock, subscribeLinkDock } from './linkDock.js';
-import { activeLink } from '../view/util.js';
+// Radio items panel: every mic, receive antenna, splitter, receiver, IEM transmitter, combiner, transmit antenna and bodypack, in signal order.
+// Each item's summary shows its status and key numbers; opening it shows the signal flow (links), the essentials, and an Advanced section with the rest
+// (the selected link's own inspector sections dock there). Edits go through js/actionsRack.js and js/actionsRadio.js (one undo step each).
+import { rackSections, deriveRack, rackWarnings, rackLoads, channelRoute, splitterLoad, loopHops } from '../model/rack.js';
+import { signalFlow, statusOf, radioChecks } from '../model/radio-items.js';
+import { solveCached, activeLink } from '../view/util.js';
+import { ANTENNAS } from '../model/library.js';
 import { FM_PRESETS } from '../model/fm-presets.js';
-import { CHAIN_PRESETS } from '../model/chain-presets.js';
+import { txFormFactor, txDeviceName, inventoryRows, inventoryTotals, packListText } from '../model/inventory.js';
+import { inventoryView } from './inventoryUi.js';
 import { poweringBudget, poweringLine } from '../model/powering.js';
 import { erpCheck } from '../model/erp.js';
+import { formatPower, formatDb } from '../model/units.js';
 import { getCoordRegion } from './region.js';
-import { gearPickers } from './gearUi.js';
-import {
-  renameRackItem, addRackAntenna, addRackSplitter, setSplitterType, setSplitterInput, connectChannel, moveChannel, removeRackItem, setRackAntenna,
-  addRackCombiner, setCombiner, setSplitterPorts, setRxBias, setRackAntennaType, setRackAntennaAim, setRackAntennaDetail, addAntennaChainItem, setAntennaChainItem, removeAntennaChainItem, setAntennaZones, connectTxChannel, moveTxChannel, removeCombiner,
-  setCombinerFanout, setFanoutOutput, setTxIsolator,
-  setSplitterFeed, setReceiverLoop, setReceiverLoopLoss,
-} from '../actionsRack.js';
+import { setLinkFocus } from '../view/linkFocus.js';
+import { getLinkDock, subscribeLinkDock } from './linkDock.js';
+import { peopleLinkOwners, addReceiverFor } from '../actions.js';
+import { removeRackItem, removeCombiner } from '../actionsRack.js';
+import { duplicateRadioLink, moveRadioItem } from '../actionsRadio.js';
+import { makeEditors, runLossDb } from './rackEditors.js';
+import { addBar } from './rackAddBar.js';
+import { el, btn, chip, statusDot, flowStrip } from './rackWidgets.js';
 
-const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
-
-// Which of the selected link's inspector sections each kind of item hosts.
 // Live panels built once at start-up (view/diversity.js, view/telemetry.js); they are moved into the open item of the active link.
 const LIVE_FOR = { mic: ['telemetry'], receiver: ['diversity'] };
-const DOCK_FOR = { mic: ['link', 'tx'], transmitter: ['link', 'tx', 'chain'], receiver: ['rx', 'chain', 'chainB'], bodypack: ['rx', 'rxchain'] };
+// The selected link's inspector sections shown in each item's Advanced part (name, frequency, band and power rows are borrowed into the essentials).
+const DOCK_FOR = { mic: ['tx'], transmitter: ['tx', 'chain'], receiver: ['rx'], bodypack: ['rx', 'rxchain'] };
+const LINK_KINDS = ['mic', 'bodypack', 'receiver', 'transmitter'];
+const short = (s) => String(s || '').split(' (')[0];
 
 export function mountRack({ container, store }) {
   container.textContent = '';
   const summary = el('summary', container.tagName === 'DETAILS' ? '' : 'ob-summary', 'Radio items');
   const body = el('div', 'ob-body'), out = el('div', 'rack-out');
-  out.setAttribute('aria-live', 'polite');
   container.append(summary, body);
   if (container.tagName === 'DETAILS') container.open = true;
-  const open = new Set(); // expanded item keys survive a redraw
+  const open = new Set(), advOpen = new Set(); // expanded item keys (and their Advanced parts) survive a redraw
+  const msg = el('p', 'hint inv-msg'); msg.setAttribute('role', 'status');
+  const say = (t) => { msg.textContent = t; };
+  const status = el('p', 'hint rack-status'); status.setAttribute('role', 'status');
 
-  const field = (label, control) => { const l = el('label', 'inv-field'); l.append(el('span', '', label), control); return l; };
-  const select = (label, options, value, onPick) => {
-    const s = el('select'); s.setAttribute('aria-label', label);
-    for (const [v, t] of options) s.append(Object.assign(el('option', '', t), { value: v }));
-    s.value = value == null ? '' : value; s.addEventListener('change', () => onPick(s.value)); return s;
+  // Inspector rows shown in an item's essentials: moved out of their section with a marker left behind, and put back before every redraw.
+  const borrowed = [];
+  let taken = new Set();
+  const restore = () => { for (const { row, marker } of borrowed.splice(0)) if (marker.parentNode) marker.replaceWith(row); taken = new Set(); };
+  const borrow = (keys) => {
+    const dock = getLinkDock(); if (!dock) return null;
+    const box = el('div', 'rack-docked rf-borrowed');
+    for (const k of keys) {
+      if (taken.has(k)) continue;
+      let ctl = null;
+      for (const n of ['link', 'tx', 'rx']) { if (dock[n]) { ctl = dock[n].querySelector(`[data-fkey="${k}"]`); if (ctl) break; } }
+      const row = ctl && ctl.closest('.f'); if (!row) continue;
+      const marker = document.createComment(`borrowed ${k}`); row.replaceWith(marker); box.append(row);
+      borrowed.push({ row, marker }); taken.add(k);
+    }
+    return box.childNodes.length ? box : null;
   };
-  const text = (label, value, onSet) => {
-    const i = el('input'); i.type = 'text'; i.value = value; i.maxLength = 40; i.setAttribute('aria-label', label);
-    i.addEventListener('change', () => onSet(i.value)); return i;
-  };
-  const num = (label, value, onSet, min = -1000, max = 1000) => {
-    const i = el('input'); i.type = 'number'; i.step = '0.1'; i.min = String(min); i.max = String(max); i.value = String(Math.round(value * 100) / 100); i.setAttribute('aria-label', label);
-    i.addEventListener('change', () => { const v = Number(i.value); if (Number.isFinite(v)) onSet(Math.min(max, Math.max(min, v))); }); return i;
-  };
-  const btn = (label, onClick, title) => { const b = el('button', '', label); b.type = 'button'; if (title) b.title = title; b.addEventListener('click', onClick); return b; };
+
+  let reveal = () => {};
+  const bar = addBar({ store, say, reveal: (keys, sel) => reveal(keys, sel) });
+  const pack = el('details', 'rf-pack'), packSum = el('summary', '', 'Pack list'), packPre = el('pre', 'rf-pack-text'), packCopy = btn('Copy pack list', async () => {
+    try { await navigator.clipboard.writeText(packPre.textContent); say('Pack list copied.'); } catch { const r = document.createRange(); r.selectNodeContents(packPre); const s = getSelection(); s.removeAllRanges(); s.addRange(r); say('Pack list selected: press Ctrl+C (Cmd+C) to copy.'); }
+  }, 'Copies the list as plain text');
+  pack.append(packSum, packCopy, packPre);
 
   let lastSel = Symbol('none');
   function render() {
@@ -63,233 +72,172 @@ export function mountRack({ container, store }) {
       const sc0 = store.getScene(), l0 = sc0.links.find((q) => q.tx.id === selNow || q.rx.id === selNow);
       if (l0) for (const k of (l0.tx.id === selNow ? ['mic', 'transmitter'] : ['receiver', 'bodypack'])) open.add(`${k}:${l0.id}`);
     }
-    const scene = store.getScene(), rack = scene.rack || deriveRack(scene), sections = rackSections(scene, txFormFactor);
+    const focusInfo = (() => { // the control with focus comes back after the redraw (same item, same label)
+      const a = document.activeElement, it = a && out.contains(a) && a.closest('.rack-item');
+      return it ? { key: it.dataset.key, summary: a.tagName === 'SUMMARY', label: a.getAttribute('aria-label') || a.textContent } : null;
+    })();
+    restore();
     { const hold = document.getElementById('live-holder'); if (hold) for (const id of ['diversity', 'telemetry']) { const n = document.getElementById(id); if (n && out.contains(n)) hold.append(n); } } // park the live panels before the list is rebuilt
     out.textContent = '';
-    const linkName = (id) => { const l = scene.links.find((q) => q.id === id); return l ? l.name : id; };
+    const scene = store.getScene(), rack = scene.rack || deriveRack(scene), sections = rackSections(scene, txFormFactor);
+    const pu = (scene.units && scene.units.power) || 'dBm';
+    const linkOf = (id) => scene.links.find((q) => q.id === id);
+    const linkName = (id) => { const l = linkOf(id); return l ? l.name : id; };
+    const results = new Map();
+    const resOf = (id) => { if (!results.has(id)) { const l = linkOf(id); let r = null; try { r = l ? solveCached(scene, l) : null; } catch { r = null; } results.set(id, r); } return results.get(id); };
     const bwOf = (l) => { const p = l.tx && l.tx.fmPreset && FM_PRESETS[l.tx.fmPreset]; return p && p.params ? p.params.occupiedBwKhz : 200; };
-    const warns = rackWarnings(scene, bwOf, { erpOf: (l) => erpCheck(l, getCoordRegion()) }), warnBy = new Map();
+    const warns = [...rackWarnings(scene, bwOf, { erpOf: (l) => erpCheck(l, getCoordRegion()) }), ...radioChecks(scene)], warnBy = new Map();
     const dcOf = new Map(); // bias warnings from the link maths, shown on the receiver and on the antennas that feed it
-    for (const l of scene.links) if (l.kind === 'mic') { const r = solveCached(scene, l); const ws = ((r && r.warnings) || []).filter((t) => /bias|DC/i.test(t)); if (ws.length) dcOf.set(l.id, ws); }
+    for (const l of scene.links) if (l.kind === 'mic') { const r = resOf(l.id); const ws = ((r && r.warnings) || []).filter((t) => /bias|DC/i.test(t)); if (ws.length) dcOf.set(l.id, ws); }
+    const chanOf = (lid) => { for (const r of rack.receivers || []) { const c = r.channels.find((x) => x.linkId === lid); if (c) return { r, c }; } return null; };
     for (const [lid, ws] of dcOf) {
-      const m = (rack.receivers || []).flatMap((r) => r.channels).find((c) => c.linkId === lid); if (!m) continue;
-      const mr = rack.receivers.find((r) => r.channels.some((c) => c.linkId === lid)), route = channelRoute(rack, m, mr), keys = [`receiver:${lid}`, ...[route.antA, route.antB].filter(Boolean).map((a) => `antenna:${a.id}`)];
+      const m = chanOf(lid); if (!m) continue;
+      const route = channelRoute(rack, m.c, m.r), keys = [`receiver:${lid}`, ...[route.antA, route.antB].filter(Boolean).map((a) => `antenna:${a.id}`)];
       for (const k of new Set(keys)) for (const t of new Set(ws)) warns.push({ key: k, level: 'warn', text: `${linkName(lid)}: ${t}` });
     }
     for (const l of scene.links) { // powering budget: current drawn by powered gear against each DC source
       if (l.kind !== 'mic') continue;
-      const m = (rack.receivers || []).flatMap((r) => r.channels).find((c) => c.linkId === l.id); if (!m) continue;
-      const route = channelRoute(rack, m), keys = [`receiver:${l.id}`, ...[route.antA, route.antB].filter(Boolean).map((a) => `antenna:${a.id}`)];
+      const m = chanOf(l.id); if (!m) continue;
+      const route = channelRoute(rack, m.c), keys = [`receiver:${l.id}`, ...[route.antA, route.antB].filter(Boolean).map((a) => `antenna:${a.id}`)];
       for (const e of poweringBudget(l)) {
         warns.push({ key: keys[0], level: e.ok ? 'info' : 'warn', text: `${linkName(l.id)} powering, ${e.source}: ${poweringLine(e)}.` });
         for (const t of e.warnings) for (const k of keys.slice(1)) warns.push({ key: k, level: 'warn', text: `${linkName(l.id)}: ${t}` });
       }
     }
     for (const w of warns) warnBy.set(w.key, [...(warnBy.get(w.key) || []), w]);
-    const portOpts = [['', 'As many as used'], ...[2, 3, 4, 5, 6, 8, 12, 16].map((n) => [String(n), `${n} ports`])];
-    const antOpts = (role) => [['', 'No antenna'], ...rack.antennas.filter((a) => (a.role === 'tx') === (role === 'tx')).map((a) => [a.id, a.name])];
-    const find = {
-      receiver: (id) => { for (const r of rack.receivers) { const c = r.channels.find((x) => x.linkId === id); if (c) return { r, c }; } return null; },
-      transmitter: (id) => { for (const r of rack.transmitters || []) { const c = r.channels.find((x) => x.linkId === id); if (c) return { r, c }; } return null; },
-    };
-    const details = (key, title, fill) => {
-      const d = el('details', 'rack-item'); d.dataset.key = key; d.open = open.has(key);
-      d.addEventListener('toggle', () => { if (d.open) open.add(key); else open.delete(key); });
-      const ws = warnBy.get(key) || [], sum = el('summary', ws.some((w) => w.level === 'warn') ? 'rack-warn' : '', (ws.length ? (ws.some((w) => w.level === 'warn') ? '⚠ ' : 'ℹ ') : '') + title);
-      if (['mic', 'bodypack', 'receiver', 'transmitter'].includes(key.split(':')[0])) { const lid = key.split(':')[1]; sum.addEventListener('pointerenter', () => setLinkFocus(lid)); sum.addEventListener('pointerleave', () => setLinkFocus(null)); }
-      const kind = key.split(':')[0], lid = key.split(':')[1], lk = scene.links.find((q) => q.id === lid);
-      if (lk && DOCK_FOR[kind]) sum.addEventListener('click', () => { if (!d.open) store.select((kind === 'mic' || kind === 'transmitter' ? lk.tx : lk.rx).id); }); // opening an item selects its link so the link's own fields appear in it
-      d.append(sum); const b = el('div', 'rack-edit'); for (const w of ws) b.append(el('p', w.level === 'warn' ? 'rack-warn-text' : 'hint', w.text)); fill(b);
-      if (lk && DOCK_FOR[kind] && d.open) { // the selected link's Link, Transmitter, Receiver and cable sections live here
-        const dock = getLinkDock(), act = activeLink(scene, store.getSelection());
-        if (dock && act && act.id === lid) { const host = el('div', 'rack-docked'); const micRx = kind === 'receiver' && lk.kind === 'mic'; // a mic receiver's cable run is edited on its antenna item
-          for (const n of DOCK_FOR[kind]) { if (micRx && (n === 'chain' || n === 'chainB')) continue; if (dock[n]) host.append(dock[n]); }
-          if (micRx) host.append(el('p', 'hint', 'Cable, booster and filter between the antenna and this receiver are edited in the antenna item ("Cable run from this antenna").'));
-          for (const id of LIVE_FOR[kind] || []) { const n = document.getElementById(id); if (n) host.append(n); } b.append(host); }
-      }
-      d.append(b); return d;
-    };
-    const props = (id, b, idx) => { const c = linkCard(scene, id); if (c) for (const i of idx) if (c.lines[i]) b.append(el('p', 'hint', c.lines[i])); };
-    const owner = (id, b, which) => { // who wears or holds this link: choosing someone moves the pack onto them (the link takes their name)
-      const people = scene.people || [], o = peopleLinkOwners(scene).get(id), cur = o ? o.personId : '';
-      if (!people.length) { b.append(el('p', 'hint', 'No people in the show yet. Add one in the People section, then assign this link here.')); return; }
-      const has = (p) => (which === 'mic' ? p.micLinkId : p.iemLinkId);
-      const opts = [['', 'No one'], ...people.map((p) => [p.id, has(p) && has(p) !== id ? `${p.name} (already has ${(scene.links.find((l) => l.id === has(p)) || {}).name || 'one'}; this becomes an extra)` : p.name])];
-      b.append(field(which === 'mic' ? 'Worn or held by' : 'Worn by', select('Person for ' + linkName(id), opts, cur, (v) => {
-        const who = (pid) => (people.find((x) => x.id === pid) || {}).name || 'the person';
-        if (!v) { if (o && o.extra) { removeExtraMic(store, o.personId, id); msg.textContent = `${linkName(id)} is no longer one of ${who(o.personId)}'s extra packs.`; } else if (o) { (which === 'mic' ? assignMic : assignIem)(store, o.personId, null); msg.textContent = `${linkName(id)} is no longer ${who(o.personId)}'s main ${which === 'mic' ? 'mic' : 'IEM'}.`; } return; }
-        if (o && o.personId === v) { msg.textContent = `${linkName(id)} is already carried by ${who(v)}.`; return; } // already theirs (main or extra)
-        const swap = !!o && o.personId !== v, pe = people.find((x) => x.id === v);
-        if (pe && has(pe) && has(pe) !== id) { assignExtraMic(store, v, id, { swap }); msg.textContent = `${pe.name} already has ${linkName(has(pe))}, so ${linkName(id)} was added as an extra pack.`; } // a person can carry several: the second and later ones are extras
-        else { (which === 'mic' ? assignMic : assignIem)(store, v, id, { swap }); msg.textContent = `${linkName(id)} is now ${(pe || {}).name || 'their'}'s main ${which === 'mic' ? 'mic' : 'IEM'}.`; }
-      })));
-    };
-    const gear = (id, b, part) => { const l = scene.links.find((q) => q.id === id); if (l) b.append(gearPickers(store, l, part)); };
-    const editors = {
-      mic: (it, b) => {
-        props(it.id, b, [0, 1]); owner(it.id, b, 'mic'); gear(it.id, b, 'tx');
-        const extras = scene.links.filter((q) => q.txOf === it.id);
-        const add = btn('Add a receiver for this mic', () => { const id = addReceiverFor(store, it.id); msg.textContent = id ? 'Receiver added: see it under Receivers.' : 'Could not add a receiver (link limit reached).'; }, 'A second receiver listening to this transmitter, for a backup, a recording rig or another room. It has its own antenna and path.');
-        b.append(el('p', 'hint', extras.length ? `Also heard by ${extras.map((q) => q.name).join(', ')}.` : 'Heard by one receiver.'), add);
+    const act = activeLink(scene, store.getSelection()), dock = getLinkDock();
+    const owners = peopleLinkOwners(scene), personOf = (id) => { const o = owners.get(id); return o ? ((scene.people || []).find((p) => p.id === o.personId) || {}).name : null; };
+    const antName = (id) => { const a = rack.antennas.find((x) => x.id === id); return a ? a.name : null; };
+    const marginChip = (id) => { const r = resOf(id); return r && Number.isFinite(r.marginDb) ? chip(formatDb(r.marginDb), 'Margin over the receiver sensitivity (Budgets panel)', `m-${r.status}`) : null; };
+    const freqChip = (l) => chip(`${l.freqMHz.toFixed(3)} MHz`, 'Frequency');
+    // the person chip only when the name does not already say who; a generic model reads "Generic"
+    const whoChip = (l, title) => { const p = personOf(l.id); return p && !String(l.name || '').toLowerCase().includes(p.toLowerCase()) ? chip(p, title) : null; };
+    const modelChip = (l) => { const n = txDeviceName(l); return chip(/^generic\b/i.test(n) ? 'Generic' : short(n), `Transmitter model: ${n}`); };
+
+    // summary: [status dot] name  chips...
+    const facts = {
+      mic: (it) => { const l = linkOf(it.id); return [l.name, [freqChip(l), modelChip(l), whoChip(l, 'Worn or held by'), marginChip(l.id)]]; },
+      bodypack: (it) => { const l = linkOf(it.id); return [l.name, [freqChip(l), whoChip(l, 'Worn by'), marginChip(l.id)]]; },
+      receiver: (it) => {
+        const l = linkOf(it.id), m = chanOf(it.id); if (!m) return [l.name, []];
+        const up = m.r.loopFrom && rack.receivers.find((x) => x.id === m.r.loopFrom), sp = m.c.splitterId && rack.splitters.find((s) => s.id === m.c.splitterId);
+        const feed = up ? `loop from ${up.name}` : sp ? `from ${sp.name}` : `from ${[antName(m.c.antA), antName(m.c.antB)].filter(Boolean).join(' + ') || 'no antenna'}`;
+        return [l.name, [freqChip(l), chip(`${m.r.name}${m.r.channels.length > 1 ? ` ch ${m.r.channels.indexOf(m.c) + 1}` : ''}`, 'Receiver unit and channel'), chip(feed, 'Antenna feed', up || sp || m.c.antA ? '' : 'bad'), marginChip(l.id)]];
       },
-      bodypack: (it, b) => {
-        props(it.id, b, [2]); owner(it.id, b, 'iem'); gear(it.id, b, 'rx');
-        const lk = scene.links.find((q) => q.id === it.id), src = lk && lk.txOf !== undefined && scene.links.find((q) => q.id === lk.txOf);
-        if (src) b.append(el('p', 'hint', `Listens to ${src.name}: it hears that transmitter and mix, and follows its frequency.`));
-        else if (scene.links.some((q) => q.txOf === it.id)) b.append(el('p', 'hint', `Also heard by ${scene.links.filter((q) => q.txOf === it.id).map((q) => q.name).join(', ')}.`));
+      transmitter: (it) => {
+        const l = linkOf(it.id); let m = null; for (const t of rack.transmitters || []) { const c = t.channels.find((x) => x.linkId === it.id); if (c) m = { r: t, c }; }
+        if (!m) return [l.name, []];
+        const cb = m.c.combinerId && rack.combiners.find((x) => x.id === m.c.combinerId), path = cb ? `via ${cb.name}` : antName(m.c.antennaId) ? `to ${antName(m.c.antennaId)}` : 'no antenna';
+        return [l.name, [freqChip(l), chip(formatPower(l.tx.powerDbm, pu), 'Transmit power'), chip(`${m.r.name}${m.r.channels.length > 1 ? ` ch ${m.r.channels.indexOf(m.c) + 1}` : ''}`, 'Transmitter unit and channel'), chip(path, 'Output path', cb || antName(m.c.antennaId) ? '' : 'bad'), marginChip(l.id)]];
       },
-      antenna: (it, b) => {
-        const a = rack.antennas.find((x) => x.id === it.id);
-        b.append(field('Name', text('Antenna name', a.name, (v) => renameRackItem(store, 'antennas', a.id, v))));
-        for (const k of ['x', 'y', 'z']) b.append(field(`${k} (m)`, num(`Antenna ${k}`, a.pos[k], (v) => setRackAntenna(store, a.id, { pos: { [k]: v } }), k === 'z' ? 0 : -500, k === 'z' ? 50 : 500)));
-        const types = Object.entries(ANTENNAS).filter(([k]) => k !== 'body' || a.antenna.type === 'body').map(([k, v]) => [k, v.name]), o = a.antenna.orientation || { az: 0, el: 0 };
-        b.append(field('Antenna', select('Antenna type for ' + a.name, types, a.antenna.type, (v) => setRackAntennaType(store, a.id, v))),
-          field('Gain (dBi)', num('Gain', a.antenna.gainDbi, (v) => setRackAntennaAim(store, a.id, { gainDbi: v }), -30, 40)),
-          field('Aim: azimuth (degrees)', num('Azimuth', o.az, (v) => setRackAntennaAim(store, a.id, { az: v }), 0, 360)),
-          field('Aim: elevation (degrees)', num('Elevation', o.el, (v) => setRackAntennaAim(store, a.id, { el: v }), -90, 90)),
-          field('Tilt (degrees, nose up)', num('Tilt', a.antenna.tiltDeg ?? 0, (v) => setRackAntennaDetail(store, a.id, { tiltDeg: v }), -90, 90)),
-          field('Roll (degrees, 0 = upright)', num('Roll', a.antenna.rollDeg ?? 0, (v) => setRackAntennaDetail(store, a.id, { rollDeg: v }), -180, 180)),
-          field('Polarisation', select('Polarisation of ' + a.name, allowedPolarisations(a.antenna.type).map((p) => [p, POLARISATION_LABELS[p] || p]), a.antenna.polarisation ?? defaultPolarisation(a.antenna.type), (v) => setRackAntennaDetail(store, a.id, { polarisation: v }))));
-        if (a.antenna.type === 'quarterwave') b.append(field('Ground plane', select('Ground plane of ' + a.name, [['', 'Not set'], ...Object.keys(GROUND_PLANE_GAIN_DBI).map((g) => [g, `${GROUND_PLANE_LABELS[g]} (${GROUND_PLANE_GAIN_DBI[g]} dBi)`])], a.antenna.groundPlane ?? '', (v) => setRackAntennaDetail(store, a.id, { groundPlane: v }))));
-        b.append(el('p', 'hint', 'Every link fed by this antenna follows these settings.'));
-        if (a.role !== 'tx') {
-          b.append(el('h5', '', 'Cable run from this antenna'), el('p', 'hint', 'Cable, booster, filter or fibre between the antenna and its splitter or receiver. Every receiver on this antenna shares it, in the order listed.'));
-          (a.chain || []).forEach((c) => {
-            const row = el('div', 'rack-chain'); row.append(el('strong', '', c.presetId && CHAIN_PRESETS[c.presetId] ? CHAIN_PRESETS[c.presetId].label : c.kind));
-            if (c.kind === 'cable') row.append(field('Cable', select('Cable type', Object.entries(CABLES).map(([k, v]) => [k, v.name]), c.cableType, (v) => setAntennaChainItem(store, a.id, c.id, { cableType: v }))), field('Length (m)', num('Cable length', c.lengthM, (v) => setAntennaChainItem(store, a.id, c.id, { lengthM: v }), 0, 500)));
-            else if (c.kind === 'booster') row.append(field('Gain (dB)', num('Gain', c.gainDb, (v) => setAntennaChainItem(store, a.id, c.id, { gainDb: v }), -50, 60)), field('Noise figure (dB)', num('Noise figure', c.nfDb, (v) => setAntennaChainItem(store, a.id, c.id, { nfDb: v }), 0, 30)));
-            else if (c.fibreKm !== undefined) row.append(field('Fibre (km)', num('Fibre length', c.fibreKm, (v) => setAntennaChainItem(store, a.id, c.id, { fibreKm: v }), 0, 20)));
-            else if (c.lossDb !== undefined) row.append(field('Loss (dB)', num('Loss', c.lossDb, (v) => setAntennaChainItem(store, a.id, c.id, { lossDb: v }), 0, 60)));
-            row.append(btn('Remove', () => removeAntennaChainItem(store, a.id, c.id))); b.append(row);
-          });
-          const add = select('Add to the cable run', [['', 'Add to the cable run...'], ['cable', 'Cable'], ...['lna-20', 'booster-12', 'filter-bandpass', 'rof-passive-1km', 'rof-active-lna', 'biastee', 'dcblock'].filter((k) => CHAIN_PRESETS[k]).map((k) => [k, CHAIN_PRESETS[k].label])], '', (v) => { if (v) addAntennaChainItem(store, a.id, v === 'cable' ? { kind: 'cable' } : { presetId: v }); });
-          b.append(add);
-          if ((scene.zones || []).length) {
-            b.append(el('h5', '', 'Zones this antenna serves'), el('p', 'hint', 'A planning note: the list warns about a zone no antenna serves. Coverage results do not use it yet.'));
-            for (const z of scene.zones) { const l = el('label', 'inv-field'), cb = el('input'); cb.type = 'checkbox'; cb.checked = (a.zones || []).includes(z.id); cb.addEventListener('change', () => setAntennaZones(store, a.id, scene.zones.filter((q) => (q.id === z.id ? cb.checked : (a.zones || []).includes(q.id))).map((q) => q.id))); l.append(cb, el('span', '', ` ${z.name || z.id}`)); b.append(l); }
-          }
-        }
-        const lastRx = a.role !== 'tx' && rack.antennas.filter((x) => x.role !== 'tx').length < 2, rm = btn('Remove antenna', () => removeRackItem(store, 'antennas', a.id), lastRx ? 'The last receive antenna cannot be removed' : 'Whatever it fed is left with no antenna');
-        rm.disabled = lastRx; b.append(rm);
+      antenna: (it) => {
+        const a = rack.antennas.find((x) => x.id === it.id), to = [];
+        for (const s of rack.splitters) { if (s.fromSplitter) continue; if (s.antA === a.id) to.push(`${s.name} A`); if (s.antB === a.id) to.push(`${s.name} B`); }
+        for (const r of rack.receivers) if (!r.loopFrom) for (const c of r.channels) if (!c.splitterId && (c.antA === a.id || c.antB === a.id)) to.push(r.name);
+        const fed = scene.links.find((l) => l.kind === 'mic' && to.length), loss = (a.chain || []).length ? runLossDb(a, fed ? fed.freqMHz : 600) : null;
+        return [a.name, [chip(short((ANTENNAS[a.antenna.type] || {}).name || a.antenna.type), 'Antenna type'), chip(to.length ? `to ${to.slice(0, 3).join(', ')}${to.length > 3 ? ` +${to.length - 3}` : ''}` : 'not connected', 'Connected to', to.length ? '' : 'bad'), loss !== null && chip(`run ${formatDb(-loss)}`, 'Cable run gain (negative = loss)')]];
       },
-      splitter: (it, b) => {
-        const s = rack.splitters.find((x) => x.id === it.id);
-        b.append(field('Name', text('Splitter name', s.name, (v) => renameRackItem(store, 'splitters', s.id, v))),
-          field('Type', select('Splitter type', [['passive', 'Passive'], ['active', 'Active (powers the antennas)']], s.type, (v) => setSplitterType(store, s.id, v))),
-          field('Ports', select('Splitter ports', portOpts, s.ports ? String(s.ports) : '', (v) => setSplitterPorts(store, s.id, v || null))),
-          field('Fed from', select('Splitter feed', [['', 'Antennas'], ...rack.splitters.filter((x) => x.id !== s.id && canFeedSplitter(rack, s.id, x.id)).map((x) => [x.id, `${x.name} (output)`])], s.fromSplitter || '', (v) => setSplitterFeed(store, s.id, v || null))));
-        if (s.fromSplitter) b.append(el('p', 'hint', `Cascaded: takes its signal from an output of another splitter, up to ${RACK_LIMITS.maxSplitterDepth} stages. Each stage adds its own split loss (and gain if active); antennas come from the first stage.`));
-        else b.append(field('Input A', select('Splitter input A', antOpts('rx'), s.antA, (v) => setSplitterInput(store, s.id, 'A', v))),
-          field('Input B', select('Splitter input B', antOpts('rx'), s.antB, (v) => setSplitterInput(store, s.id, 'B', v))));
-        b.append(btn('Remove splitter', () => removeRackItem(store, 'splitters', s.id), 'Receivers on it connect straight to its antennas'));
+      txantenna: (it) => {
+        const a = rack.antennas.find((x) => x.id === it.id), by = [];
+        for (const t of rack.transmitters || []) for (const c of t.channels) if (!c.combinerId && c.antennaId === a.id) by.push(linkName(c.linkId));
+        for (const c of rack.combiners || []) if (c.antennaId === a.id || (c.fanout && (c.fanout.outputs || []).some((o) => o && o.antennaId === a.id))) by.push(c.name);
+        return [a.name, [chip(a.load ? '50 ohm load' : short((ANTENNAS[a.antenna.type] || {}).name || a.antenna.type), 'Antenna type'), chip(by.length ? `from ${by.slice(0, 2).join(', ')}${by.length > 2 ? ` +${by.length - 2}` : ''}` : 'not connected', 'Fed by', by.length ? '' : 'bad')]];
       },
-      receiver: (it, b) => {
-        const m = find.receiver(it.id); if (!m) return;
-        props(it.id, b, [2, 3, 4]); gear(it.id, b, 'rx');
-        const lk = scene.links.find((q) => q.id === it.id), src0 = lk.txOf !== undefined && scene.links.find((q) => q.id === lk.txOf);
-        if (src0) b.append(el('p', 'hint', `Listens to ${src0.name}: it hears that mic's transmitter and follows its frequency.`));
-        const on = lk.rx.antennaBiasV > 0, bias = el('input'); bias.type = 'checkbox'; bias.checked = on; bias.setAttribute('aria-label', 'Antenna bias for ' + lk.name);
-        bias.addEventListener('change', () => setRxBias(store, it.id, { on: bias.checked }));
-        const bl = el('label', 'inv-field'); bl.append(bias, el('span', '', ' Supply antenna bias from this receiver (powers a booster or active antenna up the cable)')); b.append(bl);
-        if (on) b.append(field('Bias voltage (V)', num('Bias voltage', lk.rx.antennaBiasV, (v) => setRxBias(store, it.id, { volts: v }), 1, 48)), field('Bias current limit (mA, 0 = not stated)', num('Bias current', lk.rx.antennaBiasMa || 0, (v) => setRxBias(store, it.id, { ma: v }), 0, 1000)));
-        else b.append(el('p', 'hint', 'Or put a bias tee in the antenna cable run. The list warns when something on the line needs bias and none reaches it.'));
-        const recvOpts = [...rack.receivers.map((r) => [r.id, r.name]), ['new', 'A new receiver unit']];
-        b.append(field('Sits in receiver unit', select('Receiver unit for ' + linkName(it.id), recvOpts, m.r.id, (v) => moveChannel(store, it.id, v))),
-          field('Receiver unit name', text('Receiver unit name', m.r.name, (v) => renameRackItem(store, 'receivers', m.r.id, v))),
-          field('Fed from', select('Feed for ' + linkName(it.id), [['', 'Antennas directly'], ...rack.splitters.map((s) => [s.id, s.name])], m.c.splitterId, (v) => connectChannel(store, it.id, v ? { splitterId: v } : { antA: m.c.antA || (rack.antennas.find((a) => a.role !== 'tx') || {}).id, antB: m.c.antB }))));
-        const loopOpts = [['', 'No (own antenna feed)'], ...rack.receivers.filter((x) => x.id !== m.r.id && (canLoopReceiver(rack, m.r.id, x.id) || x.id === m.r.loopFrom)).map((x) => [x.id, `${x.name} loop-through`])];
-        b.append(field('Antenna loop-through from', select('Loop-through for ' + linkName(it.id), loopOpts, m.r.loopFrom || '', (v) => setReceiverLoop(store, m.r.id, v || null))));
-        if (m.r.loopFrom) {
-          b.append(field(`Loss of this hop (dB, ${Number.isFinite(m.r.loopLossDb) ? 'set by you' : 'assumed ' + DEFAULT_LOOP_LOSS_DB})`, num('Loop-through loss', loopLossOf(m.r), (v) => setReceiverLoopLoss(store, m.r.id, v), 0, 20)),
-            el('p', 'hint', `This receiver takes the antenna signal passed on by ${(rack.receivers.find((x) => x.id === m.r.loopFrom) || {}).name || 'another receiver'}, with one small insertion loss per hop (about 1 to 3 dB, an assumption: check the receiver's data sheet). At most ${RACK_LIMITS.maxLoopHops} hops. Its feed follows that receiver's first channel.`));
-        } else if (!m.c.splitterId) b.append(field('Antenna A', select('Antenna A for ' + linkName(it.id), antOpts('rx'), m.c.antA, (v) => connectChannel(store, it.id, { antA: v, antB: m.c.antB }))), field('Antenna B', select('Antenna B for ' + linkName(it.id), antOpts('rx'), m.c.antB, (v) => connectChannel(store, it.id, { antA: m.c.antA, antB: v }))));
-        else b.append(el('p', 'hint', 'It takes antenna A and B from the splitter. A splitter costs each output its share of the signal.'));
+      splitter: (it) => {
+        const s = rack.splitters.find((x) => x.id === it.id), n = splitterLoad(rack, s.id), par = s.fromSplitter && rack.splitters.find((x) => x.id === s.fromSplitter);
+        return [s.name, [chip(s.type, 'Splitter type'), chip(`${n}${s.ports ? `/${s.ports}` : ''} out`, 'Outputs in use / ports'), chip(par ? `from ${par.name}` : `from ${[antName(s.antA), antName(s.antB)].filter(Boolean).join(' + ') || 'no antenna'}`, 'Input', par || s.antA ? '' : 'bad')]];
       },
-      transmitter: (it, b) => {
-        const m = find.transmitter(it.id); if (!m) return;
-        props(it.id, b, [0, 1]); owner(it.id, b, 'iem'); gear(it.id, b, 'tx');
-        const opts = [...rack.transmitters.map((r) => [r.id, r.name]), ['new', 'A new transmitter unit']];
-        b.append(field('Sits in transmitter unit', select('Transmitter unit for ' + linkName(it.id), opts, m.r.id, (v) => moveTxChannel(store, it.id, v))),
-          field('Transmitter unit name', text('Transmitter unit name', m.r.name, (v) => renameRackItem(store, 'transmitters', m.r.id, v))),
-          field('Through', select('Combiner for ' + linkName(it.id), [['', 'Straight to an antenna'], ...rack.combiners.map((c) => [c.id, c.name])], m.c.combinerId, (v) => connectTxChannel(store, it.id, v ? { combinerId: v } : { antennaId: m.c.antennaId }))));
-        if (!m.c.combinerId) b.append(field('Antenna', select('Transmit antenna for ' + linkName(it.id), antOpts('tx'), m.c.antennaId, (v) => connectTxChannel(store, it.id, { antennaId: v }))));
-        else b.append(el('p', 'hint', 'The combiner sets the antenna and any cable run; each channel pays the combining loss.'));
-        b.append(field('Isolator', select('Isolator for ' + linkName(it.id), [['', 'None'], ['20', 'Isolator, 20 dB'], ['25', 'Isolator, 25 dB'], ['30', 'Circulator, 30 dB']], m.c.isolator ? String(m.c.isolatorDb || 25) : '', (v) => setTxIsolator(store, it.id, !!v, v ? Number(v) : undefined))));
-        if (m.c.isolator) b.append(el('p', 'hint', 'Fitted at the transmitter output: 0.5 dB loss, and reflected power returning to the output stage is cut by the isolation. The combiner-to-combiner IMD isolation setting is separate and is not changed by this.'));
-      },
-      combiner: (it, b) => {
-        const c = rack.combiners.find((x) => x.id === it.id);
-        b.append(field('Name', text('Combiner name', c.name, (v) => renameRackItem(store, 'combiners', c.id, v))),
-          field('Type', select('Combiner type', [['passive', 'Passive'], ['active', 'Active']], c.type, (v) => setCombiner(store, c.id, { type: v }))),
-          field('Ports', select('Combiner ports', portOpts, c.ports ? String(c.ports) : '', (v) => setCombiner(store, c.id, { ports: v || null }))),
-          field('Transmit antenna', select('Antenna for ' + c.name, antOpts('tx'), c.antennaId, (v) => setCombiner(store, c.id, { antennaId: v }))),
-          field('Cable to antenna (m)', num('Cable length for ' + c.name, c.cable ? c.cable.lengthM : 0, (v) => setCombiner(store, c.id, { cableM: v }), 0, 500)),
-          field('Cable type', select('Cable type for ' + c.name, Object.entries(CABLES).map(([k, v]) => [k, v.name]), c.cable ? c.cable.type : 'rg58', (v) => setCombiner(store, c.id, { cableType: v }))),
-          field('Splitter to several antennas', select('Output splitter for ' + c.name, [['', 'None'], ['passive', 'Passive'], ['active', 'Active']], c.fanout ? c.fanout.type : '', (v) => setCombinerFanout(store, c.id, v ? { on: true, type: v } : { on: false }))),
-          btn('Remove combiner', () => removeCombiner(store, c.id), 'Its channels go straight to the antenna'));
-        if (c.fanout) {
-          const outs = c.fanout.outputs;
-          [...outs, null].forEach((o, i) => {
-            if (!o && outs.length >= 16) return;
-            b.append(field(`Output ${i + 1} antenna`, select(`Splitter output ${i + 1} antenna for ${c.name}`, antOpts('tx'), o ? o.antennaId : '', (v) => setFanoutOutput(store, c.id, i, { antennaId: v }))));
-            if (o) b.append(field(`Output ${i + 1} cable (m)`, num(`Splitter output ${i + 1} cable length for ${c.name}`, o.cable ? o.cable.lengthM : 0, (v) => setFanoutOutput(store, c.id, i, { cableM: v }), 0, 500)),
-              btn(`Remove output ${i + 1}`, () => setFanoutOutput(store, c.id, i, null)));
-          });
-          b.append(el('p', 'hint', 'Every antenna gets the splitter loss plus its own cable. The link is solved on the first output that has an antenna; the Transmit antenna and Cable fields above are not used.'));
-        }
-      },
-      txantenna: (it, b) => {
-        editors.antenna(it, b);
-        const a = rack.antennas.find((x) => x.id === it.id), cb = el('input'); cb.type = 'checkbox'; cb.checked = !!a.load; cb.setAttribute('aria-label', 'Dummy load');
-        cb.addEventListener('change', () => setRackAntenna(store, a.id, { load: cb.checked }));
-        const l = el('label', 'inv-field'); l.append(cb, el('span', '', ' This is a 50 ohm dummy load: nothing is radiated (1 W is plenty for an IEM)')); b.prepend(l);
+      combiner: (it) => {
+        const c = rack.combiners.find((x) => x.id === it.id), n = (rack.transmitters || []).reduce((k, t) => k + t.channels.filter((x) => x.combinerId === c.id).length, 0);
+        const to = c.fanout ? `to ${(c.fanout.outputs || []).filter((o) => o && antName(o.antennaId)).length} antennas` : antName(c.antennaId) ? `to ${antName(c.antennaId)}` : 'no antenna';
+        return [c.name, [chip(c.type, 'Combiner type'), chip(`${n}${c.ports ? `/${c.ports}` : ''} in`, 'Inputs in use / ports'), c.cable && chip(`${c.cable.lengthM} m cable`, 'Cable to the antenna'), chip(to, 'Output', /no antenna|to 0 /.test(to) ? 'bad' : '')]];
       },
     };
+    const editors = makeEditors({ store, scene, rack, say, linkName, borrow, isActive: (id) => !!(act && act.id === id && dock) });
+    const lastRxAnt = rack.antennas.filter((x) => x.role !== 'tx').length < 2;
+    const tools = (kind, id, box) => {
+      const row = el('div', 'rf-tools'), name = (facts[kind] ? facts[kind]({ id })[0] : id);
+      row.append(btn('Up', () => moveRadioItem(store, kind, id, -1), `Move ${name} up the list`), btn('Down', () => moveRadioItem(store, kind, id, 1), `Move ${name} down the list`));
+      const l = LINK_KINDS.includes(kind) && linkOf(id);
+      if (l && l.txOf === undefined && (kind === 'mic' || kind === 'transmitter')) row.append(btn('Duplicate', () => { const nid = duplicateRadioLink(store, id); if (nid) { const n = store.getScene().links.find((q) => q.id === nid); say(`Added ${n.name} at ${n.freqMHz.toFixed(3)} MHz, a copy of ${l.name}.`); reveal([`${kind}:${nid}`], n.tx.id); } else say('Could not duplicate (link limit reached).'); }, `A copy of ${name} at the next clean frequency, fed the same way`));
+      if (l && l.txOf !== undefined) row.append(btn('Duplicate', () => { const nid = addReceiverFor(store, l.txOf); say(nid ? `Added another ${l.kind === 'iem' ? 'bodypack' : 'receiver'} on ${linkName(l.txOf)}.` : 'Could not add (link limit reached).'); if (nid) reveal([`${kind}:${nid}`]); }, `Another ${l.kind === 'iem' ? 'bodypack' : 'receiver'} listening to ${linkName(l.txOf)}`));
+      if (kind === 'antenna' || kind === 'txantenna') { const rm = btn('Remove', () => removeRackItem(store, 'antennas', id), kind === 'antenna' && lastRxAnt ? 'The last receive antenna cannot be removed' : 'Whatever it fed is left with no antenna', 'danger'); rm.disabled = kind === 'antenna' && lastRxAnt; row.append(rm); }
+      if (kind === 'splitter') row.append(btn('Remove', () => removeRackItem(store, 'splitters', id), 'Receivers on it connect straight to its antennas', 'danger'));
+      if (kind === 'combiner') row.append(btn('Remove', () => removeCombiner(store, id), 'Its channels go straight to the antenna', 'danger'));
+      box.append(row);
+    };
+
+    const fill = (d, it, kind) => { // the open item: warnings, flow strip, essentials, tools, Advanced
+      const key = `${kind}:${it.id}`, b = el('div', 'rack-edit'), ws = warnBy.get(key) || [];
+      for (const w of [...ws].sort((x, y) => (x.level === 'warn' ? 0 : 1) - (y.level === 'warn' ? 0 : 1))) b.append(el('p', w.level === 'warn' ? 'rack-warn-text' : 'hint', `${w.level === 'warn' ? 'Fix: ' : ''}${w.text}`));
+      const l = LINK_KINDS.includes(kind) && linkOf(it.id);
+      if (l) { const f = signalFlow(l, resOf(l.id)); if (f) b.append(flowStrip(f, pu)); }
+      const ess = el('div', 'rf-ess'), adv = el('div', 'rf-adv-body'), advD = el('details', 'rf-adv'), advS = el('summary', '', 'Advanced');
+      advD.open = advOpen.has(key); advD.addEventListener('toggle', () => { if (advD.open) advOpen.add(key); else advOpen.delete(key); });
+      (editors[kind] || (() => {}))(it, ess, adv);
+      b.append(ess); tools(kind, it.id, b);
+      adv.append(el('p', 'hint rf-conn', `Connections: ${it.text}`));
+      if (l && dock && act && act.id === l.id) {
+        const host = el('div', 'rack-docked');
+        for (const n of DOCK_FOR[kind] || []) if (dock[n]) host.append(dock[n]);
+        if (l.kind === 'p2p' && dock.link) host.append(dock.link);
+        for (const id of LIVE_FOR[kind] || []) { const n = document.getElementById(id); if (n) host.append(n); }
+        adv.append(host);
+      } else if (l) adv.append(el('p', 'hint', 'Select this link (open its item, or click it on the plan) to see all its transmitter, receiver and cable fields here.'));
+      advD.append(advS, adv); b.append(advD);
+      d.append(b);
+    };
+    const details = (it) => {
+      const kind = it.kind, key = `${kind}:${it.id}`, d = el('details', 'rack-item'); d.dataset.key = key; d.open = open.has(key);
+      const ws = warnBy.get(key) || [], l = LINK_KINDS.includes(kind) && linkOf(it.id);
+      const state = statusOf(l ? resOf(l.id) : null, ws);
+      const [name, chips] = facts[kind] ? facts[kind](it) : [it.text, []];
+      const sum = el('summary', 'rf-sum'); d.dataset.state = state;
+      const nameEl = el('span', 'rf-name', name), chipBox = el('span', 'rf-chips');
+      for (const c of chips) if (c) chipBox.append(c);
+      sum.append(statusDot(state), nameEl, chipBox);
+      const nw = ws.filter((w) => w.level === 'warn').length;
+      if (nw) sum.append(chip(`${nw} to fix`, ws.filter((w) => w.level === 'warn').map((w) => w.text).join('\n'), 'warn'));
+      else if (ws.length) sum.append(chip(`${ws.length} note${ws.length === 1 ? '' : 's'}`, ws.map((w) => w.text).join('\n'), 'info'));
+      if (l) { sum.addEventListener('pointerenter', () => setLinkFocus(l.id)); sum.addEventListener('pointerleave', () => setLinkFocus(null)); }
+      if (l && DOCK_FOR[kind]) sum.addEventListener('click', () => { if (!d.open) store.select((kind === 'mic' || kind === 'transmitter' ? l.tx : l.rx).id); }); // opening an item selects its link so the link's own fields appear in it
+      d.append(sum);
+      d.addEventListener('toggle', () => { if (d.open) { open.add(key); if (d.childElementCount < 2) fill(d, it, kind); } else open.delete(key); });
+      if (d.open) fill(d, it, kind);
+      return d;
+    };
+
+    let nFail = 0, nWarnItems = 0;
     for (const sec of sections) {
       const h = el('h3', 'rack-cat', sec.title); out.append(h);
-      for (const it of sec.items) out.append(details(`${it.kind}:${it.id}`, it.text, (b) => (editors[it.kind] || (() => {}))(it, b)));
+      for (const it of sec.items) { const d = details(it); if (d.dataset.state === 'fail') nFail++; else if (d.dataset.state === 'warn') nWarnItems++; out.append(d); }
     }
-    if (!sections.length) out.append(el('p', 'hint', 'No radio items yet.'));
+    if (!sections.length) out.append(el('p', 'hint', 'No radio items yet: add a mic or an IEM above.'));
+    if (focusInfo) {
+      const item = out.querySelector(`.rack-item[data-key="${CSS.escape(focusInfo.key)}"]`);
+      const t = item && (focusInfo.summary ? item.querySelector(':scope > summary') : [...item.querySelectorAll('select, input, button')].find((n) => (n.getAttribute('aria-label') || n.textContent) === focusInfo.label));
+      if (t) t.focus({ preventScroll: true });
+    }
     const iv = inventoryView(scene, store.getSelection());
     summary.textContent = `Radio items (${iv.summary})`;
     const nWarn = warns.filter((w) => w.level === 'warn').length, loads = rackLoads(scene);
-    status.textContent = [nWarn ? `⚠ ${nWarn} warning${nWarn === 1 ? '' : 's'}: open the marked items.` : '', loads.total ? `${loads.total} x 50 ohm load to pack.` : ''].filter(Boolean).join(' ');
+    status.textContent = [nFail ? `${nFail} item${nFail === 1 ? '' : 's'} failing.` : '', nWarn ? `${nWarn} warning${nWarn === 1 ? '' : 's'} to fix${nWarnItems ? ` on ${nWarnItems} item${nWarnItems === 1 ? '' : 's'}` : ''}: open the marked items.` : '', !nFail && !nWarn ? 'All items OK.' : '', loads.total ? `${loads.total} x 50 ohm load to pack.` : ''].filter(Boolean).join(' ');
+    packPre.textContent = packListText(inventoryTotals(inventoryRows(scene), scene));
+    bar.refresh(scene);
   }
 
-  const status = el('p', 'hint rack-status'); status.setAttribute('role', 'status');
-  const bar = el('div', 'inv-add'), msg = el('p', 'hint inv-msg'); msg.setAttribute('role', 'status');
-  for (const [kind, word] of [['mic', 'microphone'], ['iem', 'in-ear monitor']]) {
-    const b = btn(`Add ${kind === 'mic' ? 'Mic' : 'IEM'} Tx`, () => {
-      const id = addLink(store, kind);
-      if (!id) { msg.textContent = 'The link limit has been reached.'; return; }
-      const l = store.getScene().links.find((q) => q.id === id);
-      msg.textContent = `Added ${l.name} at ${l.freqMHz} MHz. Check it against the others in the Coordination panel.`; store.select(l.tx.id);
-    }, `Add another ${word} link at the next free frequency, beside the last one`);
-    bar.append(b);
-  }
-  bar.append(btn('Add IEM Rx', () => {
-    const sc = store.getScene(), act = activeLink(sc, store.getSelection()), prim = sc.links.filter((q) => q.kind === 'iem' && q.txOf === undefined);
-    const src = act && act.kind === 'iem' ? (act.txOf !== undefined ? sc.links.find((q) => q.id === act.txOf) : act) : prim[prim.length - 1];
-    if (!src) { msg.textContent = 'Add an IEM Tx first: a bodypack needs a transmitter to listen to.'; return; }
-    const id = addReceiverFor(store, src.id);
-    msg.textContent = id ? `Added a bodypack for ${src.name}'s mix: see it under In-ear bodypacks. Assign it to a person there.` : 'Could not add a bodypack (link limit reached).';
-  }, 'Another bodypack on the same IEM transmitter and mix (the selected IEM, or the last one)'));
-  bar.append(
-    btn('Add Rx antenna', () => addRackAntenna(store)), btn('Add Rx splitter', () => addRackSplitter(store)),
-    btn('Add Tx antenna', () => addRackAntenna(store, { role: 'tx' })), btn('Add Tx combiner', () => addRackCombiner(store)),
-  );
-  body.append(el('p', 'hint', 'Every radio item in the show. Open one to see its properties, pick its equipment and change what it is connected to; the link maths follows.'), bar, msg, status, out);
-  let timer = null;
-  let pending = false;
+  reveal = (keys, sel) => { for (const k of keys) open.add(k); if (sel) store.select(sel); else queue(); };
+  body.append(el('p', 'hint', 'Every radio item in signal order. The dot and numbers show how each is doing; open one for its signal flow and essentials, with the rest under Advanced.'), bar.node, msg, status, out, pack);
+  let timer = null, pending = false;
   const queue = () => {
     clearTimeout(timer);
     timer = setTimeout(() => { // a field being typed in must keep focus: redraw when it is left
       const a = document.activeElement;
-      if (a && a.closest && a.closest('.rack-docked') && out.contains(a)) { pending = true; return; }
+      if (a && a.closest && a.closest('.rack-docked, .rf-bulk') && body.contains(a) && a.tagName !== 'BUTTON') { pending = true; return; }
       render();
     }, 30);
   };
-  out.addEventListener('focusout', () => { if (pending) { pending = false; queue(); } });
+  body.addEventListener('focusout', () => { if (pending) { pending = false; queue(); } });
   const unsub = store.subscribe(queue), unsubDock = subscribeLinkDock(queue); render();
-  return { render, destroy() { clearTimeout(timer); if (typeof unsub === 'function') unsub(); unsubDock(); } };
+  return { render, destroy() { clearTimeout(timer); restore(); if (typeof unsub === 'function') unsub(); unsubDock(); } };
 }

@@ -1136,10 +1136,57 @@ body.vnalab-open { overflow: hidden; }
 .rack-edit { display: grid; gap: 6px; padding: 6px; }
 .rack-edit input[type=text], .rack-edit input[type=number], .rack-edit select { width: 100%; font: inherit; box-sizing: border-box; }
 
-.rack-warn { color: #e0a030; }
-.rack-warn-text { margin: 0; color: #e0a030; }
+.rack-warn { color: var(--warn-text); }
+.rack-warn-text { margin: 0; color: var(--warn-text); }
 
 .rack-chain { display: grid; gap: 4px; padding: 4px 0; border-top: 1px solid var(--line, #3a3f4a); }
+/* Radio items: summary chips, status dot, signal-flow strip, essentials and Advanced */
+.rack-item > summary.rf-sum { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; list-style-position: inside; }
+.rf-name { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.rf-chips { display: inline-flex; flex-wrap: wrap; gap: 3px; min-width: 0; }
+.rf-chip { display: inline-block; padding: 0 5px; border: 1px solid var(--line, #ccc); border-radius: 9px; font-size: 11px; line-height: 16px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; color: var(--ink-soft, inherit); }
+.rf-chip-bad, .rf-chip-warn { color: var(--warn-text); border-color: var(--marginal); background: var(--marginal-bg); }
+.rf-chip-info { opacity: .8; }
+.rf-chip-m-pass { color: var(--pass); border-color: var(--pass); }
+.rf-chip-m-marginal { color: var(--warn-text); border-color: var(--marginal); }
+.rf-chip-m-fail { color: var(--fail); border-color: var(--fail); background: var(--fail-bg); }
+.rf-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--pass); }
+.rf-dot[data-state="warn"] { background: var(--marginal); }
+.rf-dot[data-state="fail"] { background: var(--fail); }
+.rack-item[data-state="fail"] { border-left: 3px solid var(--fail); }
+.rack-item[data-state="warn"] { border-left: 3px solid var(--marginal); }
+.rf-flow { display: flex; flex-wrap: wrap; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.rf-stage { display: grid; padding: 2px 5px; border: 1px solid var(--line, #ccc); border-radius: 3px; font-size: 11px; line-height: 1.25; min-width: 0; }
+.rf-stage + .rf-stage::before { content: none; }
+.rf-stage-name { font-weight: 600; }
+.rf-stage-delta { opacity: .8; }
+.rf-stage-level { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rf-stage-margin[data-status="pass"] { color: var(--pass); border-color: var(--pass); }
+.rf-stage-margin[data-status="marginal"] { color: var(--warn-text); border-color: var(--marginal); }
+.rf-stage-margin[data-status="fail"] { color: var(--fail); border-color: var(--fail); }
+.rf-ess { display: grid; gap: 6px; }
+.rf-fact { margin: 0; }
+.rf-fact-k { opacity: .75; }
+.rf-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.rf-row > p { margin: 0; flex: 1 1 140px; }
+.rf-inp { display: flex; align-items: center; gap: 4px; }
+.rf-inp > input, .rf-inp > select { flex: 1 1 auto; min-width: 0; }
+.rf-unit { opacity: .75; white-space: nowrap; }
+.rf-pos { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 4px; }
+.rf-check { display: flex; gap: 4px; align-items: flex-start; }
+.rf-check > input { flex: none; }
+.rf-tools { display: flex; flex-wrap: wrap; gap: 4px; }
+.rf-adv { border-top: 1px solid var(--line, #3a3f4a); padding-top: 4px; }
+.rf-adv > summary { cursor: pointer; font-weight: 600; }
+.rf-adv-body { display: grid; gap: 6px; padding-top: 6px; }
+.rf-borrowed { display: grid; gap: 4px; }
+.rf-bulk > summary { cursor: pointer; font-size: 12px; }
+.rf-bulk-body { display: grid; gap: 6px; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); align-items: end; padding: 4px 0; }
+.rf-bulk-body > .hint { grid-column: 1 / -1; margin: 0; }
+.rf-pack { margin-top: 10px; font-size: 12px; }
+.rf-pack > summary { cursor: pointer; font-weight: 600; }
+.rf-pack-text { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; margin: 4px 0 0; }
+.rack-out, .rack-item, .rack-edit { min-width: 0; max-width: 100%; }
 
 /* Saved scenes + A/B compare pop-out (top bar) */
 .scenes-dialog { width: min(640px, 94vw); max-height: 86vh; overflow: auto; padding: 10px 14px; border: 1px solid var(--ink); background: var(--bg, #fff); color: inherit; }

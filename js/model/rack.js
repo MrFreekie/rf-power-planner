@@ -25,9 +25,10 @@ export function deriveRack(scene) {
   const groups = sources.map((s) => [s, ...links.filter((l) => l.rx.sharedAntennaOf === s.id)]);
   const multi = groups.filter((g) => g.length > 1).length > 1;
   let gi = 0, ri = 0;
-  for (const g of groups) {
+  for (const [k, g] of groups.entries()) {
     const src = g[0], b = src.rx.diversity && src.rx.diversity.enabled ? src.rx.diversity.antennaB : null;
-    const shared = g.length > 1, n = shared ? ++gi : 0, tag = shared && multi ? String(n) : '';
+    // a shared antenna is numbered among the shared ones (as its splitter); an antenna of its own by its place in the list, when there are several
+    const shared = g.length > 1, n = shared ? ++gi : 0, tag = shared ? (multi ? String(n) : '') : groups.length > 1 ? String(k + 1) : '';
     const aId = `ra_${src.id}`, bId = `rb_${src.id}`;
     rack.antennas.push({ id: aId, name: `Rx Antenna ${tag}${b || shared ? 'A' : ''}`.trim(), pos: structuredClone(src.rx.pos), antenna: structuredClone(src.rx.antenna) });
     if (b) rack.antennas.push({ id: bId, name: `Rx Antenna ${tag}B`, pos: structuredClone(b.pos), antenna: structuredClone(b.antenna || src.rx.antenna) });
@@ -263,7 +264,8 @@ export function validateRack(scene) {
 /**
  * rackSections(scene) -> the radio items in categories, as plain data for the list (works on scene.rack or, without one, on deriveRack(scene)):
  * formOf(link) -> 'handheld' | 'bodypack' | 'plug-on' | other: splits the microphones into one category each (omit it for a single list).
- *   [{ key, title, items:[{ id, kind, text }] }] with kinds mic, antenna, splitter, receiver (one item per channel), iem, txantenna, combiner, transmitter (per channel).
+ *   [{ key, title, items:[{ id, kind, text }] }] with kinds mic, antenna, splitter, receiver (one item per channel), transmitter (per channel), combiner, txantenna, bodypack,
+ *   in signal order: microphones, receive antennas, splitters, receivers; then IEM transmitters, combiners, transmit antennas, bodypacks.
  */
 export function rackSections(scene, formOf) {
   const rack = scene.rack || deriveRack(scene), links = scene.links || [];
@@ -303,10 +305,10 @@ export function rackSections(scene, formOf) {
     const path = b ? `${b.name}${b.cable ? ` > ${b.cable.lengthM} m cable` : ''} > ${tail}` : tail;
     return { id: c.linkId, kind: 'transmitter', text: `${t.name} Channel ${i + 1} (${nameOf(c.linkId)}) > ${c.isolator ? `isolator (${ISOLATOR_LOSS_DB} dB loss, ${isolatorDb(c)} dB isolation) > ` : ''}${path}` };
   })) });
-  const iemLinks = links.filter((l) => l.kind === 'iem');
-  if (iemLinks.length) sections.push({ key: 'bodypacks', title: 'In-ear bodypacks', items: iemLinks.map((l) => ({ id: l.id, kind: 'bodypack', text: `${l.name || l.id} bodypack` })) });
   if ((rack.combiners || []).length) sections.push({ key: 'combiners', title: 'Combiners', items: rack.combiners.map((b) => ({ id: b.id, kind: 'combiner', text: `${b.name} (${b.type}) > ${b.cable ? `${b.cable.lengthM} m cable > ` : ''}${b.fanout && Array.isArray(b.fanout.outputs) ? `splitter > ${b.fanout.outputs.map((o) => `${o.cable ? `${o.cable.lengthM} m cable > ` : ''}${an(o.antennaId)}`).join(' and ') || 'no antenna'}` : an(b.antennaId)}` })) });
   if (txAnts.length) sections.push({ key: 'txant', title: 'Transmit antennas', items: txAnts.map((a) => ({ id: a.id, kind: 'txantenna', text: a.load ? `${a.name} (50 ohm dummy load)` : a.name })) });
+  const iemLinks = links.filter((l) => l.kind === 'iem');
+  if (iemLinks.length) sections.push({ key: 'bodypacks', title: 'In-ear bodypacks', items: iemLinks.map((l) => ({ id: l.id, kind: 'bodypack', text: `${l.name || l.id} bodypack` })) });
   return sections;
 }
 

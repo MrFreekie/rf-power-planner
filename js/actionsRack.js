@@ -20,6 +20,9 @@ const isTx = (rack, id) => { const a = rack.antennas.find((x) => x.id === id); r
 const hasRole = (rack, id, tx) => !id || (rack.antennas.some((x) => x.id === id) && isTx(rack, id) === tx);
 const chan = (rack, linkId) => { for (const r of rack.receivers) for (const c of r.channels) if (c.linkId === linkId) return { r, c }; return null; };
 
+/** rackDraft(draft) -> draft.rack, adopting the links into a rack first when there is none (for other action files working inside store.update). */
+export const rackDraft = adopt;
+
 /** adoptRack(store) -> true when the rack was created from the current links. */
 export const adoptRack = (store) => store.update((d) => { if (!d.rack) adopt(d); });
 
@@ -36,7 +39,9 @@ export function addRackAntenna(store, partial = {}) { // partial.role 'tx' makes
     const rack = adopt(d); if (rack.antennas.length >= RACK_LIMITS.maxAntennas) return;
     const ref = [...rack.antennas].reverse().find((a) => (a.role === 'tx') === (partial.role === 'tx')) || { pos: { x: 6, y: 1, z: 2 }, antenna: { type: 'paddle', gainDbi: 2, orientation: { az: 90, el: 0 }, polarisation: 'vertical' } };
     id = newId('ra');
-    rack.antennas.push({ id, ...(partial.role === 'tx' ? { role: 'tx' } : {}), name: partial.name || `Rx Antenna ${rack.antennas.length + 1}`, pos: partial.pos || { ...ref.pos, x: Math.round((ref.pos.x + 0.6) * 100) / 100 }, antenna: partial.antenna || structuredClone(ref.antenna) });
+    const tx = partial.role === 'tx', names = new Set(rack.antennas.map((a) => a.name)); // numbered within its role, never a name already in use
+    let n = rack.antennas.filter((a) => (a.role === 'tx') === tx).length + 1; while (names.has(`${tx ? 'Tx' : 'Rx'} Antenna ${n}`)) n++;
+    rack.antennas.push({ id, ...(tx ? { role: 'tx' } : {}), name: partial.name || `${tx ? 'Tx' : 'Rx'} Antenna ${n}`, pos: partial.pos || { ...ref.pos, x: Math.round((ref.pos.x + 0.6) * 100) / 100 }, antenna: partial.antenna || structuredClone(ref.antenna) });
   });
   return id;
 }

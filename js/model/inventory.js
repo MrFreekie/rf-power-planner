@@ -1,7 +1,8 @@
 // Show inventory (pure): one row per link with the gear on each end, plus totals of what has to be packed and who or what each link is tied to.
 //   inventoryRows(scene, results?)  -> rows { id, name, kind, freqMHz, person, personId, txItem, txPowerMw, txAntenna, rxItem, rxAntenna, antennaB, chainItems,
 //                                             chainLossDb, distanceM, inputPowerDbm, marginDb, status }
-//   inventoryTotals(rows, scene)    -> { mics, iems, other, transmitters, receivers, antennas, cables } where the last four are [{ label, count, ... }]
+//   inventoryTotals(rows, scene)    -> { mics, iems, other, transmitters, receivers, antennas, cables, splitters, combiners, units, loads } (lists are [{ label, count, ... }])
+//   packListText(totals)            -> the totals as plain text, for copying
 //   linkCard(scene, linkId, results?) -> the selected link in words: who, what gear, where, which path, how it ended
 // Equipment names come from the FM preset registry; a link with no preset is named by its kind ("Generic microphone transmitter"). No DOM, no clock.
 import { FM_PRESETS, FM_TX_PRESET_IDS, FM_RX_PRESET_IDS, fmTuningCheck } from './fm-presets.js';
@@ -89,23 +90,60 @@ function tally(list, keyOf, extra) {
   return [...m.values()].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
 }
 
-/** What to pack: counts of each transmitter and receiver model, antenna type and cable type across all links (a diversity antenna B counts too). */
+/**
+ * What to pack: counts of each transmitter and receiver model, antenna type and cable type across all links (a diversity antenna B counts too).
+ * With a radio rack (scene.rack) the rack's antennas, antenna cable runs, combiner cables, splitters, combiners and units are counted once each,
+ * not once per link they feed; a link's own leads (chain items the rack did not put there) still count per link.
+ * Extra fields: units { receivers, transmitters } (rack units, null without a rack), splitters and combiners ([{ label, count }]).
+ */
 export function inventoryTotals(rows, scene) {
-  const links = (scene && scene.links) || [];
-  const antennas = [];
+  const links = (scene && scene.links) || [], rack = scene && scene.rack;
+  const antennas = [], cableMap = new Map();
+  const addCable = (type, lengthM) => { const name = (CABLES[type] && CABLES[type].name) || String(type); const cur = cableMap.get(name) || { label: name, count: 0, lengthM: 0 }; cur.count += 1; cur.lengthM = r1(cur.lengthM + (Number.isFinite(lengthM) ? lengthM : 0)); cableMap.set(name, cur); };
+  const rackChan = (id) => { for (const r of (rack && rack.receivers) || []) for (const c of r.channels || []) if (c.linkId === id) return c; return null; };
   for (const l of links) {
-    if (l.txOf === undefined && l.tx.antenna && l.tx.antenna.type !== 'body') antennas.push(antennaName(l.tx.antenna));
-    if (l.rx.antenna && l.rx.antenna.type !== 'body' && !l.rx.sharedAntennaOf) antennas.push(antennaName(l.rx.antenna)); // a shared antenna is packed once, with its first link
-    const div = l.rx.diversity;
-    if (div && div.enabled && div.antennaB) antennas.push(antennaName(div.antennaB.antenna || l.rx.antenna));
+    const iem = l.kind === 'iem';
+    if (l.txOf === undefined && l.tx.antenna && l.tx.antenna.type !== 'body' && !(rack && iem)) antennas.push(antennaName(l.tx.antenna)); // a rack IEM's antenna is a rack antenna
+    const fromRack = rack && l.kind === 'mic' && rackChan(l.id);
+    if (!fromRack && l.rx.antenna && l.rx.antenna.type !== 'body' && !l.rx.sharedAntennaOf) antennas.push(antennaName(l.rx.antenna)); // a shared antenna is packed once, with its first link
+    const div = l.rx.diversity, ch = fromRack;
+    if (div && div.enabled && div.antennaB && (!ch || (!ch.splitterId && !ch.antB))) antennas.push(antennaName(div.antennaB.antenna || l.rx.antenna)); // with a rack, only a B antenna the rack does not supply
+    for (const it of l.chain || []) if (it && it.kind === 'cable' && !(rack && it.rackSplitter)) addCable(it.cableType, it.lengthM);
   }
-  const cableMap = new Map();
-  for (const l of links) for (const c of chainSummary(l).cables) { const cur = cableMap.get(c.name) || { label: c.name, count: 0, lengthM: 0 }; cur.count += c.count; cur.lengthM = r1(cur.lengthM + c.lengthM); cableMap.set(c.name, cur); }
+  if (rack) {
+    for (const a of rack.antennas || []) {
+      if (!a.load && a.antenna && a.antenna.type !== 'body') antennas.push(antennaName(a.antenna));
+      for (const it of a.chain || []) if (it && it.kind === 'cable') addCable(it.cableType, it.lengthM);
+    }
+    for (const c of rack.combiners || []) {
+      if (c.cable && c.cable.lengthM > 0) addCable(c.cable.type || 'rg58', c.cable.lengthM);
+      if (c.fanout) for (const o of c.fanout.outputs || []) if (o && o.cable && o.cable.lengthM > 0) addCable(o.cable.type || 'rg58', o.cable.lengthM);
+    }
+  }
+  const unit = (word) => (x) => `${x.type === 'active' ? 'Active' : 'Passive'} ${word}${x.ports ? ` (${x.ports} ports)` : ''}`;
+  const fanouts = rack ? (rack.combiners || []).filter((c) => c.fanout).map((c) => ({ type: c.fanout.type, ports: c.fanout.ports })) : [];
   return {
     mics: rows.filter((r) => r.kind === 'mic' && !r.extraRx).length, extraReceivers: rows.filter((r) => r.extraRx).length, iems: rows.filter((r) => r.kind === 'iem').length, other: rows.filter((r) => r.kind !== 'mic' && r.kind !== 'iem').length,
     transmitters: tally(rows.filter((r) => !r.extraRx), (r) => r.txItem), receivers: tally(rows, (r) => r.rxItem), antennas: tally(antennas, (a) => a),
     loads: rackLoads(scene), cables: [...cableMap.values()].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)),
+    units: rack ? { receivers: (rack.receivers || []).length, transmitters: (rack.transmitters || []).length } : null,
+    splitters: rack ? tally([...(rack.splitters || []).map(unit('antenna splitter')), ...fanouts.map(unit('transmit splitter'))], (x) => x) : [],
+    combiners: rack ? tally((rack.combiners || []).map(unit('IEM combiner')), (x) => x) : [],
   };
+}
+
+/** packListText(totals, title?) -> plain text of what to pack, one line per group, for copying into a show file or an email. */
+export function packListText(totals, title = 'Pack list') {
+  const t = totals || {}, lines = [title];
+  const list = (xs, extra) => (xs || []).map((x) => `${x.count} x ${x.label}${extra ? extra(x) : ''}`).join('; ');
+  const add = (label, xs, extra) => { if (xs && xs.length) lines.push(`${label}: ${list(xs, extra)}`); };
+  add('Transmitters', t.transmitters); add('Receivers and bodypacks', t.receivers);
+  if (t.units && (t.units.receivers || t.units.transmitters)) lines.push(`Rack units: ${t.units.receivers} receiver${t.units.receivers === 1 ? '' : 's'}, ${t.units.transmitters} IEM transmitter${t.units.transmitters === 1 ? '' : 's'}`);
+  add('Antennas', t.antennas); add('Splitters', t.splitters); add('Combiners', t.combiners);
+  add('Cables', t.cables, (x) => (x.lengthM ? ` (${x.lengthM} m in all)` : ''));
+  if (t.loads && t.loads.total) lines.push(`50 ohm loads: ${t.loads.total}`);
+  if (lines.length === 1) lines.push('Nothing yet.');
+  return lines.join('\n');
 }
 
 /** The selected link in plain words, for the card under the inventory. Returns null for an unknown id. */

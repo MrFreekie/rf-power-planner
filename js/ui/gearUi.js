@@ -8,7 +8,7 @@ import { DIGITAL_PRESETS } from '../model/digital-params.js';
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 
   /** Transmitter model, power and receiver model selects for one link. Each change is one undoable step through the same actions the inspector uses. */
-export function gearPickers(store, link, part = 'all') {
+export function gearPickers(store, link, part = 'all', { modulation = true } = {}) { // modulation: false leaves the modulation pickers out, 'only' gives just them
     const opts = gearOptions(link), wrap = el('div', 'inv-gear');
     const mod = link.modulation || { type: 'analog-fm', digital: {} };
     const pick = (label, items, current, onPick) => {
@@ -18,12 +18,12 @@ export function gearPickers(store, link, part = 'all') {
       sel.value = current; sel.addEventListener('change', () => onPick(sel.value)); lab.append(sel); return lab;
     };
     const wantTx = part !== 'rx', wantRx = part !== 'tx';
-    if (wantTx) wrap.append(pick('Modulation', [['analog-fm', 'Analog FM'], ['digital', 'Digital']], mod.type, (v) => setModulation(store, link.id, { type: v })));
-    if (wantTx && mod.type === 'digital') {
+    if (wantTx && modulation) wrap.append(pick('Modulation', [['analog-fm', 'Analog FM'], ['digital', 'Digital']], mod.type, (v) => setModulation(store, link.id, { type: v })));
+    if (wantTx && modulation && mod.type === 'digital') {
       wrap.append(pick('Digital preset', Object.entries(DIGITAL_PRESETS).map(([id, p]) => [id, p.label || id]), (mod.digital && mod.digital.preset) || '', (v) => setModulation(store, link.id, { preset: v, fixedOrder: null })));
       wrap.append(pick('Digital order', [['', 'Adaptive'], ['2', 'BPSK'], ['4', 'QPSK'], ['16', '16-QAM'], ['64', '64-QAM'], ['256', '256-QAM']], mod.digital && mod.digital.fixedOrder ? String(mod.digital.fixedOrder) : '', (v) => setModulation(store, link.id, { fixedOrder: v ? Number(v) : null })));
     }
-    if (!opts.tx.length && !opts.rx.length) return wrap;
+    if (modulation === 'only' || (!opts.tx.length && !opts.rx.length)) return wrap;
     const field = (label, current, list, generic, onPick) => {
       const lab = el('label', 'inv-field'); lab.append(el('span', '', label));
       const sel = el('select'); sel.setAttribute('aria-label', `${label} for ${link.name}`);
