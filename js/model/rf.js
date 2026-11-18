@@ -28,7 +28,6 @@ import { wallNoiseAt, wallConstruction } from './ledwall.js';
 import { noiseSourcesAt, mutedReflectorIds, floorRiseDb } from './noise-sources.js';
 export { wallNoiseAt, wallFieldDbuvm, WALL_NOISE_PRESETS, WALL_CONSTRUCTIONS, wallConstruction, meshShieldingDb } from './ledwall.js';
 export { rofEffective, rofOpticalLossDb, rofIip3FromSfdr, rofBranchDelays } from './rof.js';
-import { audiencePathLoss } from './audience.js';
 import { crowdPathLoss, CROWD_CAVEAT, CROWD_MAX_LOSS_DB } from './crowd.js';
 import { CEILING_MATERIALS, overheadPlanes, overheadZoneFraction } from './ceiling.js';
 import { antennaMatch, vswrThroughLoss, BAND_VSWR_WARN, BAND_VSWR_STRONG } from './antenna-band.js';
@@ -533,15 +532,11 @@ export function pathWallLoss(scene, points, freqMHz) {
     }
   }
   lossDb += platformLossDb;
-  // Audience rectangles (audience.js) and crowd zones (crowd.js): the same rule (0.9 dB per metre per person/m2, Fresnel clearance
-  // ramp above head height, ASSUMED slope). A scene may hold both; they stack, but their sum on one path is capped at
-  // CROWD_MAX_LOSS_DB (26 dB, one body's worst measured shadow): the crowd-zone share is trimmed to fit.
-  const aud = audiencePathLoss(scene, points, freqMHz);
-  lossDb += aud.lossDb;
+  // Crowd zones (crowd.js): 0.9 dB per metre per person/m2 (or a mode default), Fresnel clearance ramp above head height; the sum on one path is capped at CROWD_MAX_LOSS_DB.
   const crowd = crowdPathLoss(scene, points, freqMHz);
-  const crowdDb = Math.min(crowd.lossDb, Math.max(0, CROWD_MAX_LOSS_DB - aud.lossDb));
+  const crowdDb = crowd.lossDb;
   lossDb += crowdDb;
-  return { lossDb, crossed, detail, platformLossDb, platforms, audienceLossDb: aud.lossDb, audienceChords: aud.chords, crowdLossDb: crowdDb, crowdChords: crowd.chords, crowdDetail: crowd.crowds };
+  return { lossDb, crossed, detail, platformLossDb, platforms, crowdLossDb: crowdDb, crowdChords: crowd.chords, crowdDetail: crowd.crowds };
 }
 
 // ---------------------------------------------------------------- cables and chains
@@ -926,7 +921,6 @@ export function solveLink(scene, link) {
     return {
       ...p, ...(wl.lossDb || wl.crossed.length ? { wallLossDb: wl.lossDb, crossedWalls: wl.crossed, wallLossDetail: wl.detail } : {}),
       ...(wl.platformLossDb ? { platformLossDb: wl.platformLossDb, platformChords: wl.platforms } : {}),
-      ...(wl.audienceLossDb ? { audienceLossDb: wl.audienceLossDb, audienceChords: wl.audienceChords } : {}),
       ...(wl.crowdLossDb ? { crowdLossDb: wl.crowdLossDb, crowdChords: wl.crowdChords, crowdDetail: wl.crowdDetail } : {}),
       gainDb: db20(Math.hypot(cre, cim)), phaseRad: Math.atan2(cim, cre), _gt: gt, _gr: gr, ...(polLoss ? { polarisationLossDb: polLoss } : {}),
     };
@@ -968,11 +962,9 @@ export function solveLink(scene, link) {
   if (txM.mismatchDb > 1e-9) step(`Tx antenna mismatch (VSWR ${txM.vswr.toFixed(1)}:1)`, -txM.mismatchDb);
   step(`Free-space loss (${formatLength(distanceM, scene && scene.units && scene.units.length)})`, -fspl);
   const directPlatformDb = direct.platformLossDb || 0;
-  const directAudienceDb = direct.audienceLossDb || 0;
   const directCrowdDb = direct.crowdLossDb || 0;
-  if (directWallDb - directPlatformDb - directAudienceDb - directCrowdDb > 1e-12) step('Wall transmission', -(directWallDb - directPlatformDb - directAudienceDb - directCrowdDb));
+  if (directWallDb - directPlatformDb - directCrowdDb > 1e-12) step('Wall transmission', -(directWallDb - directPlatformDb - directCrowdDb));
   if (directPlatformDb) step('Platform obstruction', -directPlatformDb);
-  if (directAudienceDb) step('Audience absorption (assumed)', -directAudienceDb);
   if (directCrowdDb) step('Crowd absorption (assumed)', -directCrowdDb);
   if (Math.abs(multipathDb) > 1e-9) step('Multipath (coherent sum)', multipathDb);
   step('Rx antenna gain', direct._gr);

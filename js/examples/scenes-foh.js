@@ -3,7 +3,7 @@ import { solveLink, chainLossDb } from '../model/rf.js';
 import { overloadStep } from '../model/overload.js';
 import { RX_PRESETS } from '../model/rx-params.js';
 import { imdSummary } from '../model/imd.js';
-import { createDefaultLink, createChainItem, createReflector, createDefaultImd, createImdTransmitter, createAudience, createChainItemFromPreset, newId } from '../model/scene.js';
+import { createDefaultLink, createChainItem, createReflector, createDefaultImd, createImdTransmitter, createCrowdRect, createChainItemFromPreset, newId } from '../model/scene.js';
 import { omni, make } from './helpers.js';
 
 /**
@@ -90,7 +90,7 @@ export function sosReport(scene) {
  *   'remote': antennas at the stage side (3.0 m, 9 m from the performer, outside the crowd) with 45 m of LMR-400 back to FOH.
  *             opts.remote: 'coax' (default: a 15 dB booster at the antenna end, ahead of the cable), 'booster-at-rack' (same booster after the
  *             cable: the wrong place), 'rof' (the active RF over fibre preset, 0.05 km). The IEM transmit path never gets a booster (power limit).
- * Crowd: scene.audience, 5..25 m x 8..26 m. Standing 3-5 persons per m2, seated 1-2 (opts.density default 4 standing / 1.5 seated); the
+ * Crowd: scene.crowds (a rectangle), 5..25 m x 8..26 m. Standing 3-5 persons per m2, seated 1-2 (opts.density default 4 standing / 1.5 seated); the
  * absorption (0.9 dB per metre per person-per-m2 below head height with the clearance ramp above it, capped at 26 dB) is an ASSUMED planning figure. Links: links[0] mic (stage
  * transmitter to FOH receiver, 606.1 MHz), links[1] IEM (FOH transmitter to the bodypack on stage, 614.0 MHz).
  */
@@ -101,7 +101,7 @@ export function fohScene(variant, { kind = 'standing', densityPerM2, remote = 'c
     s.stage = { width: 30, depth: 40 };
     s.environment.floor = 'wood';
     // the performer's body shadow (3 dB, assumed) is set on the mic link only: the IEM bodypack antenna is a body-type antenna that already includes its wearer
-    s.audience = [createAudience({ name: kind === 'seated' ? 'Seated crowd' : 'Standing crowd', x: 5, y: 8, width: 20, depth: 18, kind, densityPerM2: density })];
+    s.crowds = [createCrowdRect({ name: kind === 'seated' ? 'Seated crowd' : 'Standing crowd', x: 5, y: 8, width: 20, depth: 18, kind, densityPerM2: density })];
     const z = variant === 'low' ? 1.2 : 5.0;
     const stagePos = { x: 15, y: 4, z: 1.6 };
     const at = variant === 'remote' ? { x: 6, y: 6, z: 3.0 } : { x: 15, y: 30, z };
@@ -130,13 +130,13 @@ export function fohScene(variant, { kind = 'standing', densityPerM2, remote = 'c
 
 /**
  * fohReport(scene) -> { mic, iem }, each { distanceM, rxPowerDbm (at the antenna terminals), inputPowerDbm (at the receiver input), marginDb,
- * audienceLossDb (the 'Audience absorption' step, positive), chainLossDb (net cable and booster loss, negative = gain) }.
+ * crowdLossDb (the 'Crowd absorption' step, positive), chainLossDb (net cable and booster loss, negative = gain) }.
  */
 export function fohReport(scene) {
   const one = (l) => {
     const r = solveLink(scene, l);
-    const a = r.waterfall.find((w) => /^Audience absorption/.test(w.label));
-    return { distanceM: r.distanceM, rxPowerDbm: r.rxPowerDbm, inputPowerDbm: r.inputPowerDbm, marginDb: r.marginDb, audienceLossDb: a ? -a.deltaDb : 0, chainLossDb: chainLossDb(l.chain, l.freqMHz) };
+    const a = r.waterfall.find((w) => /^Crowd absorption/.test(w.label));
+    return { distanceM: r.distanceM, rxPowerDbm: r.rxPowerDbm, inputPowerDbm: r.inputPowerDbm, marginDb: r.marginDb, crowdLossDb: a ? -a.deltaDb : 0, chainLossDb: chainLossDb(l.chain, l.freqMHz) };
   };
   return { mic: one(scene.links[0]), iem: one(scene.links[1]) };
 }

@@ -2,9 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createStore } from '../js/store.js';
 import { createDefaultScene, validateScene } from '../js/model/scene.js';
-import { addAudience, updateAudience, removeAudience, setCeiling, addOverheadPanel, updateOverheadPanel, removeOverheadPanel, setP2pField, setAntennaDesignBand, densityChoiceId } from '../js/actionsAreas.js';
+import { setCeiling, addOverheadPanel, updateOverheadPanel, removeOverheadPanel, setP2pField, setAntennaDesignBand } from '../js/actionsAreas.js';
 import { setLinkKind } from '../js/actions.js';
-import { AUDIENCE_DENSITY_PRESETS, AUDIENCE_MAX } from '../js/model/audience.js';
 import { findItem, selectableIds } from '../js/view/util.js';
 import { farBounds } from '../js/view/planExtent.js';
 import { budgetExtras } from '../js/ui/budgetExtras.js';
@@ -12,27 +11,6 @@ import { solveLink } from '../js/model/rf.js';
 
 const mk = () => createStore(createDefaultScene());
 
-test('audience: add, clamp density 0.1..5, limit, remove, find and select', () => {
-  const s = mk(); const id = addAudience(s, { width: 8, depth: 5, densityPerM2: 99 });
-  assert.equal(s.getScene().audience[0].densityPerM2, 5);
-  updateAudience(s, id, { densityPerM2: 0.01, kind: 'seated' }); assert.equal(s.getScene().audience[0].densityPerM2, 0.1); assert.equal(s.getScene().audience[0].kind, 'seated');
-  updateAudience(s, id, { kind: 'bogus', x: NaN }); assert.equal(s.getScene().audience[0].kind, 'seated');
-  assert.equal(findItem(s.getScene(), id).type, 'audience'); assert.ok(selectableIds(s.getScene()).includes(id));
-  assert.equal(validateScene(s.getScene()).ok, true);
-  for (let i = 0; i < AUDIENCE_MAX + 3; i++) addAudience(s);
-  assert.equal(s.getScene().audience.length, AUDIENCE_MAX);
-  removeAudience(s, id); assert.equal(findItem(s.getScene(), id), null);
-});
-
-test('audience: drag coalesces to one undo step', () => {
-  const s = mk(); const id = addAudience(s); const x0 = s.getScene().audience[0].x;
-  updateAudience(s, id, { x: 3 }, { coalesce: 'd' }); updateAudience(s, id, { x: 4 }, { coalesce: 'd' });
-  s.undo(); assert.equal(s.getScene().audience[0].x, x0);
-});
-
-test('density choice id matches presets else custom', () => {
-  assert.equal(densityChoiceId(AUDIENCE_DENSITY_PRESETS, 3.5), 'dense'); assert.equal(densityChoiceId(AUDIENCE_DENSITY_PRESETS, 1.23), 'custom');
-});
 
 test('ceiling and overhead panels', () => {
   const s = mk();

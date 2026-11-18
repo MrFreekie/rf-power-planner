@@ -42,7 +42,7 @@ import { isPlacing, placeMessage, pickPlace, cancelPlace, subscribePlace } from 
 import { moveNoiseSource } from '../actionsAreas.js';
 import { movePerson } from '../actions.js';
 import { offsetFromPack, linkOwners } from '../model/people.js';
-import { updateAudience, updateOverheadPanel, addAudience } from '../actionsAreas.js';
+import { updateOverheadPanel } from '../actionsAreas.js';
 
 const LOBE_STEP = 6; // degrees
 
@@ -385,7 +385,7 @@ export function createPlanView(canvas, store) {
   function dragStart(hd, w0) {
     const key = `plan-drag-${++dragCounter}`;
     if (hd.kind === 'areaBody' || hd.kind === 'areaCorner') {
-      const sc = store.getScene(), it = (hd.area === 'audience' ? sc.audience : sc.overheadPanels || []).find((q) => q.id === hd.itemId);
+      const sc = store.getScene(), it = (sc.overheadPanels || []).find((q) => q.id === hd.itemId);
       return { key, area: it && { ...it }, startPtr: w0 ? { x: w0.x, y: w0.y } : { x: hd.wx, y: hd.wy } };
     }
     if (hd.kind === 'crowdBody' || hd.kind === 'crowdVertex') {
@@ -413,7 +413,7 @@ export function createPlanView(canvas, store) {
   function dragMove(hd, ptr, target, state) { dragMoveInner(hd, ptr, target, state); edgeGrow(ptr); }
   function dragMoveInner(hd, ptr, target, state) {
     if ((hd.kind === 'areaBody' || hd.kind === 'areaCorner') && state.area) {
-      const upd = hd.area === 'audience' ? updateAudience : updateOverheadPanel, snap = (v) => (shiftDown ? round2(v) : Math.round(v * 10) / 10), P0 = state.area;
+      const upd = updateOverheadPanel, snap = (v) => (shiftDown ? round2(v) : Math.round(v * 10) / 10), P0 = state.area;
       if (hd.kind === 'areaBody') upd(store, hd.itemId, { x: snap(P0.x + ptr.x - state.startPtr.x), y: snap(P0.y + ptr.y - state.startPtr.y) }, { coalesce: state.key });
       else { const r = resizeFromCorner(P0, hd.corner, { x: snap(ptr.x), y: snap(ptr.y) }, { minSize: 0.2 }); upd(store, hd.itemId, { x: round2(r.x), y: round2(r.y), width: round2(r.width), depth: round2(r.depth) }, { coalesce: state.key }); }
       return;
@@ -529,7 +529,7 @@ export function createPlanView(canvas, store) {
       if (!g) return;
       if (g.type === 'tx' || g.type === 'rx') { g.item.pos.x = round2(clamp(g.item.pos.x + dx * step, bd.x0, bd.x1)); g.item.pos.y = round2(clamp(g.item.pos.y + dy * step, bd.y0, bd.y1)); }
       else if (g.type === 'reflector') for (const p of [g.item.p1, g.item.p2]) { p.x = round2(p.x + dx * step); p.y = round2(p.y + dy * step); }
-      else if (g.type === 'platform' || g.type === 'audience' || g.type === 'panel') { g.item.x = round2(g.item.x + dx * step); g.item.y = round2(g.item.y + dy * step); }
+      else if (g.type === 'platform' || g.type === 'panel') { g.item.x = round2(g.item.x + dx * step); g.item.y = round2(g.item.y + dy * step); }
     }, { coalesce: `plan-nudge-${id}` });
     const g = findItem(store.getScene(), id);
     if (g && g.item.pos) announce(`${g.item.name} at ${describePos(store.getScene(), g.item.pos)}`, { key: 'move', delay: 350 });
@@ -570,18 +570,6 @@ export function createPlanView(canvas, store) {
   let cursor = null;
   const onCurMove = (e) => { const r = canvas.getBoundingClientRect(); cursor = { x: e.clientX - r.left, y: e.clientY - r.top }; host.invalidate(); };
   const onCurLeave = () => { cursor = null; host.invalidate(); };
-  // drag-and-drop: the inspector's "Drag onto the plan" chip drops a new audience area centred on the pointer
-  const AUD_MIME = 'application/x-rfbench-audience';
-  const onDragOver = (e) => { if (e.dataTransfer && [...e.dataTransfer.types].includes(AUD_MIME)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } };
-  const onDrop = (e) => {
-    if (!e.dataTransfer || ![...e.dataTransfer.types].includes(AUD_MIME)) return;
-    e.preventDefault();
-    const r = canvas.getBoundingClientRect(), w = vp.screenToWorld(e.clientX - r.left, e.clientY - r.top);
-    const bd = bounds(store.getScene().stage), W = 6, D = 4;
-    const id = addAudience(store, { x: Math.round((clamp(w.x, bd.x0, bd.x1) - W / 2) * 10) / 10, y: Math.round((clamp(w.y, bd.y0, bd.y1) - D / 2) * 10) / 10, width: W, depth: D });
-    if (id) { store.select(id); announce('Audience area added', { key: 'move', delay: 100 }); }
-  };
-  canvas.addEventListener('dragover', onDragOver); canvas.addEventListener('drop', onDrop);
   // "Place measurement" mode: the next click on the plan becomes a reading position; it runs before the drag/pan handlers and swallows the click
   const onPlaceDown = (e) => {
     if (!isPlacing()) return;
@@ -616,6 +604,6 @@ export function createPlanView(canvas, store) {
 
   return {
     viewport: vp, fit, invalidate: host.invalidate,
-    destroy() { unsubPlace(); canvas.removeEventListener('pointerdown', onPlaceDown, true); canvas.removeEventListener('keydown', onPlaceKey, true); unsubFresnel(); canvas.removeEventListener('dragover', onDragOver); canvas.removeEventListener('drop', onDrop); if (fitBtn) fitBtn.removeEventListener('click', onFitBtn); canvas.removeEventListener('pointermove', onCurMove); canvas.removeEventListener('pointerleave', onCurLeave); canvas.removeEventListener('pointercancel', onCurLeave); window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKey); unregSnap(); detachRip(); detach(); unsub?.(); unsubSq?.(); unsubRx?.(); unsubCov?.(); unsubImd?.(); unsubView?.(); unsubFocus?.(); setLinkFocus(null); host.destroy(); },
+    destroy() { unsubPlace(); canvas.removeEventListener('pointerdown', onPlaceDown, true); canvas.removeEventListener('keydown', onPlaceKey, true); unsubFresnel(); if (fitBtn) fitBtn.removeEventListener('click', onFitBtn); canvas.removeEventListener('pointermove', onCurMove); canvas.removeEventListener('pointerleave', onCurLeave); canvas.removeEventListener('pointercancel', onCurLeave); window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKey); unregSnap(); detachRip(); detach(); unsub?.(); unsubSq?.(); unsubRx?.(); unsubCov?.(); unsubImd?.(); unsubView?.(); unsubFocus?.(); setLinkFocus(null); host.destroy(); },
   };
 }

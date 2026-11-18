@@ -1,4 +1,4 @@
-// Inspector: the people form and the point-to-point and intermod demo forms. The venue forms (stage, platforms, noise, audience, ceiling, environment, reflectors) are built here but shown in the Venue builder panel. The active mic or IEM link's own
+// Inspector: the people form and the point-to-point and intermod demo forms. The venue forms (stage, platforms, noise, crowd zones, ceiling, environment, reflectors) are built here but shown in the Venue builder panel. The active mic or IEM link's own
 // Link, Transmitter, Receiver and cable sections are built here too but shown inside its radio items (see linkDock.js, rackUi.js).
 // Structure is rebuilt only when the set of editable things changes (selection, chain items, reflectors);
 // otherwise every field is patched in place and a focused field is never overwritten.
@@ -20,13 +20,12 @@ import { addPerson, updatePerson, assignMic, assignIem, assignExtraMic, removeEx
 import { confirmDialog } from './confirmDialog.js';
 import { linkChoices, personMargins, extraChoices } from './peopleUi.js';
 import { cleanName, limitMessage } from './nameInput.js';
-import { addAudience, updateAudience, removeAudience, setCeiling, addOverheadPanel, updateOverheadPanel, removeOverheadPanel, setP2pField, setAntennaDesignBand, densityChoiceId, setWallField, setImdIntercept, setImdFilter, addImdBand, updateImdBand, removeImdBand, setImdHarmonic } from '../actionsAreas.js';
+import { setCeiling, addOverheadPanel, updateOverheadPanel, removeOverheadPanel, setP2pField, setAntennaDesignBand, setWallField, setImdIntercept, setImdFilter, addImdBand, updateImdBand, removeImdBand, setImdHarmonic } from '../actionsAreas.js';
 import { IIP2_PRESETS, DEFAULT_IIP2_DBM, IIP4_OVER_IIP2_DB } from '../model/imd-even.js';
 import { WALL_CONSTRUCTIONS, WALL_NOISE_PRESETS, WALL_NOISE_LIMITS } from '../model/ledwall.js';
-import { AUDIENCE_DENSITY_PRESETS, AUDIENCE_DENSITY_LIMITS, AUDIENCE_DB_PER_M_PER_PERSON, AUDIENCE_MAX_LOSS_DB } from '../model/audience.js';
 import { CEILING_MATERIALS, CEILING_LIMITS } from '../model/ceiling.js';
 import { addCrowd, updateCrowd, removeCrowd } from '../actionsAreas.js';
-import { CROWD_MODES, CROWD_DEFAULTS, CROWD_LIMITS, CROWD_CAVEAT, crowdParams } from '../model/crowd.js';
+import { CROWD_MODES, CROWD_DEFAULTS, CROWD_LIMITS, CROWD_CAVEAT, CROWD_DENSITY_PRESETS, crowdParams } from '../model/crowd.js';
 import { CROWD_MODE_LABELS, CROWD_SHORT_NOTE, newCrowdPartial, polygonAddAfter, polygonRemoveAt, polygonSetPoint, confidenceLines, crowdParamText } from './crowdUi.js';
 import { ANTENNA_BANDS, antennaMatch, resolveDesignBand } from '../model/antenna-band.js';
 import { rofEffective } from '../model/rof.js';
@@ -70,7 +69,7 @@ const KIND_NAMES = {
   rof: 'RF over fibre', coupler: 'Directional coupler', biastee: 'Bias tee', dcblock: 'DC block', activesplitter: 'Active splitter', activecombiner: 'Active combiner',
 };
 const PREVIEW_KINDS = new Set(['splitter', 'combiner']);
-const SECTION_FOR = { tx: 'tx', rx: 'rx', reflector: 'refl', link: 'link', platform: 'plats', audience: 'aud', crowd: 'crowd', panel: 'ovh', person: 'ppl', noise: 'noise' };
+const SECTION_FOR = { tx: 'tx', rx: 'rx', reflector: 'refl', link: 'link', platform: 'plats', crowd: 'crowd', panel: 'ovh', person: 'ppl', noise: 'noise' };
 
 export function mountInspector({ container, store }) {
   container.classList.add('inspector');
@@ -79,7 +78,7 @@ export function mountInspector({ container, store }) {
   let updaters = [];
   let refs = {};
   let session = 0; // bumped on focus so each editing burst is its own undo step
-  const open = { stage: false, plats: false, chainB: true, imd: true, aud: false, ovh: false, p2p: true, link: true, tx: false, rx: false, env: false, chain: true, refl: false };
+  const open = { stage: false, plats: false, chainB: true, imd: true, ovh: false, p2p: true, link: true, tx: false, rx: false, env: false, chain: true, refl: false };
   let lastSel = Symbol('none');
 
   const getCtx = () => {
@@ -376,7 +375,7 @@ export function mountInspector({ container, store }) {
     const link = c.link;
     const heading = el('h2', null, 'Inspector');
     const who = c.found
-      ? el('p', 'insp-who', c.found.type === 'platform' ? `Selected: platform "${c.found.item.name}"` : c.found.type === 'audience' ? `Selected: audience area "${c.found.item.name}"` : c.found.type === 'crowd' ? `Selected: crowd zone "${c.found.item.name}"` : c.found.type === 'panel' ? `Selected: overhead panel "${c.found.item.name}"` : c.found.type === 'reflector' ? `Selected: reflector "${c.found.item.name}"`
+      ? el('p', 'insp-who', c.found.type === 'platform' ? `Selected: platform "${c.found.item.name}"` : c.found.type === 'crowd' ? `Selected: crowd zone "${c.found.item.name}"` : c.found.type === 'panel' ? `Selected: overhead panel "${c.found.item.name}"` : c.found.type === 'reflector' ? `Selected: reflector "${c.found.item.name}"`
         : c.found.type === 'link' ? `Selected: link "${link.name}"` : `Selected: ${c.found.type === 'tx' ? 'transmitter' : 'receiver'} "${c.found.item.name}"`)
       : el('p', 'insp-who', `Nothing selected: editing link "${link.name}"`);
     container.append(heading, who);
@@ -403,8 +402,6 @@ export function mountInspector({ container, store }) {
     const plb = section('plats', 'Platforms', 'A platform is a raised block on the stage (drum riser, choir steps). Its top height is measured from the ground.');
     buildPlatforms(plb, c);
 
-    const audb = section('aud', 'Audience', `A crowd absorbs signal below head height: ${AUDIENCE_DB_PER_M_PER_PERSON} dB per metre per person per square metre, capped at ${AUDIENCE_MAX_LOSS_DB} dB per path (assumed, unverified). Drag an audience area onto the plan, or add one here.`);
-    buildAudience(audb, c);
     const crb = section('crowd', 'Crowd zones (assumed)', `A crowd zone is a polygon on the plan that absorbs signal passing through it below head height. ${CROWD_SHORT_NOTE} Drag a zone or its corner squares on the plan, or edit the corners below.`);
     buildCrowd(crb, c);
     const ppb = section('ppl', 'People', 'A person carries a mic and an in-ear pack. Dragging a person moves both packs together; each link stays selectable on its own. Body contact and dampness apply to both packs.');
@@ -666,7 +663,7 @@ export function mountInspector({ container, store }) {
 
     const p2pb = c.link.kind === 'p2p' ? section('p2p', 'Point-to-point path', 'Heights are above a common flat datum. Terrain profiles, multiple edges, rain and ducting are not modelled.') : null;
     if (p2pb) buildP2p(p2pb);
-    const secs = ['stage', 'plats', ...(p2pb ? ['p2p'] : []), 'ppl', 'noise', 'aud', 'crowd', 'ovh', 'link', 'tx', 'rx', 'env', 'chain', ...(refs.chainB ? ['chainB'] : []), 'refl'];
+    const secs = ['stage', 'plats', ...(p2pb ? ['p2p'] : []), 'ppl', 'noise', 'crowd', 'ovh', 'link', 'tx', 'rx', 'env', 'chain', ...(refs.chainB ? ['chainB'] : []), 'refl'];
     if (c.scene.imd && c.scene.imd.enabled) { buildImd(section('imd', 'Intermod demo'), c); secs.unshift('imd'); }
     // This element is a hidden form engine now: every section is handed to its panel (radio items, Venue builder, People, Point-to-point, Intermodulation).
     const docked = LINK_DOCK_SECTIONS.filter((n) => refs[n]);
@@ -816,7 +813,6 @@ export function mountInspector({ container, store }) {
     body.append(form);
   }
 
-  // ---- audience areas -------------------------------------------------------------------------
   function buildNoise(body, c) {
     const srcs = c.scene.noiseSources || [];
     const list = el('ul', 'refl-list');
@@ -969,59 +965,6 @@ export function mountInspector({ container, store }) {
     body.append(form, extraBox, marg, bar);
   }
 
-  function buildAudience(body, c) {
-    const areas = c.scene.audience || [];
-    const list = el('ul', 'refl-list');
-    areas.forEach((a) => {
-      const li = el('li');
-      const b = button(a.name || 'Audience', `aud:${a.id}`, () => store.select(a.id));
-      b.setAttribute('aria-pressed', String(c.sel === a.id));
-      li.append(b); list.append(li);
-    });
-    if (!areas.length) body.append(el('p', 'hint', 'No audience areas. Add one, or drag the chip below onto the plan.'));
-    body.append(list);
-    const addB = button('Add audience area', 'aud-add', (e) => { addOrLimit(store, e && e.currentTarget, 'audience area', () => { const id = addAudience(store); if (id) store.select(id); return id; }); });
-    const chip = el('span', 'drag-chip', 'Drag onto the plan');
-    chip.draggable = true; chip.title = 'Drag onto the plan to place an audience area';
-    chip.addEventListener('dragstart', (e) => { e.dataTransfer.setData('application/x-rfbench-audience', 'standing'); e.dataTransfer.setData('text/plain', 'audience area'); e.dataTransfer.effectAllowed = 'copy'; });
-    body.append(addB, chip);
-    const a0 = c.found?.type === 'audience' ? c.found.item : null;
-    if (!a0) return;
-    const id = a0.id;
-    const Aa = (cc) => (cc.scene.audience || []).find((q) => q.id === id);
-    const len = (key, label, field, min, max, axis = null) => numberField({
-      key: `aud-${key}`, label, decimals: 2, min: (cc) => lengthToUi(dispRange(cc.scene, axis, min, max)[0], cc.lu), max: (cc) => lengthToUi(dispRange(cc.scene, axis, min, max)[1], cc.lu), step: (cc) => (cc.lu === 'ft' ? 0.5 : 0.1), unit: (cc) => cc.lu,
-      get: (cc) => lengthToUi(dispAxis(cc.scene, axis, Aa(cc)?.[field] ?? 0), cc.lu), set: (cc, v, o) => updateAudience(store, id, { [field]: internalAxis(cc.scene, axis, lengthFromUi(v, cc.lu)) }, o),
-    });
-    const form = el('div', 'refl-form');
-    const flagU = (row) => { const sp = el('span', 'flag flag-U', 'U'); sp.title = FLAG_TEXT.U; sp.setAttribute('role', 'img'); sp.setAttribute('aria-label', FLAG_TEXT.U); row.querySelector('.inp').append(sp); return row; };
-    form.append(
-      textField({ key: 'aud-name', label: 'Name', get: (cc) => Aa(cc)?.name, set: (cc, v, o) => updateAudience(store, id, { name: v }, o) }),
-      selectField({ key: 'aud-kind', label: 'Posture', options: [['standing', 'Standing (head 1.75 m)'], ['seated', 'Seated (head 1.2 m)']], get: (cc) => Aa(cc)?.kind, set: (cc, v) => updateAudience(store, id, { kind: v }) }),
-      flagU(selectField({
-        key: 'aud-dens-preset', label: 'Density',
-        options: [...AUDIENCE_DENSITY_PRESETS.filter((p) => p.id !== 'seated').map((p) => [p.id, `${p.label}, ${p.densityPerM2}/m2`]), ['custom', 'Custom']],
-        get: (cc) => densityChoiceId(AUDIENCE_DENSITY_PRESETS, Aa(cc)?.densityPerM2 ?? 2),
-        set: (cc, v) => { const p = AUDIENCE_DENSITY_PRESETS.find((q) => q.id === v); if (p) updateAudience(store, id, { densityPerM2: p.densityPerM2 }); },
-      })),
-      numberField({
-        key: 'aud-dens', label: 'Persons per square metre', decimals: 2, min: AUDIENCE_DENSITY_LIMITS[0], max: AUDIENCE_DENSITY_LIMITS[1], step: 0.1, unit: `per m2 (${AUDIENCE_DENSITY_LIMITS[0]} to ${AUDIENCE_DENSITY_LIMITS[1]})`,
-        get: (cc) => Aa(cc)?.densityPerM2, set: (cc, v, o) => updateAudience(store, id, { densityPerM2: v }, o),
-      }),
-      len('x', 'Left edge x (0 = centre line)', 'x', -500, 1000, 'x'), len('y', 'Back edge y (0 = front edge)', 'y', -500, 1000, 'y'),
-      len('w', 'Width', 'width', 0.1, 500), len('d', 'Depth', 'depth', 0.1, 500),
-    );
-    const slider = el('input'); slider.type = 'range'; slider.min = AUDIENCE_DENSITY_LIMITS[0]; slider.max = AUDIENCE_DENSITY_LIMITS[1]; slider.step = 0.1;
-    slider.setAttribute('aria-label', 'Audience density, persons per square metre'); slider.dataset.fkey = 'aud-slider';
-    slider.addEventListener('input', () => updateAudience(store, id, { densityPerM2: Number(slider.value) }, { coalesce: `aud-dens-${id}` }));
-    updaters.push((cc) => { const a = Aa(cc); if (a && document.activeElement !== slider) slider.value = a.densityPerM2; });
-    const srow = el('div', 'f'); const sl = el('label', null, 'Density slider'); sl.htmlFor = (slider.id = `insp-aud-sl`); srow.append(sl, slider);
-    const info = el('p', 'hint');
-    updaters.push((cc) => { const a = Aa(cc); if (a) info.textContent = `About ${Math.round(a.width * a.depth * a.densityPerM2)} people. Loss ${(AUDIENCE_DB_PER_M_PER_PERSON * a.densityPerM2).toFixed(2)} dB per metre of path inside the crowd (assumed, unverified).`; });
-    form.append(srow, info, button('Remove audience area', 'aud-remove', () => { removeAudience(store, id); store.select(null); }, { cls: 'danger' }));
-    body.append(form);
-  }
-
   // ---- crowd zones (polygon absorption) ------------------------------------------------------------
   function buildCrowd(body, c) {
     const zones = c.scene.crowds || [];
@@ -1050,6 +993,9 @@ export function mountInspector({ container, store }) {
     form.append(
       textField({ key: 'crowd-name', label: 'Name', maxLength: CROWD_LIMITS.nameChars, get: (cc) => Q(cc).name, fallback: () => 'Crowd', set: (cc, v, o) => upd({ name: v }, o) }),
       assumedFlag(selectField({ key: 'crowd-mode', label: 'Mode', options: CROWD_MODES.map((m) => [m, `${CROWD_MODE_LABELS[m]} (head ${CROWD_DEFAULTS[m].headHeightM} m, cap ${CROWD_DEFAULTS[m].lMaxDb} dB)`]), get: (cc) => crowdParams(Q(cc)).mode, set: (cc, v) => upd({ mode: v }) })),
+      selectField({ key: 'crowd-dens-preset', label: 'Density preset', options: [...CROWD_DENSITY_PRESETS.map((p) => [p.id, `${p.label}, ${p.densityPerM2}/m2`]), ['custom', 'Custom']],
+        get: (cc) => { const d = crowdParams(Q(cc)).densityPerM2, p = CROWD_DENSITY_PRESETS.find((q) => Math.abs(q.densityPerM2 - d) < 1e-9); return p ? p.id : 'custom'; },
+        set: (cc, v) => { const p = CROWD_DENSITY_PRESETS.find((q) => q.id === v); if (p) upd({ densityPerM2: p.densityPerM2, kDbPerM: null }); } }),
       assumedFlag(numberField({
         key: 'crowd-dens', label: 'Density', decimals: 2, min: CROWD_LIMITS.densityPerM2[0], max: CROWD_LIMITS.densityPerM2[1], step: 0.1, unit: 'persons per m2',
         get: (cc) => crowdParams(Q(cc)).densityPerM2, set: (cc, v, o) => upd({ densityPerM2: v, kDbPerM: null }, o), // density drives the slope (0.9 dB per metre per person per m2) until the slope is set by hand
@@ -1582,7 +1528,7 @@ export function mountInspector({ container, store }) {
       (c.scene.noiseSources || []).map((n) => `${n.id}:${n.kind}:${n.reflectorId || ''}`),
       (c.scene.people || []).map((p) => `${p.id}:${p.micLinkId || ''}:${p.iemLinkId || ''}:${(p.extraLinkIds || []).join('+')}`), c.scene.links.map((l) => `${l.id}:${l.kind}`),
       (c.scene.platforms || []).map((p) => p.id),
-      (c.scene.audience || []).map((a) => a.id), (c.scene.crowds || []).map((q) => `${q.id}:${q.id === c.sel ? q.polygon.length : ''}`), (c.scene.overheadPanels || []).map((o) => o.id), !!(c.scene.ceiling),
+      (c.scene.crowds || []).map((q) => `${q.id}:${q.id === c.sel ? q.polygon.length : ''}`), (c.scene.overheadPanels || []).map((o) => o.id), !!(c.scene.ceiling),
       c.scene.imd && c.scene.imd.enabled ? c.scene.imd.transmitters.map((t) => t.id) : null,
       c.scene.imd && c.scene.imd.enabled ? (c.scene.imd.bands || []).length : null,
     ]);
@@ -1593,7 +1539,6 @@ export function mountInspector({ container, store }) {
     const names = new Map();
     for (const r of c.scene.reflectors) names.set(`refl:${r.id}`, r.name || 'Reflector');
     for (const p of c.scene.platforms || []) names.set(`plat:${p.id}`, p.name || 'Platform');
-    for (const a of c.scene.audience || []) names.set(`aud:${a.id}`, a.name || 'Audience');
     for (const n of c.scene.noiseSources || []) names.set(`ns:${n.id}`, n.name || 'Noise source');
     for (const p of c.scene.people || []) names.set(`ppl:${p.id}`, p.name || 'Person');
     for (const o of c.scene.overheadPanels || []) names.set(`ovh:${o.id}`, o.name || 'Overhead panel');

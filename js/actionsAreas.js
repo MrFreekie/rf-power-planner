@@ -1,9 +1,8 @@
-// Scene mutations for audience areas, the ceiling, overhead panels, point-to-point settings and antenna design band.
+// Scene mutations for crowd zones, the ceiling, overhead panels, point-to-point settings and antenna design band.
 // Same contract as actions.js: store first, everything through store.update, bad numbers ignored, ranges clamped.
-import { createAudience, createCeiling, createOverheadPanel, PLATFORM_LIMITS, isSafeId } from './model/scene.js';
+import { createCeiling, createOverheadPanel, PLATFORM_LIMITS, isSafeId } from './model/scene.js';
 import { createCrowd, sanitizeName, SCENE_LIMITS } from './model/scene.js';
 import { CROWD_MODES, CROWD_LIMITS } from './model/crowd.js';
-import { AUDIENCE_KINDS, AUDIENCE_DENSITY_LIMITS, AUDIENCE_MAX } from './model/audience.js';
 import { CEILING_MATERIALS, CEILING_LIMITS } from './model/ceiling.js';
 import { ANTENNA_BANDS } from './model/antenna-band.js';
 import { antennaOf } from './actions.js';
@@ -17,45 +16,6 @@ const fin = Number.isFinite;
 const clampTo = (v, [lo, hi]) => Math.min(hi, Math.max(lo, v));
 const opts = (o) => (o && o.coalesce ? { coalesce: o.coalesce } : {});
 const round2 = (v) => Math.round(v * 100) / 100;
-
-// ---- audience -------------------------------------------------------------------------------------------------------
-
-/** Density options for the dropdown plus 'custom'. Pure. */
-export function densityChoiceId(presets, d) {
-  const hit = presets.find((p) => Math.abs(p.densityPerM2 - d) < 1e-9 && p.id !== 'seated');
-  return hit ? hit.id : 'custom';
-}
-
-/** addAudience(store, partial) -> id, null at the 30-area limit. Default 6 x 4 m standing crowd at 2 persons per m2. */
-export function addAudience(store, partial = {}) {
-  let id = null;
-  store.update((d) => {
-    if (!Array.isArray(d.audience)) d.audience = [];
-    if (d.audience.length >= AUDIENCE_MAX) return;
-    const a = createAudience({ name: `Audience ${d.audience.length + 1}`, x: 0, y: -6 - 1 * d.audience.length });
-    applyAudience(a, partial);
-    d.audience.push(a); id = a.id;
-  });
-  return id;
-}
-
-function applyAudience(a, p) {
-  if (typeof p.name === 'string') a.name = p.name.slice(0, 80);
-  for (const k of ['x', 'y']) if (fin(p[k])) a[k] = round2(clampTo(p[k], PLATFORM_LIMITS.coord));
-  for (const k of ['width', 'depth']) if (fin(p[k])) a[k] = round2(clampTo(p[k], PLATFORM_LIMITS.size));
-  if (AUDIENCE_KINDS.includes(p.kind)) a.kind = p.kind;
-  if (fin(p.densityPerM2)) a.densityPerM2 = Math.round(clampTo(p.densityPerM2, AUDIENCE_DENSITY_LIMITS) * 100) / 100;
-}
-
-/** updateAudience(store, id, { name?, x?, y?, width?, depth?, kind?, densityPerM2? }, { coalesce }). Returns true when found. */
-export function updateAudience(store, id, patch = {}, o = {}) {
-  let found = false;
-  store.update((d) => { const a = (d.audience || []).find((q) => q.id === id); if (!a) return; found = true; applyAudience(a, patch); }, opts(o));
-  return found;
-}
-export function removeAudience(store, id) {
-  return store.update((d) => { if (Array.isArray(d.audience)) d.audience = d.audience.filter((a) => a.id !== id); });
-}
 
 // ---- crowd zones (polygon absorption, crowd.js) ------------------------------------------------------------------------
 

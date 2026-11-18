@@ -107,7 +107,7 @@ function itemsForLink(scene, link, res) {
 
   // Wall and audience loss on the direct path
   const maxOf = (k) => (res.paths || []).reduce((a, p) => Math.max(a, Number.isFinite(p[k]) ? p[k] : 0), 0);
-  const wallDb = Math.max(0, maxOf('wallLossDb') - maxOf('audienceLossDb') - maxOf('platformLossDb') - maxOf('crowdLossDb'));
+  const wallDb = Math.max(0, maxOf('wallLossDb') - maxOf('platformLossDb') - maxOf('crowdLossDb'));
   if (wallDb > 0.05) {
     add({
       id: 'wall-loss', label: 'Wall transmission loss', value: `${fmt(wallDb)} dB`, flag: 'I', sensitivityDb: r1(Math.min(wallDb, Math.max(2, 0.3 * wallDb))), effectDb: r1(wallDb),
@@ -115,7 +115,7 @@ function itemsForLink(scene, link, res) {
       fix: 'A transmit-and-receive test across the actual wall at the show frequency.',
     });
   }
-  const audDb = maxOf('audienceLossDb');
+  const audDb = maxOf('crowdLossDb');
   if (audDb > 0.05) {
     add({
       id: 'audience-loss', label: 'Audience absorption', value: `${fmt(audDb)} dB`, flag: 'U', sensitivityDb: r1(Math.min(audDb, Math.max(2, 0.5 * audDb))), effectDb: r1(audDb),

@@ -2,8 +2,7 @@
 //
 // scene.crowds = [{ id, name?, polygon: [{x, y}, ...], mode: 'seated'|'standing'|'packed', densityPerM2?, headHeightM?, kDbPerM?, lMaxDb? }]
 // (x, y) in scene metres, the same axes as zones and platforms. Optional field: scenes without it load and solve exactly as before.
-// scene.audience (audience.js) is the older axis-aligned rectangle form; it now uses the same rate, cap, head heights and clearance ramp.
-// The two add if both are present, but rf.js caps their sum on one path at CROWD_MAX_LOSS_DB.
+// Older scenes held rectangular audience areas in scene.audience; migrateScene turns each into a crowd zone (scene.js).
 //
 // Model (an engineering estimate, not a measurement; see CROWD_CAVEAT):
 //   L_dB = s * min( k * d_in , L_max )                                       (saturating per-metre excess loss)
@@ -34,6 +33,18 @@ export const CROWD_DEFAULTS = Object.freeze({
   standing: Object.freeze({ densityPerM2: 3, kDbPerM: 2.7, lMaxDb: 20, headHeightM: 1.75, kRange: [1.5, 4.0], lMaxRange: [12, 26] }),
   packed: Object.freeze({ densityPerM2: 5, kDbPerM: 4.0, lMaxDb: 22, headHeightM: 1.75, kRange: [2.5, 6.0], lMaxRange: [15, 26] }),
 });
+/**
+ * Density presets (persons per m2) for the crowd form. Sourced: the Green Guide recommended maximum standing density 4.0 per m2 (SGSA, via a
+ * University of Greenwich egress study) and about 4.7 per m2 observed in and around Wembley (G. K. Still); flag S. The others are planning values, flag U.
+ */
+export const CROWD_DENSITY_PRESETS = Object.freeze([
+  { id: 'sparse', label: 'Sparse', densityPerM2: 0.5, flag: 'U' },
+  { id: 'standing', label: 'Standing, normal', densityPerM2: 2, flag: 'U' },
+  { id: 'dense', label: 'Dense', densityPerM2: 3.5, flag: 'U' },
+  { id: 'green-guide', label: 'Green Guide maximum standing (limit)', densityPerM2: 4.0, flag: 'S' },
+  { id: 'pit', label: 'Front-of-stage pit (observed)', densityPerM2: 4.7, flag: 'S' },
+  { id: 'max', label: 'Very dense (planning maximum)', densityPerM2: 5, flag: 'U' },
+]);
 export const CROWD_DENSITY_TO_K = 0.9; // dB per metre per (person per m2), ASSUMED
 /** Accepted ranges of the optional fields (validated in scene.js, clamped in actions). */
 export const CROWD_LIMITS = Object.freeze({ densityPerM2: [0.1, 8], headHeightM: [0.3, 2.5], kDbPerM: [0.1, 10], lMaxDb: [1, CROWD_MAX_LOSS_DB], nameChars: 80 });
@@ -170,7 +181,8 @@ export function crowdPathLoss(scene, points, freqMHz) {
           const zMid = (A.z || 0) + tm * ((B.z || 0) - (A.z || 0));
           const d1 = before + tm * len, d2 = total - d1;
           const f1 = fresnelF1(freqMHz, d1, d2);
-          const s = crowdClearanceFactor(zMid, p.headHeightM, f1);
+          const z0 = (A.z || 0) + iv.t0 * ((B.z || 0) - (A.z || 0)), z1 = (A.z || 0) + iv.t1 * ((B.z || 0) - (A.z || 0));
+          const s = clearanceShare(z0, z1, p.headHeightM, CROWD_RAMP_FRACTION * f1); // exact share of the chord below the heads, including the ramp
           rawDb += p.kDbPerM * dIn; weighted += s * p.kDbPerM * dIn; lengthM += dIn;
           mine.push({ id: c.id, name: c.name, mode: p.mode, leg: i - 1, lengthM: dIn, zMidM: zMid, d1M: d1, d2M: d2, f1M: f1, clearance: s, headHeightM: p.headHeightM });
         }
@@ -185,6 +197,18 @@ export function crowdPathLoss(scene, points, freqMHz) {
     sum += lossDb;
   }
   return { lossDb: Math.min(sum, CROWD_MAX_LOSS_DB), chords, crowds };
+}
+
+// Antiderivative of the clearance factor s(z) (1 below h, linear to 0 at h + T, 0 above): S(z) = integral of s from 0 to z.
+function clearanceIntegral(z, h, T) {
+  if (z <= h) return z;
+  if (T > 0 && z < h + T) { const c = z - h; return h + c - (c * c) / (2 * T); }
+  return h + Math.max(T, 0) / 2;
+}
+/** Mean clearance factor over a straight chord running from height z0 to z1 (exact, so a ray that crosses head height inside the crowd counts the part below it fully). */
+function clearanceShare(z0, z1, h, T) {
+  const frac = Math.abs(z1 - z0) < 1e-12 ? (z0 <= h ? 1 : T > 0 && z0 < h + T ? 1 - (z0 - h) / T : 0) : (clearanceIntegral(z1, h, T) - clearanceIntegral(z0, h, T)) / (z1 - z0);
+  return Math.max(0, Math.min(1, frac));
 }
 
 /** Plain-language summary (for the assumptions panel and the summary data): one line per crowd on the path plus the caveat. */

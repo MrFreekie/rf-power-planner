@@ -26,7 +26,7 @@
 import { knifeEdgeLossDb, knifeEdgeV, earthBulgeM, K_STANDARD } from './p2p.js';
 import { absolutePos, platformBoxes } from './floor.js';
 import { overheadPlanes } from './ceiling.js';
-import { audienceHeadM } from './audience.js';
+import { crowdParams } from './crowd.js';
 
 export const FRESNEL_CLEARANCE_FRACTION = 0.6;
 export const FRESNEL_SAMPLES = 64;
@@ -85,10 +85,10 @@ export function fresnelObstacles(scene, { bulgeAt } = {}) {
     const name = b.kind === 'deck' ? 'Stage deck' : String((scene.platforms || []).find((q) => q.id === b.id)?.name || b.id);
     out.push({ id: b.id, name, category, clearanceAt: (p) => boxClearance(toLocal(b, p), [b.lx0, b.ly0, 0], [b.lx1, b.ly1, b.zTop]) });
   }
-  for (const a of scene.audience || []) {
-    if (!a || !(a.width > 0) || !(a.depth > 0)) continue;
-    const head = audienceHeadM(a);
-    out.push({ id: a.id, name: a.name || 'Audience', category: 'audience', clearanceAt: (p) => boxClearance(p, [a.x, a.y, 0], [a.x + a.width, a.y + a.depth, head]) });
+  for (const c of scene.crowds || []) { // a crowd zone is treated as the box around its polygon, up to head height
+    if (!c || !Array.isArray(c.polygon) || c.polygon.length < 3) continue;
+    const xs = c.polygon.map((q) => q.x), ys = c.polygon.map((q) => q.y), head = crowdParams(c).headHeightM;
+    out.push({ id: c.id, name: c.name || 'Crowd', category: 'audience', clearanceAt: (p) => boxClearance(p, [Math.min(...xs), Math.min(...ys), 0], [Math.max(...xs), Math.max(...ys), head]) });
   }
   for (const w of scene.reflectors || []) {
     if (!w || !w.p1 || !w.p2) continue;

@@ -1,7 +1,7 @@
 // Position lock: an optional boolean `locked` on any placeable item stops it being dragged or nudged on the plan and side views
 // (so a rigged antenna is not knocked out of place). It never changes the RF maths. Pure: no DOM, no globals.
 
-const KEYS = ['reflectors', 'platforms', 'audience', 'overheadPanels', 'crowds', 'people', 'noiseSources'];
+const KEYS = ['reflectors', 'platforms', 'overheadPanels', 'crowds', 'people', 'noiseSources'];
 
 /** Every lockable item as { it, path }: link tx / rx ends, the placed-object lists and IMD transmitters. */
 function* each(scene) {

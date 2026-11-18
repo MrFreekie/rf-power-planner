@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fresnelClearance, fresnelRadiusM, fresnelEllipsoid, fresnelForScene, FRESNEL_CLEARANCE_FRACTION } from '../js/model/fresnel.js';
 import { p2pGeometry, fresnelRadiusM as p2pF1 } from '../js/model/p2p.js';
-import { createDefaultScene, createAudience, createReflector, createPlatform, createCeiling, validateScene } from '../js/model/scene.js';
+import { createDefaultScene, createCrowdRect, createReflector, createPlatform, createCeiling, validateScene } from '../js/model/scene.js';
 import { solveLink } from '../js/model/rf.js';
 import { fohScene } from '../js/examples.js';
 
@@ -38,12 +38,12 @@ test('floor clearance: 1.5 m antennas over 30 m give 1.5 / 1.9358 = 0.775 (clear
 });
 
 test('audience heads: a standing crowd (1.75 m) across a 1.5 m path puts the centre line 0.25 m inside it: fraction -0.25 / F1(x), blocked; raised to 2.5 m it clears by 0.75 m', () => {
-  const add = (s) => { s.audience = [createAudience({ id: 'a1', x: 10, y: 0, width: 10, depth: 10, kind: 'standing', densityPerM2: 2 })]; };
+  const add = (s) => { s.crowds = [createCrowdRect({ id: 'a1', x: 10, y: 0, width: 10, depth: 10, kind: 'standing', densityPerM2: 2 })]; };
   const r = fresnelClearance(...Object.values(straight(1.5, add)));
   const c = r.categories.audience; near(c.clearanceM, -0.25, 1e-9); near(c.minFraction, -0.25 / fresnelRadiusM(c.xM, 30, 600), 1e-9);
   assert.equal(c.blocked, true); assert.equal(r.status, 'blocked'); assert.equal(c.alreadyModelled, true); assert.ok(r.warnings.some((w) => /audience/.test(w) && /already in the link budget/.test(w)));
   assert.ok(c.edgeLossDb > 0 && c.edgeLossDb < 30);
-  const seated = fresnelClearance(...Object.values(straight(1.5, (s) => { s.audience = [createAudience({ x: 10, y: 0, width: 10, depth: 10, kind: 'seated' })]; })));
+  const seated = fresnelClearance(...Object.values(straight(1.5, (s) => { s.crowds = [createCrowdRect({ x: 10, y: 0, width: 10, depth: 10, kind: 'seated' })]; })));
   assert.ok(seated.categories.audience.minFraction > 0); // seated heads 1.2 m: the path is 0.3 m above
   const hi = fresnelClearance(...Object.values(straight(2.5, add)));
   assert.ok(hi.categories.audience.clearanceM >= 0.74 && hi.categories.audience.clearanceM <= 0.76 + 1e-9, String(hi.categories.audience.clearanceM)); // 2.5 - 1.75, over the middle of the crowd

@@ -3,12 +3,12 @@
 // Shows floor, reflectors crossing the slice, direct / floor-bounce rays, and draggable height handles.
 import { createViewport } from './viewport.js';
 import { chordSpan } from './platformGeom.js';
-import { audienceHeadM } from '../model/audience.js';
 import {
   createCanvasHost, activeLink, findItem, selectableIds, solveCached, fmtLen, fmtDb, statusColor,
   drawGrid, drawScaleBar, haloText, setFont, strokeHatchRect, clamp, round2, DEG, readTheme,
 } from './util.js';
 import { attachInteraction } from './interact.js';
+import { crowdParams } from '../model/crowd.js';
 import { tracePaths, antennaFrame } from '../model/rf.js';
 import { tiltFromPointer, stepTilt, tiltText, tiltHandleLength, placeLabel, TILT_COARSE_STEP, TILT_FINE_STEP, pitchOf, pitchWord, isRingAntenna } from '../ui/antennaFields.js';
 import { drawTiltGauge, tiltForPointer } from './tiltGauge.js';
@@ -157,14 +157,15 @@ export function createSideView(canvas, store) {
       handles.push({ kind: 'refBar', itemId: r.id, sx: a.x, sy: (a.y + b.y) / 2, r: 10, bar: [b.y, a.y] });
     }
 
-    // audience (dotted band up to head height), overhead panels (dashed bars at their height) and the ceiling line
-    for (const au of scene.audience || []) {
-      const sp = chordSpan({ x: au.x, y: au.y, width: au.width, depth: au.depth }, S, u); if (!sp) continue;
-      const head = audienceHeadM(au), a1 = vp.worldToScreen(sp[0], -head), b1 = vp.worldToScreen(sp[1], 0);
+    // crowd zones (dotted band up to head height), overhead panels (dashed bars at their height) and the ceiling line
+    for (const cz of scene.crowds || []) { // crowd zones: the box around the polygon, up to head height
+      if (!Array.isArray(cz.polygon) || cz.polygon.length < 3) continue; const px = cz.polygon.map((q) => q.x), py = cz.polygon.map((q) => q.y), au = { name: cz.name };
+      const sp = chordSpan({ x: Math.min(...px), y: Math.min(...py), width: Math.max(...px) - Math.min(...px), depth: Math.max(...py) - Math.min(...py) }, S, u); if (!sp) continue;
+      const head = crowdParams(cz).headHeightM, a1 = vp.worldToScreen(sp[0], -head), b1 = vp.worldToScreen(sp[1], 0);
       ctx.save(); ctx.fillStyle = `rgba(${th.inkRgb},0.07)`; ctx.fillRect(a1.x, a1.y, b1.x - a1.x, b1.y - a1.y);
       ctx.fillStyle = th.inkSoft; for (let yy = a1.y + 4; yy < b1.y; yy += 7) for (let xx = a1.x + 4; xx < b1.x; xx += 7) ctx.fillRect(xx, yy, 1.5, 1.5);
       ctx.setLineDash([2, 3]); ctx.strokeStyle = th.ink; ctx.lineWidth = 1.2; ctx.strokeRect(a1.x + 0.5, a1.y + 0.5, b1.x - a1.x - 1, b1.y - a1.y - 1); ctx.restore();
-      if (b1.x - a1.x > 60) haloText(ctx, th, `${au.name || 'Audience'} (head ${fmtLen(head, scene.units)})`, (a1.x + b1.x) / 2, a1.y - 4, { align: 'center', px: 11, color: th.inkSoft });
+      if (b1.x - a1.x > 60) haloText(ctx, th, `${au.name || 'Crowd'} (head ${fmtLen(head, scene.units)})`, (a1.x + b1.x) / 2, a1.y - 4, { align: 'center', px: 11, color: th.inkSoft });
     }
     for (const op of scene.overheadPanels || []) {
       const sp = chordSpan({ x: op.x, y: op.y, width: op.width, depth: op.depth }, S, u); if (!sp) continue;

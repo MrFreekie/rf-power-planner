@@ -32,7 +32,6 @@ import { CEILING_MATERIALS, CEILING_LIMITS } from './ceiling.js';
 import { WALL_NOISE_PRESETS, WALL_NOISE_LIMITS, WALL_CONSTRUCTIONS } from './ledwall.js';
 import { validatePerson, prunePeople, PEOPLE_LIMITS, linkOwners } from './people.js';
 import { validateNoiseSource, wallNoiseSourcesFromReflectors, NOISE_SOURCE_LIMITS } from './noise-sources.js';
-import { AUDIENCE_KINDS, AUDIENCE_DENSITY_LIMITS, AUDIENCE_MAX } from './audience.js';
 import { CROWD_MODES, CROWD_LIMITS } from './crowd.js';
 import { ANTENNA_BANDS } from './antenna-band.js';
 import { TV_BLOCK_LEVEL_LIMITS } from './spectrum-map.js';
@@ -58,9 +57,9 @@ export function createCeiling(overrides = {}) {
   return { enabled: true, heightM: 5, material: 'metal', ...overrides };
 }
 
-/** An audience area (crowd absorption layer, audience.js). */
-export function createAudience(overrides = {}) {
-  return { id: newId('aud'), name: 'Audience', x: 0, y: 0, width: 6, depth: 4, kind: 'standing', densityPerM2: 2, ...overrides };
+/** A rectangular crowd zone: createCrowdRect({ x, y, width, depth, kind: 'standing'|'seated', densityPerM2, headHeightM?, name? }). Loss capped at 26 dB per path like the old audience areas. */
+export function createCrowdRect({ x = 0, y = 0, width = 6, depth = 4, kind = 'standing', densityPerM2 = 2, headHeightM, ...rest } = {}) {
+  return createCrowd({ name: 'Audience', mode: kind === 'seated' ? 'seated' : 'standing', polygon: [{ x, y }, { x: x + width, y }, { x: x + width, y: y + depth }, { x, y: y + depth }], densityPerM2, lMaxDb: 26, ...(headHeightM !== undefined ? { headHeightM } : {}), ...rest });
 }
 
 /** A crowd zone (polygon absorption, crowd.js). Default: a 6 x 4 m standing crowd. Optional fields: densityPerM2, headHeightM, kDbPerM, lMaxDb. */
@@ -605,21 +604,6 @@ export function validateScene(scene) {
       if (o.lossDb !== undefined && !(isNum(o.lossDb) && o.lossDb >= L.lossDb[0] && o.lossDb <= L.lossDb[1])) errors.push(`${p}.lossDb must be between ${L.lossDb[0]} and ${L.lossDb[1]}`);
     });
   }
-  if (scene.audience !== undefined) {
-    if (!Array.isArray(scene.audience)) errors.push('audience must be an array');
-    else if (scene.audience.length > AUDIENCE_MAX) errors.push(`at most ${AUDIENCE_MAX} audience areas are supported`);
-    else scene.audience.forEach((a, i) => {
-      const p = `audience[${i}]`;
-      if (!isObj(a) || !isSafeId(a.id)) { errors.push(`${p}.id must be a short plain string`); return; }
-      if (a.name !== undefined && !(typeof a.name === 'string' && a.name.length <= 80)) errors.push(`${p}.name must be a short string`);
-      if (!AUDIENCE_KINDS.includes(a.kind)) errors.push(`${p}.kind must be standing or seated`);
-      const [c0, c1] = PLATFORM_LIMITS.coord, [s0, s1] = PLATFORM_LIMITS.size;
-      for (const k of ['x', 'y']) if (!(isNum(a[k]) && a[k] >= c0 && a[k] <= c1)) errors.push(`${p}.${k} must be a number between ${c0} and ${c1}`);
-      for (const k of ['width', 'depth']) if (!(isNum(a[k]) && a[k] >= s0 && a[k] <= s1)) errors.push(`${p}.${k} must be between ${s0} and ${s1}`);
-      if (!(isNum(a.densityPerM2) && a.densityPerM2 >= AUDIENCE_DENSITY_LIMITS[0] && a.densityPerM2 <= AUDIENCE_DENSITY_LIMITS[1])) errors.push(`${p}.densityPerM2 must be between ${AUDIENCE_DENSITY_LIMITS[0]} and ${AUDIENCE_DENSITY_LIMITS[1]}`);
-      if (a.headM !== undefined && !(isNum(a.headM) && a.headM >= 0.3 && a.headM <= 2.5)) errors.push(`${p}.headM must be between 0.3 and 2.5`);
-    });
-  }
   if (scene.crowds !== undefined) { // optional crowd zones (crowd.js)
     if (!Array.isArray(scene.crowds)) errors.push('crowds must be an array');
     else if (!checkCount(scene.crowds, SL.maxCrowds, 'crowds', errors)) { /* reported */ } else scene.crowds.forEach((c, i) => {
@@ -930,6 +914,21 @@ export function migrateAntennaPolarisation(s) {
  * Tilt and elevation were two controls for the same pitch. On load, a non-ring antenna's tiltDeg is folded into its aim elevation and dropped
  * (ring-pattern antennas ignore elevation, so their tilt, the lean of the element, stays). Antenna B follows A's aim unless it has its own.
  */
+/** Older scenes held audience rectangles apart from crowd zones; each becomes a crowd zone (same loss rule, 26 dB cap kept) and scene.audience goes away. */
+function audienceToCrowds(s) {
+  if (!Array.isArray(s.audience)) { delete s.audience; return; }
+  const out = Array.isArray(s.crowds) ? s.crowds : [];
+  for (const a of s.audience) {
+    if (!isObj(a) || !(a.width > 0) || !(a.depth > 0)) continue;
+    const x0 = a.x, y0 = a.y, x1 = a.x + a.width, y1 = a.y + a.depth;
+    const c = { id: a.id, name: typeof a.name === 'string' ? a.name : 'Audience', mode: a.kind === 'seated' ? 'seated' : 'standing', polygon: [{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }], densityPerM2: Math.min(8, Math.max(0.1, Number(a.densityPerM2) || 2)), lMaxDb: 26 };
+    if (Number.isFinite(a.headM)) c.headHeightM = a.headM;
+    if (a.locked === true) c.locked = true;
+    out.push(c);
+  }
+  s.crowds = out;
+  delete s.audience;
+}
 function foldTiltIntoElevation(s) {
   const clampEl = (v) => Math.max(-90, Math.min(90, Math.round(v * 10) / 10));
   const num = (v, d) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
@@ -962,7 +961,7 @@ export function migrateScene(raw) {
   if (Array.isArray(raw.links) && raw.links.length > SL.maxLinks) throw new Error(`Scene has more than ${SL.maxLinks} links`);
   if (Array.isArray(raw.zones) && raw.zones.length > SL.maxZones) throw new Error(`Scene has more than ${SL.maxZones} zones`);
   if (Array.isArray(raw.overheadPanels) && raw.overheadPanels.length > CEILING_LIMITS.panelsMax) throw new Error(`Scene has more than ${CEILING_LIMITS.panelsMax} overhead panels`);
-  if (Array.isArray(raw.audience) && raw.audience.length > AUDIENCE_MAX) throw new Error(`Scene has more than ${AUDIENCE_MAX} audience areas`);
+  if (Array.isArray(raw.audience) && Array.isArray(raw.crowds) && raw.audience.length + raw.crowds.length > SL.maxCrowds) throw new Error(`Scene has more than ${SL.maxCrowds} crowds`);
   if (Array.isArray(raw.crowds) && raw.crowds.length > SL.maxCrowds) throw new Error(`Scene has more than ${SL.maxCrowds} crowds`);
   if (Array.isArray(raw.platforms) && raw.platforms.length > PLATFORM_LIMITS.max) throw new Error(`Scene has more than ${PLATFORM_LIMITS.max} platforms`);
   if (Array.isArray(raw.measurements) && raw.measurements.length > MEASUREMENT_LIMITS.max) throw new Error(`Scene has more than ${MEASUREMENT_LIMITS.max} measurements`);
@@ -974,6 +973,7 @@ export function migrateScene(raw) {
   // Version 1 -> 2: scene.venue is new. Older files have none; a saved venue (packed shades) is unpacked into memory.
   if (s.version < 2) { delete s.venue; s.version = 2; }
   if (s.venue === null) delete s.venue;
+  audienceToCrowds(s);
   foldTiltIntoElevation(s);
   if (s.venue !== undefined) {
     const packed = isObj(s.venue) && Array.isArray(s.venue.layers) && s.venue.layers.some((L) => isObj(L) && Array.isArray(L.shades) && L.shades.some((sh) => isObj(sh) && typeof sh.packed === 'string'));

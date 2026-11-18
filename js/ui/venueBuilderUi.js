@@ -1,4 +1,4 @@
-// Venue builder panel: the stage, platforms, audience, crowd zones, ceiling, noise sources, environment and reflector forms in one place.
+// Venue builder panel: the stage, platforms, crowd zones, ceiling, noise sources, environment and reflector forms in one place.
 // The forms are built by the inspector (they need its field helpers) and handed over through linkDock.js; this panel only hosts them.
 import { getVenueDock, subscribeVenueDock, VENUE_DOCK_SECTIONS } from './linkDock.js';
 
@@ -7,7 +7,7 @@ export function mountVenueBuilder({ container }) {
   const summary = document.createElement('summary'); summary.textContent = 'Venue builder';
   const body = document.createElement('div'); body.className = 'ob-body';
   const intro = document.createElement('p'); intro.className = 'hint';
-  intro.textContent = 'The room the show happens in: stage and platforms, audience and crowd, ceiling, noise sources, floor and propagation settings, reflectors.';
+  intro.textContent = 'The room the show happens in: stage and platforms, crowd zones, ceiling, noise sources, floor and propagation settings, reflectors.';
   const host = document.createElement('div'); host.className = 'venue-docked';
   // The floor surface select is wired in app.js; its element moves here from the top bar so the venue settings sit together.
   const floorSel = document.getElementById('floor'), floorLabel = floorSel && floorSel.closest('label');
