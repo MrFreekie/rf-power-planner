@@ -39,6 +39,7 @@ jobs:
           cp index.html _site/
           cp -r css js _site/
           if [ -d assets ]; then cp -r assets _site/; fi
+          echo "export const BUILD_TIME = \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\";" > _site/js/build-info.js
           touch _site/.nojekyll
       - uses: actions/upload-pages-artifact@v3
         with:
