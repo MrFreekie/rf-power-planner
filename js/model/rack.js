@@ -366,18 +366,36 @@ export function rackLoads(scene) {
 
 /**
  * tuningClashes(scene, bwOf?) -> [{ a, b, same, text }] : pairs of mic or IEM transmitters on the same frequency or closer than their occupied bandwidths allow.
- * bwOf(link) gives the occupied bandwidth in kHz (default 200). Pairs closer than (bw1+bw2)/2 overlap; pairs closer than that plus guardKHz (default TUNING_GUARD_KHZ) are flagged with guard: true. Two links of different kinds can still clash, since they share the air.
+ * bwOf(link) gives the occupied bandwidth in kHz (default 200). Pairs closer than (bw1+bw2)/2 overlap; pairs closer than that plus the guard are flagged with guard: true. Two links of different kinds can still clash, since they share the air.
+ * The guard depends on modulation (tuningGuardKHz): analogue FM or unknown TUNING_GUARD_KHZ; digital max(50, 350 - bw) so the carrier spacing is
+ * at least 350 kHz; a pair takes the larger of its two guards. An explicit guardKHz argument overrides this for every pair. The separate
+ * third-order product margin is checked by the coordination tools (coordination.js, guardKHz), not here. Returns also guardKHz and digitalGuard per pair.
  */
-export const TUNING_GUARD_KHZ = 100; // assumed extra spacing beyond the occupied bandwidths (receiver selectivity, filter skirts)
-export function tuningClashes(scene, bwOf, guardKHz = TUNING_GUARD_KHZ) {
-  const guard = Number.isFinite(guardKHz) && guardKHz >= 0 ? guardKHz : TUNING_GUARD_KHZ;
+// Analogue FM: 100 kHz beyond the occupied bandwidth, so two 200 kHz carriers sit at least 300 kHz apart (lower edge of coordinator practice,
+// 300-400 kHz; Sony 375 kHz high-density plan, Wisycom 400 kHz adjacent selectivity). Also the default when the modulation is not known.
+export const TUNING_GUARD_KHZ = 100;
+// Digital: carrier spacing about 350 kHz, derived from Shure ULX-D / QLX-D channel counts per TV channel (ASSUMED, no datasheet figure).
+export const DIGITAL_SPACING_KHZ = 350;
+export const DIGITAL_GUARD_MIN_KHZ = 50; // floor: two 25 kHz tuning steps
+/** tuningGuardKHz(link, bwKHz) -> guard (kHz) for one link: digital max(50, 350 - bw), otherwise TUNING_GUARD_KHZ. */
+export function tuningGuardKHz(link, bwKHz) {
+  if (!(link && link.modulation && link.modulation.type === 'digital')) return TUNING_GUARD_KHZ;
+  const bw = Number.isFinite(bwKHz) && bwKHz > 0 ? bwKHz : 200;
+  return Math.max(DIGITAL_GUARD_MIN_KHZ, DIGITAL_SPACING_KHZ - bw);
+}
+export function tuningClashes(scene, bwOf, guardKHz) {
+  const fixed = Number.isFinite(guardKHz) && guardKHz >= 0 ? guardKHz : null;
   const bw = (l) => { const v = bwOf ? bwOf(l) : 200; return Number.isFinite(v) && v > 0 ? v : 200; };
+  const isDig = (l) => !!(l.modulation && l.modulation.type === 'digital');
   const ls = ((scene && scene.links) || []).filter((l) => l.kind !== 'p2p' && l.txOf === undefined && Number.isFinite(l.freqMHz)), out = [];
   for (let i = 0; i < ls.length; i++) for (let j = i + 1; j < ls.length; j++) {
     const a = ls[i], b = ls[j], dk = Math.round(Math.abs(a.freqMHz - b.freqMHz) * 1e9) / 1e6, need = (bw(a) + bw(b)) / 2;
+    const guard = fixed !== null ? fixed : Math.max(tuningGuardKHz(a, need), tuningGuardKHz(b, need));
+    const digitalGuard = fixed === null && [a, b].some((l) => isDig(l) && tuningGuardKHz(l, need) === guard); // the digital rule set the guard
     if (dk >= need + guard) continue;
     const inGuard = dk >= need, same = !inGuard && dk < 0.5, nm = (l) => String(l.name || l.id);
-    out.push({ a: a.id, b: b.id, same, guard: inGuard, text: inGuard ? `${nm(a)} and ${nm(b)} are ${Math.round(dk)} kHz apart: their bandwidths do not overlap but they are inside the ${guard} kHz guard band (assumed receiver selectivity), so expect desensitisation.` : same ? `${nm(a)} and ${nm(b)} are on the same frequency (${a.freqMHz} MHz): they will interfere.` : `${nm(a)} and ${nm(b)} are ${Math.round(dk)} kHz apart, inside their ${Math.round(need)} kHz combined bandwidth: they overlap.` });
+    const why = digitalGuard ? `assumed digital spacing of about ${DIGITAL_SPACING_KHZ} kHz, check the maker's coordination` : 'assumed receiver selectivity';
+    out.push({ a: a.id, b: b.id, same, guard: inGuard, guardKHz: guard, digitalGuard, text: inGuard ? `${nm(a)} and ${nm(b)} are ${Math.round(dk)} kHz apart: their bandwidths do not overlap but they are inside the ${Math.round(guard)} kHz guard band (${why}), so expect desensitisation.` : same ? `${nm(a)} and ${nm(b)} are on the same frequency (${a.freqMHz} MHz): they will interfere.` : `${nm(a)} and ${nm(b)} are ${Math.round(dk)} kHz apart, inside their ${Math.round(need)} kHz combined bandwidth: they overlap.` });
   }
   return out;
 }

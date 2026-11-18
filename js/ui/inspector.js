@@ -986,7 +986,7 @@ export function mountInspector({ container, store }) {
     const flagU = (row) => { const sp = el('span', 'flag flag-U', 'U'); sp.title = FLAG_TEXT.U; sp.setAttribute('role', 'img'); sp.setAttribute('aria-label', FLAG_TEXT.U); row.querySelector('.inp').append(sp); return row; };
     form.append(
       textField({ key: 'aud-name', label: 'Name', get: (cc) => Aa(cc)?.name, set: (cc, v, o) => updateAudience(store, id, { name: v }, o) }),
-      selectField({ key: 'aud-kind', label: 'Posture', options: [['standing', 'Standing (head 1.7 m)'], ['seated', 'Seated (head 1.2 m)']], get: (cc) => Aa(cc)?.kind, set: (cc, v) => updateAudience(store, id, { kind: v }) }),
+      selectField({ key: 'aud-kind', label: 'Posture', options: [['standing', 'Standing (head 1.75 m)'], ['seated', 'Seated (head 1.2 m)']], get: (cc) => Aa(cc)?.kind, set: (cc, v) => updateAudience(store, id, { kind: v }) }),
       flagU(selectField({
         key: 'aud-dens-preset', label: 'Density',
         options: [...AUDIENCE_DENSITY_PRESETS.filter((p) => p.id !== 'seated').map((p) => [p.id, `${p.label}, ${p.densityPerM2}/m2`]), ['custom', 'Custom']],

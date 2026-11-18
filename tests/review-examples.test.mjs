@@ -46,9 +46,9 @@ test('coupler: tap is power minus 20 dB, through loss 0.15 dB', () => {
   has('coupler-monitor-tap', f1(tap), '0.15 dB', f1(solve(n).marginDb - solve(s).marginDb));
 });
 
-test('filter before booster: hot without it, ok with it, filter costs its passband loss', () => {
+test('filter before booster: overload without it, ok with it, filter costs its passband loss', () => {
   const a = sosReport(reviewScene('lna-no-filter')).antennas[0], b = sosReport(reviewScene('filter-before-booster')).antennas[0];
-  assert.equal(a.level, 'hot'); assert.equal(b.level, 'ok'); assert.equal(b.desenseDb, 0);
+  assert.equal(a.level, 'overload'); assert.equal(b.level, 'ok'); assert.equal(b.desenseDb, 0);
   near(a.atRxInputDbm - b.atRxInputDbm, 41.5, 0.05); // rejection 40 + loss 1.5
   near(a.wantedMarginDb - b.wantedMarginDb, 1.5, 0.05);
   has('lna-no-filter', f1(a.distanceM), f1(a.atAntennaDbm), f1(a.atRxInputDbm), f1(a.headroomDb), f1(a.desenseDb), f1(a.wantedMarginDb));

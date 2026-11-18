@@ -59,8 +59,8 @@ test('cascade examples: booster at the antenna keeps the noise figure low; at th
   assert.ok(Math.abs(ra.cascade.systemNfDb - 17.7) < 0.2, String(ra.cascade.systemNfDb));
   assert.ok(Math.abs(rr.cascade.systemNfDb - 32.6) < 0.2, String(rr.cascade.systemNfDb));
   assert.ok(Math.abs(ra.inputPowerDbm - rr.inputPowerDbm) < 1e-6); // same received power
-  assert.ok(Math.abs(ra.marginDb - 8.5) < 0.3 && ra.status === 'pass');
-  assert.ok(Math.abs(rr.marginDb + 6.5) < 0.3 && rr.status === 'fail');
+  assert.ok(Math.abs(ra.marginDb - 9.4) < 0.3 && ra.status === 'pass');
+  assert.ok(Math.abs(rr.marginDb + 5.6) < 0.3 && rr.status === 'fail');
   const cable = ra.cascade.stages.find((s) => s.label.startsWith('Cable'));
   assert.ok(Math.abs(cable.nfDb - 29.5) < 0.2);
   // the cascade reaches the rx tracker and the history
@@ -78,7 +78,7 @@ test('stray carrier: carrier squelch opens on it, pilot squelch rejects it, audi
   const { st, sq, mp, id } = rig(ex.scene);
   const l = ex.scene.links[0];
   let s = sq.get(id);
-  assert.ok(Math.abs(s.levelDbm + 86.8) < 0.5);
+  assert.ok(Math.abs(s.levelDbm + 89.8) < 0.5);
   assert.ok(Math.abs(s.capture.cirDb + 8) < 0.1, 'interferer is 8 dB stronger');
   assert.equal(s.capture.captured, 'interferer');
   assert.equal(s.capture.audioQuality, 0);

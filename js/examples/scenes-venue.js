@@ -50,8 +50,8 @@ export function bandScene(id, { right = false, reverse = false, isolator = false
 
 /**
  * Audience example (group e): a handheld microphone on stage, the receive antenna across a standing crowd at the back of a 20 x 40 m
- * room. opts.rxZ = receive antenna height (1.5 m default = head height, below the 1.7 m heads: the ray runs through the crowd;
- * 2.5 m = raised, mostly above it); opts.densityPerM2 (default 2, ASSUMED absorption model of audience.js); opts.kind 'standing'|'seated'.
+ * room. opts.rxZ = receive antenna height (1.5 m default = head height, below the 1.75 m heads: the ray runs through the crowd;
+ * 2.5 m = raised, still grazing the heads inside the clearance ramp; 4 m = clear); opts.densityPerM2 (default 2, ASSUMED absorption model of audience.js); opts.kind 'standing'|'seated'.
  */
 export function audienceScene({ rxZ = 1.5, densityPerM2 = 2, kind = 'standing', withAudience = true } = {}) {
   return make('mic', (s, l) => {

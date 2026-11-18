@@ -2,7 +2,8 @@
 //
 // scene.crowds = [{ id, name?, polygon: [{x, y}, ...], mode: 'seated'|'standing'|'packed', densityPerM2?, headHeightM?, kDbPerM?, lMaxDb? }]
 // (x, y) in scene metres, the same axes as zones and platforms. Optional field: scenes without it load and solve exactly as before.
-// This is separate from scene.audience (audience.js, an axis-aligned rectangle with a different, older rule); the two add if both are present.
+// scene.audience (audience.js) is the older axis-aligned rectangle form; it now uses the same rate, cap, head heights and clearance ramp.
+// The two add if both are present, but rf.js caps their sum on one path at CROWD_MAX_LOSS_DB.
 //
 // Model (an engineering estimate, not a measurement; see CROWD_CAVEAT):
 //   L_dB = s * min( k * d_in , L_max )                                       (saturating per-metre excess loss)

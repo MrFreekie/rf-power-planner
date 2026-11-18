@@ -86,12 +86,12 @@ export function sosReport(scene) {
 /**
  * Front-of-house (FOH) mic and IEM antennas with an audience between FOH and the stage. fohScene(variant, { kind, densityPerM2, remote }):
  *   'low':    antennas at table height (1.2 m) at FOH, directional (7 dBi paddles) aimed at the stage, 26 m from the performer, over a standing crowd.
- *   'raised': the same antennas on stands or a truss at 3.0 m, aimed at the stage: the ray clears the heads for most of the crowd.
+ *   'raised': the same antennas on a truss at 5.0 m, aimed at the stage: the ray passes more than 1 m over the heads for most of the crowd.
  *   'remote': antennas at the stage side (3.0 m, 9 m from the performer, outside the crowd) with 45 m of LMR-400 back to FOH.
  *             opts.remote: 'coax' (default: a 15 dB booster at the antenna end, ahead of the cable), 'booster-at-rack' (same booster after the
  *             cable: the wrong place), 'rof' (the active RF over fibre preset, 0.05 km). The IEM transmit path never gets a booster (power limit).
  * Crowd: scene.audience, 5..25 m x 8..26 m. Standing 3-5 persons per m2, seated 1-2 (opts.density default 4 standing / 1.5 seated); the
- * absorption (0.5 dB per metre per person-per-m2 below head height, capped at 30 dB) is an ASSUMED planning figure. Links: links[0] mic (stage
+ * absorption (0.9 dB per metre per person-per-m2 below head height with the clearance ramp above it, capped at 26 dB) is an ASSUMED planning figure. Links: links[0] mic (stage
  * transmitter to FOH receiver, 606.1 MHz), links[1] IEM (FOH transmitter to the bodypack on stage, 614.0 MHz).
  */
 export function fohScene(variant, { kind = 'standing', densityPerM2, remote = 'coax' } = {}) {
@@ -102,7 +102,7 @@ export function fohScene(variant, { kind = 'standing', densityPerM2, remote = 'c
     s.environment.floor = 'wood';
     // the performer's body shadow (3 dB, assumed) is set on the mic link only: the IEM bodypack antenna is a body-type antenna that already includes its wearer
     s.audience = [createAudience({ name: kind === 'seated' ? 'Seated crowd' : 'Standing crowd', x: 5, y: 8, width: 20, depth: 18, kind, densityPerM2: density })];
-    const z = variant === 'low' ? 1.2 : 3.0;
+    const z = variant === 'low' ? 1.2 : 5.0;
     const stagePos = { x: 15, y: 4, z: 1.6 };
     const at = variant === 'remote' ? { x: 6, y: 6, z: 3.0 } : { x: 15, y: 30, z };
     const az = variant === 'remote' ? Math.round((Math.atan2(stagePos.x - at.x, stagePos.y - at.y) * 180) / Math.PI) : 180;

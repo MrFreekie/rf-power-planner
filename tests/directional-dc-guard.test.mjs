@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { antennaGainDb, FRONT_TO_BACK_DB, chainLossDb, solveLink } from '../js/model/rf.js';
 import { poweringBudget, cableLoopOhm, DC_LOOP_OHM_PER_100M } from '../js/model/powering.js';
 import { chainJunctionLossDb } from '../js/model/chain-checks.js';
-import { tuningClashes, TUNING_GUARD_KHZ } from '../js/model/rack.js';
+import { tuningClashes, tuningGuardKHz, TUNING_GUARD_KHZ, DIGITAL_SPACING_KHZ } from '../js/model/rack.js';
 import { createDefaultScene, createChainItem } from '../js/model/scene.js';
 
 const near = (a, b, t) => assert.ok(Math.abs(a - b) <= t, `got ${a}, expected ${b}`);
@@ -16,7 +16,7 @@ test('analytic directional patterns: rear gain = main gain minus the front-to-ba
     const ant = { type: 'paddle', gainDbi: 7, patternOverride: name };
     near(main(ant) - rear(ant), fb, 1e-9);
   }
-  assert.deepEqual(FRONT_TO_BACK_DB, { paddle: 15, logperiodic: 15, helical: 13, panel: 20 });
+  assert.deepEqual(FRONT_TO_BACK_DB, { paddle: 18, logperiodic: 12, helical: 14, 'helical-cp': 14, yagi: 18, panel: 20 });
   // omni and body are unchanged: no pattern at all
   const om = { type: 'omni', gainDbi: 0, patternOverride: 'omni' };
   near(antennaGainDb(om, { az: 180, el: 0 }), 0, 1e-9);
@@ -69,4 +69,29 @@ test('tuning clashes: guard band flagged separately from overlap', () => {
   l2.freqMHz = 600.3; assert.equal(tuningClashes(s).length, 0);
   assert.equal(tuningClashes(s, undefined, 0).length, 0);
   l2.freqMHz = 600.25; assert.equal(tuningClashes(s, undefined, 0).length, 0);
+});
+
+test('tuning guard by modulation: analogue and unknown 100 kHz, digital max(50, 350 - bw) flagged as assumed, a pair takes the larger', () => {
+  const dig = { type: 'digital', digital: { preset: 'mic-qpsk-fixed', fixedOrder: null, overrides: {} } };
+  assert.equal(tuningGuardKHz({ modulation: { type: 'analog-fm' } }, 200), 100);
+  assert.equal(tuningGuardKHz({}, 200), TUNING_GUARD_KHZ);
+  assert.equal(tuningGuardKHz({ modulation: dig }, 200), 150);
+  assert.equal(tuningGuardKHz({ modulation: dig }, 125), 225);
+  assert.equal(tuningGuardKHz({ modulation: dig }, 300), 50);   // floor
+  assert.equal(tuningGuardKHz({ modulation: dig }, 2000), 50);
+  assert.equal(DIGITAL_SPACING_KHZ, 350);
+  const s = createDefaultScene();
+  const l1 = s.links[0], l2 = structuredClone(l1); l2.id = 'g2'; l2.name = 'Second';
+  l1.freqMHz = 600; l2.freqMHz = 600.325; s.links.push(l2);
+  delete l1.modulation; delete l2.modulation;
+  assert.equal(tuningClashes(s).length, 0);                      // unknown: 300 kHz rule as before
+  l1.modulation = structuredClone(dig); l2.modulation = structuredClone(dig);
+  let t = tuningClashes(s); assert.equal(t.length, 1);           // digital pair: 325 < 200 + 150
+  assert.equal(t[0].guard, true); assert.equal(t[0].guardKHz, 150); assert.equal(t[0].digitalGuard, true);
+  assert.match(t[0].text, /150 kHz guard band \(assumed digital spacing of about 350 kHz/);
+  l2.freqMHz = 600.35; assert.equal(tuningClashes(s).length, 0);
+  l2.freqMHz = 600.325; l2.modulation = { type: 'analog-fm', digital: dig.digital };
+  t = tuningClashes(s); assert.equal(t.length, 1); assert.equal(t[0].guardKHz, 150); // mixed pair: the larger guard
+  t = tuningClashes(s, () => 300); assert.equal(t.length, 1); assert.equal(t[0].guardKHz, 100); assert.equal(t[0].digitalGuard, false); assert.match(t[0].text, /assumed receiver selectivity/);
+  assert.equal(tuningClashes(s, undefined, 0).length, 0);       // explicit guard overrides
 });

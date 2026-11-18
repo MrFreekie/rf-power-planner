@@ -74,7 +74,7 @@ export const CORE_EXAMPLES = [
   {
     id: 'long-cable',
     title: 'Long cable run loss',
-    note: 'Problem: a 90 m run of thin coax costs over forty decibels at UHF (44.3 dB for this RG58 run), which leaves only about 4 dB of margin. Try LMR-400 instead, or put a booster near the antenna: loss before the first gain stage hurts most.',
+    note: 'Problem: a 90 m run of thin coax costs over forty decibels at UHF (44.3 dB for this RG58 run), which leaves only about 4.5 dB of margin. Try LMR-400 instead, or put a booster near the antenna: loss before the first gain stage hurts most.',
     build: () => ({
       scene: make('mic', (s, l) => {
         s.units = { power: 'dBm', length: 'ft' };
@@ -188,7 +188,7 @@ export const CORE_EXAMPLES = [
   {
     id: 'zones-long-hall',
     title: 'Long distance: antenna at the far end of a hall with a booster',
-    note: 'Best practice: a long cable to a far antenna loses more than the antenna can make up, so the far end of the hall is weak. A 24 dB booster after the cable on that branch brings the far zone up to its required level (with only 18 dB, about a fifth of the zone still falls short). Compare the map with and without the booster in the branch chain.',
+    note: 'Best practice: a long cable to a far antenna loses more than the antenna can make up, so the far end of the hall is weak. A 24 dB booster after the cable on that branch brings the far zone up to its required level (with only 18 dB, about half of the zone still falls short). Compare the map with and without the booster in the branch chain.',
     build: () => ({
       scene: make('iem', (s, l) => {
         s.stage = { width: 60, depth: 20 };

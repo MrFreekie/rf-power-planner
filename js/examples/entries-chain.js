@@ -18,13 +18,13 @@ export const CHAIN_EXAMPLES = [
   {
     id: 'lna-no-filter',
     title: 'LNA with no filter beside an IEM transmitter',
-    note: 'Problem: a 20 dB LNA at the mic receive antenna with no filter sees the IEM transmitter 3.3 m away at -39.4 dBm and delivers -20.9 dBm to the receiver, which is hot (2.9 dB from the P1dB of -18 dBm) with 1.0 dB of desense. The wanted mic margin is 58.2 dB but the receiver works near compression. Put a bandpass filter ahead of the LNA (see filter-before-booster). Receiver figures illustrative.',
+    note: 'Problem: a 20 dB LNA at the mic receive antenna with no filter sees the IEM transmitter 3.3 m away at -29.9 dBm and delivers -11.4 dBm to the receiver, which overloads it (headroom -6.6 dB to the P1dB of -18 dBm) with 15.2 dB of desense. The wanted mic margin is 58.6 dB on paper but the receiver is in compression. Put a bandpass filter ahead of the LNA (see filter-before-booster). Receiver figures illustrative.',
     build: () => ({ scene: reviewScene('lna-no-filter', {}) }),
   },
   {
     id: 'filter-before-booster',
     title: 'Filter before the booster',
-    note: 'Best practice: the same scene with a 604 to 608 MHz bandpass (1.5 dB loss, 40 dB rejection, assumed) ahead of the LNA: the IEM carrier reaches the receiver at -62.4 dBm, 44.4 dB below the P1dB, with no desense. The filter costs the wanted mic 1.5 dB (margin 56.7 dB against 58.2 dB), a cheap price. Filter before gain.',
+    note: 'Best practice: the same scene with a 604 to 608 MHz bandpass (1.5 dB loss, 40 dB rejection, assumed) ahead of the LNA: the IEM carrier reaches the receiver at -52.9 dBm, 34.9 dB below the P1dB, with no desense. The filter costs the wanted mic 1.5 dB (margin 57.1 dB against 58.6 dB), a cheap price. Filter before gain.',
     build: () => ({ scene: reviewScene('filter-before-booster', {}) }),
   },
   {
@@ -90,7 +90,7 @@ export const CHAIN_EXAMPLES = [
   {
     id: 'imd-iem-8-with-fifth-order',
     title: 'Fifth-order products: count against level',
-    note: 'Less ideal: understand the count: five channels from the third-order clean plan still put 26 fifth-order products in channels (158 with all eight), but their summed level is only -253.5 dBm at the bodypack, far below the -111.0 dBm thermal floor. The 12.6 dB floor rise comes from the other transmitters\' wideband noise (-98.7 dBm), not from intermod. Count hits to coordinate, judge harm by level.',
+    note: 'Less ideal: understand the count: five channels from the third-order clean plan still put 26 fifth-order products in channels (158 with all eight), but their summed level is only -253.3 dBm at the bodypack, far below the -111.0 dBm thermal floor. The 12.6 dB floor rise comes from the other transmitters\' wideband noise (-98.6 dBm), not from intermod. Count hits to coordinate, judge harm by level.',
     build: () => ({ scene: reviewScene('imd-iem-8-with-fifth-order', {}) }),
   },
   {
@@ -102,7 +102,7 @@ export const CHAIN_EXAMPLES = [
   {
     id: 'band-four-piece-people',
     title: 'Four-piece band: a mic and an IEM pack per person',
-    note: 'Best practice: four people each carry a mic and an IEM bodypack, and the links are named after them (Anna mic, Anna IEM). The margins run from 29.6 dB (Dev IEM, the weakest) to 48.5 dB (Dev mic); the handheld sits at 1.3 m and the bodypacks at the belt, 1.0 m. Move a person and both of their packs move together with the offsets kept, and deleting a person leaves the links in place (frequencies illustrative).',
+    note: 'Best practice: four people each carry a mic and an IEM bodypack, and the links are named after them (Anna mic, Anna IEM). The margins run from 28.6 dB (Ben IEM, the weakest) to 52.9 dB (Dev mic); the handheld sits at 1.3 m and the bodypacks at the belt, 1.0 m. Move a person and both of their packs move together with the offsets kept, and deleting a person leaves the links in place (frequencies illustrative).',
     build: () => ({ scene: bandPeopleScene() }),
   },
 ];

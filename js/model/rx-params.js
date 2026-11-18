@@ -37,6 +37,22 @@ const UHF_RX_PRESETS = Object.freeze({
     overloadHysteresisDb: 3,
     hotMarginDb: 10             // approx: "hot" warning starts this far below P1dB
   }),
+  // Digital wireless microphone receiver: same front end as the analogue one, better sensitivity.
+  'mic-receiver-digital': Object.freeze({
+    id: 'mic-receiver-digital',
+    label: 'Digital mic receiver, typical (illustrative)',
+    illustrative: true,
+    sensitivityDbm: -97,        // Shure QLX-D / ULX-D datasheet family (-97 to -98 dBm at BER 1e-5); published digital range -90 to -106
+    channelBwKhz: 200,
+    requiredCnrDb: 16,          // approx: -97 - (-174 + 53 + 8) = 16 dB
+    noiseFigureDb: 8,           // approx
+    agcRangeDb: 65,             // approx
+    p1dBDbm: -18,               // approx: as the analogue mic receiver
+    iip3Dbm: -8,                // approx
+    maxInputDbm: -10,           // approx
+    overloadHysteresisDb: 3,
+    hotMarginDb: 10             // approx: "hot" warning starts this far below P1dB
+  }),
   // Compact bodypack: fewer front-end resources and an antenna close to a strong transmitter.
   'iem-bodypack-typical': Object.freeze({
     id: 'iem-bodypack-typical',

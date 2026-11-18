@@ -45,7 +45,7 @@ test('migration: a legacy environment.polarisation is copied onto every antenna 
 
 test('helical-cp library type and validation: circular types take rhcp/lhcp only, linear types take vertical/horizontal/slant45 only', () => {
   assert.equal(ANTENNAS['helical-cp'].circular, true);
-  assert.equal(ANTENNAS['helical-cp'].gainDbi, 8);
+  assert.equal(ANTENNAS['helical-cp'].gainDbi, 9);
   assert.deepEqual(ANTENNAS['helical-cp'].bandMHz, [450, 960]);
   assert.equal(ANTENNAS['helical-cp'].confidence.gainDbi, 'I');
   assert.deepEqual([...allowedPolarisations('helical-cp')], ['rhcp', 'lhcp']);

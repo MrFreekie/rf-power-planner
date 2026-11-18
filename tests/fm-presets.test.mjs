@@ -307,11 +307,11 @@ test('example scenes: SKM 5200-II low-intermod versus standard in the intermod d
   const on = JSON.parse(JSON.stringify(ex.scene));
   on.imd.transmitters.forEach((t) => { t.lowIntermod = true; });
   const low = noiseFloor(on).riseDb;
-  assert.ok(Math.abs(std - 20.3) < 0.05, `std ${std}`);
-  assert.ok(Math.abs(low - 14.8) < 0.05, `low ${low}`);
+  assert.ok(Math.abs(std - 20.4) < 0.05, `std ${std}`);
+  assert.ok(Math.abs(low - 14.9) < 0.05, `low ${low}`);
   assert.ok(low < std);
-  assert.match(ex.note, /20\.3 dB/);
-  assert.match(ex.note, /14\.8 dB/);
+  assert.match(ex.note, /20\.4 dB/);
+  assert.match(ex.note, /14\.9 dB/);
   assert.match(ex.note, /assumed/);
   assert.ok(ex.note.split('. ').length <= 4);
   assert.ok(EXAMPLES.some((e) => e.id === 'ur4d-style-link') && EXAMPLES.some((e) => e.id === 'skm-low-intermod'));

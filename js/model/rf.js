@@ -29,7 +29,7 @@ import { noiseSourcesAt, mutedReflectorIds, floorRiseDb } from './noise-sources.
 export { wallNoiseAt, wallFieldDbuvm, WALL_NOISE_PRESETS, WALL_CONSTRUCTIONS, wallConstruction, meshShieldingDb } from './ledwall.js';
 export { rofEffective, rofOpticalLossDb, rofIip3FromSfdr, rofBranchDelays } from './rof.js';
 import { audiencePathLoss } from './audience.js';
-import { crowdPathLoss, CROWD_CAVEAT } from './crowd.js';
+import { crowdPathLoss, CROWD_CAVEAT, CROWD_MAX_LOSS_DB } from './crowd.js';
 import { CEILING_MATERIALS, overheadPlanes, overheadZoneFraction } from './ceiling.js';
 import { antennaMatch, vswrThroughLoss, BAND_VSWR_WARN, BAND_VSWR_STRONG } from './antenna-band.js';
 export { antennaMatch, mismatchLossDb, returnLossSweep, ANTENNA_BANDS, resolveDesignBand } from './antenna-band.js';
@@ -49,10 +49,15 @@ const DEG = Math.PI / 180;
 // table. A non-finite bearing is treated as boresight (gain = gainDbi) so one bad input cannot turn a whole sweep into NaN.
 const PATTERN_FLOOR_DB = -30;
 // Front-to-back ratio (dB) of the analytic directional patterns: gain behind the antenna = main gain minus this figure, with no
-// further sidelobe structure. ASSUMED teaching figures for typical wireless-mic class antennas, not datasheet values.
-export const FRONT_TO_BACK_DB = { paddle: 15, logperiodic: 15, helical: 13, panel: 20 };
-// Half-power beamwidths (degrees) of the analytic directional patterns (assumed class figures).
-const DIRECTIONAL_HPBW_DEG = { paddle: 70, panel: 50, helical: 60, logperiodic: 65 };
+// further sidelobe structure. Kept equal to the library.js lobe tables for the same type (tests assert it). Sources: paddle 18
+// assumed (Shure PA805 family publishes no UHF figure); log-periodic 12 (RF Venue Diversity Fin 8 dB, application note 12-15);
+// helical and helical-cp 14 (Shure HA-8091 datasheet; RF Venue CP Beam 9-10); yagi 18 assumed class figure; panel 20 assumed
+// (analytic only, no library type).
+export const FRONT_TO_BACK_DB = { paddle: 18, logperiodic: 12, helical: 14, 'helical-cp': 14, yagi: 18, panel: 20 };
+// Half-power beamwidths (degrees, azimuth plane) of the analytic directional patterns, equal to the library.js azimuth lobes:
+// paddle 100 (Shure PA805 family), log-periodic 110 (Diversity Fin 140, Wisycom LNNA 90), helical 70 (HA-8091 72, CP Beam 63x70),
+// yagi 55 assumed, panel 50 assumed. The analytic lobe is rotationally symmetric (one HPBW for both planes).
+export const DIRECTIONAL_HPBW_DEG = { paddle: 100, panel: 50, helical: 70, 'helical-cp': 70, logperiodic: 110, yagi: 55 };
 
 // ---------------------------------------------------------------- geometry basics
 
@@ -115,6 +120,8 @@ function analyticRelDb(name, f, uu) {
     case 'paddle':
     case 'panel':
     case 'helical':
+    case 'helical-cp':
+    case 'yagi':
     case 'logperiodic': {
       const hpbw = DIRECTIONAL_HPBW_DEG[name];
       const rel = -3 * Math.pow(psi / (hpbw / 2), 2); // parabolic main lobe, -3 dB at half HPBW
@@ -526,13 +533,15 @@ export function pathWallLoss(scene, points, freqMHz) {
     }
   }
   lossDb += platformLossDb;
-  // Audience (crowd) absorption below head height, ASSUMED model (audience.js)
-  const aud = audiencePathLoss(scene, points);
+  // Audience rectangles (audience.js) and crowd zones (crowd.js): the same rule (0.9 dB per metre per person/m2, Fresnel clearance
+  // ramp above head height, ASSUMED slope). A scene may hold both; they stack, but their sum on one path is capped at
+  // CROWD_MAX_LOSS_DB (26 dB, one body's worst measured shadow): the crowd-zone share is trimmed to fit.
+  const aud = audiencePathLoss(scene, points, freqMHz);
   lossDb += aud.lossDb;
-  // Crowd zones (crowd.js): polygon absorption with a Fresnel clearance factor above head height, ASSUMED slope
   const crowd = crowdPathLoss(scene, points, freqMHz);
-  lossDb += crowd.lossDb;
-  return { lossDb, crossed, detail, platformLossDb, platforms, audienceLossDb: aud.lossDb, audienceChords: aud.chords, crowdLossDb: crowd.lossDb, crowdChords: crowd.chords, crowdDetail: crowd.crowds };
+  const crowdDb = Math.min(crowd.lossDb, Math.max(0, CROWD_MAX_LOSS_DB - aud.lossDb));
+  lossDb += crowdDb;
+  return { lossDb, crossed, detail, platformLossDb, platforms, audienceLossDb: aud.lossDb, audienceChords: aud.chords, crowdLossDb: crowdDb, crowdChords: crowd.chords, crowdDetail: crowd.crowds };
 }
 
 // ---------------------------------------------------------------- cables and chains

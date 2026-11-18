@@ -22,7 +22,7 @@ export const LATE_EXAMPLES = [
   {
     id: 'presenter-with-backup-bodypack',
     title: 'Presenter: a main bodypack and a hot-spare backup',
-    note: 'Best practice: a presenter wears the main mic bodypack on the belt and a hot-spare backup on the other hip, 0.3 m apart, on a different frequency (607.3 against 606.1 MHz) so the two never share a channel. At 11 m the margins are 36.6 dB for both (main and backup), and with the IEM at 614.1 MHz no third-order product comes closer than 1200 kHz to any channel. The person owns the main mic, the backup and the IEM, so moving or turning them carries all three packs with the offsets kept. Frequencies are illustrative.',
+    note: 'Best practice: a presenter wears the main mic bodypack on the belt and a hot-spare backup on the other hip, 0.3 m apart, on a different frequency (607.3 against 606.1 MHz) so the two never share a channel. At 11 m the margins are 42.1 dB (main) and 41.7 dB (backup), and with the IEM at 614.1 MHz no third-order product comes closer than 1200 kHz to any channel. The person owns the main mic, the backup and the IEM, so moving or turning them carries all three packs with the offsets kept. Frequencies are illustrative.',
     build: () => ({ scene: presenterScene() }),
   },
   {
@@ -40,7 +40,7 @@ export const LATE_EXAMPLES = [
   {
     id: 'band-four-piece-walk',
     title: 'Four-piece band: moving the singer carries her packs',
-    note: 'Compare: moving Anna from the middle of the stage (8, 7.5) to the stage-right front (14.5, 8.5), by dragging her on the plan, carries her handheld and IEM pack with her, offsets kept. Her mic margin falls from 39.8 to 33.7 dB (-6.1 dB) while her IEM rises from 38.8 to 46.7 dB (+7.9 dB) because she is nearer the IEM antenna, and the other six links do not change (0.0 dB). The scene is the start; the animated walk moves only her mic pack along that line, so her IEM pack stays behind while it runs.',
+    note: 'Compare: moving Anna from the middle of the stage (8, 7.5) to the stage-right front (14.5, 8.5), by dragging her on the plan, carries her handheld and IEM pack with her, offsets kept. Her mic margin falls from 44.6 to 30.7 dB (-13.9 dB) while her IEM rises from 43.1 to 46.8 dB (+3.7 dB) because she is nearer the IEM antenna, and the other six links do not change (0.0 dB). The scene is the start; the animated walk moves only her mic pack along that line, so her IEM pack stays behind while it runs.',
     build: () => ({ scene: bandPeopleScene(), walk: { to: { ...bandWalkEndScene().links[0].tx.pos }, speedMps: 0.8, pingPong: true } }),
   },
   {
@@ -124,7 +124,7 @@ export const LATE_EXAMPLES = [
   {
     id: 'band-four-piece-swap-person',
     title: 'Four-piece band: a spare pack assigned to a person',
-    note: 'Best practice: the bodypack on 608.9 MHz is lying in a case at stage right, 8.5 m from the drummer, and is still called Spare bodypack with 34.8 dB of margin. Assign it to Dev in the people panel as his mic: the pack jumps to his belt (0.15 m to his right, 0.05 m behind, height kept at 1.0 m), is renamed Dev mic and shows 48.5 dB of margin, because it is now 2.4 m from the receive antenna instead of 10.2 m. The other seven links do not change. Assign every pack before checking the plan, so each figure is for where the pack is worn and not where it was left (positions illustrative).',
+    note: 'Best practice: the bodypack on 608.9 MHz is lying in a case at stage right, 8.5 m from the drummer, and is still called Spare bodypack with 31.8 dB of margin. Assign it to Dev in the people panel as his mic: the pack jumps to his belt (0.15 m to his right, 0.05 m behind, height kept at 1.0 m), is renamed Dev mic and shows 52.9 dB of margin, because it is now 2.4 m from the receive antenna instead of 10.2 m. The other seven links do not change. Assign every pack before checking the plan, so each figure is for where the pack is worn and not where it was left (positions illustrative).',
     build: () => ({ scene: bandSwapScene(false) }),
   },
   {

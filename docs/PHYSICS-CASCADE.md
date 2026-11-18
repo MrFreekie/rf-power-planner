@@ -11,7 +11,7 @@ All values are generic and illustrative (marked approx in the parameter files). 
 - System sensitivity at the antenna terminals = N + required CNR.
 
 ### Required CNR
-- The quoted sensitivity is a signal level at which the receiver delivers acceptable audio. It implies a CNR: required CNR = sensitivity - (kTB + receiver NF). Presets (`RX_PRESETS`): mic receiver -90 dBm, NF 8 dB gives 23 dB; IEM bodypack -85 dBm, NF 10 dB gives 26 dB; budget receiver -85 dBm, NF 12 dB gives 24 dB. Typical range 20 to 28 dB (approx): well above the FM threshold of 10 to 12 dB, so audio is clean (see `PHYSICS-MPX.md`).
+- The quoted sensitivity is a signal level at which the receiver delivers acceptable audio. It implies a CNR: required CNR = sensitivity - (kTB + receiver NF). Presets (`RX_PRESETS`): mic receiver -90 dBm, NF 8 dB gives 23 dB; IEM bodypack -85 dBm, NF 10 dB gives 26 dB; budget receiver -85 dBm, NF 12 dB gives 24 dB. Digital mic receiver -97 dBm, NF 8 dB gives 16 dB (published digital figures -90 to -106 dBm at BER 1e-5). Typical range 20 to 28 dB (approx): well above the FM threshold of 10 to 12 dB, so audio is clean (see `PHYSICS-MPX.md`).
 - Typical ranges (`CASCADE_TYPICAL`, approx): receiver NF 6 to 14 dB; antenna-mounted low-noise booster NF 1 to 3 dB, gain 10 to 25 dB, input-referred IIP3 +10 to +30 dBm; cable NF = loss.
 
 ### Booster placement: worked example

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { RX_PRESETS, RX_DEFAULTS, DIVERSITY_PRESETS, SPACING_RULES, IM3_SLOPE, IIP3_MINUS_P1DB_DB } from '../js/model/rx-params.js';
 
 import { FM_RX_PRESET_IDS } from '../js/model/fm-presets.js';
-const rxIds = ['mic-receiver-typical', 'iem-bodypack-typical', 'budget-receiver', 'rx-vhf-typical', 'rx-2g4-typical', 'rx-5g8-typical'];
+const rxIds = ['mic-receiver-typical', 'mic-receiver-digital', 'iem-bodypack-typical', 'budget-receiver', 'rx-vhf-typical', 'rx-2g4-typical', 'rx-5g8-typical'];
 
 // Bessel J0 by power series (accurate for |x| < 8).
 function j0(x) { let t = 1, s = 1; for (let k = 1; k < 40; k++) { t *= -(x * x) / (4 * k * k); s += t; } return s; }
@@ -30,6 +30,13 @@ test('level ordering: AGC top < P1dB < max input; IIP3 about P1dB + 10', () => {
     assert.ok(p.overloadHysteresisDb >= 1 && p.overloadHysteresisDb <= 6);
     assert.ok(p.agcRangeDb >= 40 && p.agcRangeDb <= 90);
   }
+});
+
+test('digital mic receiver preset: -97 dBm, consistent with kTB + NF + required CNR, same front end as the analogue one', () => {
+  const d = RX_PRESETS['mic-receiver-digital'], m = RX_PRESETS['mic-receiver-typical'];
+  assert.equal(d.sensitivityDbm, -97);
+  assert.ok(Math.abs(-174 + L(d.channelBwKhz * 1e3) + d.noiseFigureDb + d.requiredCnrDb - d.sensitivityDbm) < 0.5);
+  assert.equal(d.p1dBDbm, m.p1dBDbm); assert.ok(d.sensitivityDbm < m.sensitivityDbm);
 });
 
 test('budget receiver is the least linear', () => {
@@ -95,7 +102,7 @@ test('required CNR is implied by sensitivity and NF', () => {
   for (const id of rxIds) {
     const p = RX_PRESETS[id];
     assert.ok(Math.abs(impliedRequiredCnrDb(p.sensitivityDbm, p.noiseFigureDb, p.channelBwKhz) - p.requiredCnrDb) < 0.1, id);
-    if (!id.startsWith('rx-2g4') && !id.startsWith('rx-5g8')) assert.ok(p.requiredCnrDb >= CASCADE_TYPICAL.requiredCnrDb.min - 1 && p.requiredCnrDb <= CASCADE_TYPICAL.requiredCnrDb.max); // the analog-FM range; the digital ISM presets need only 14 dB
+    if (!id.startsWith('rx-2g4') && !id.startsWith('rx-5g8') && id !== 'mic-receiver-digital') assert.ok(p.requiredCnrDb >= CASCADE_TYPICAL.requiredCnrDb.min - 1 && p.requiredCnrDb <= CASCADE_TYPICAL.requiredCnrDb.max); // the analog-FM range; the digital ISM presets need only 14 dB, the digital UHF mic receiver 16 dB
   }
 });
 

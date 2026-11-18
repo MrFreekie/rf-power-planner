@@ -80,7 +80,7 @@ test('walking band: the singer moves 6.5 m right and 1 m forward, only her two l
   const a = bandPeopleScene(), b = bandWalkEndScene();
   const ma = linkMargins(a), mb = linkMargins(b);
   for (const k of ['Ben mic', 'Ben IEM', 'Chloe mic', 'Chloe IEM', 'Dev mic', 'Dev IEM']) near(mb[k], ma[k], 1e-9, k);
-  near(mb['Anna mic'] - ma['Anna mic'], -6.1, 0.05); near(mb['Anna IEM'] - ma['Anna IEM'], 7.9, 0.05);
+  near(mb['Anna mic'] - ma['Anna mic'], -13.9, 0.05); near(mb['Anna IEM'] - ma['Anna IEM'], 3.7, 0.05);
   const pa = a.people.find((p) => p.name === 'Anna'), pb = b.people.find((p) => p.name === 'Anna');
   near(pb.pos.x - pa.pos.x, 6.5, 1e-9); near(pb.pos.y - pa.pos.y, 1, 1e-9);
   const ka = a.links.find((l) => l.id === pa.micLinkId).tx.pos, kb = b.links.find((l) => l.id === pb.micLinkId).tx.pos;

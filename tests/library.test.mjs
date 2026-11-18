@@ -52,9 +52,10 @@ test('pattern is 0 dB at boresight and never positive', () => {
 });
 
 test('directional antennas have front-to-back ratio and -3 dB near half beamwidth', () => {
-  assert.ok(antennaPatternDb('paddle', 180, 0) <= -15);
-  assert.ok(antennaPatternDb('logperiodic', 180, 0) <= -15);
-  assert.ok(Math.abs(antennaPatternDb('paddle', 37.5, 0) + 3) < 0.1);
+  assert.ok(antennaPatternDb('paddle', 180, 0) <= -18);
+  assert.ok(antennaPatternDb('logperiodic', 180, 0) <= -12);
+  assert.ok(Math.abs(antennaPatternDb('paddle', 50, 0) + 3) < 0.1); // 100 degree azimuth beamwidth
+  assert.ok(Math.abs(antennaPatternDb('logperiodic', 55, 0) + 3) < 0.1); // 110 degree azimuth beamwidth
   assert.ok(antennaPatternDb('cardioid', 180, 0) <= -20);
   // dipole: omni in azimuth, null along its axis (elevation offset 90)
   assert.equal(antennaPatternDb('dipole', 120, 0), 0);

@@ -57,7 +57,7 @@ export const LINKS_EXAMPLES = [
   {
     id: 'cascade-booster-antenna',
     title: 'Cascaded noise figure: booster at the antenna',
-    note: 'Best practice: a 20 dB booster at the antenna comes first in the chain, so the 29.5 dB of cable loss after it adds little noise: the system noise figure is 17.7 dB and the link has 8 dB of margin. Compare with the same parts the other way round in the next example.',
+    note: 'Best practice: a 20 dB booster at the antenna comes first in the chain, so the 29.5 dB of cable loss after it adds little noise: the system noise figure is 17.7 dB and the link has 9 dB of margin. Compare with the same parts the other way round in the next example.',
     build: () => ({
       scene: make('mic', (s, l) => {
         l.tx.pos = { x: 1, y: 1, z: 1.5 };
@@ -90,7 +90,7 @@ export const LINKS_EXAMPLES = [
         l.rx.squelch = { enabled: true, thresholdDbm: -100, hysteresisDb: 3 };
         l.mpx.pilotSquelch = true;
         l.rx.pos = { x: 105, y: 6, z: 1.0 };
-        l.interferer = { enabled: true, levelDbm: -78.8, hasPilot: false, offsetKHz: 0 };
+        l.interferer = { enabled: true, levelDbm: -81.8, hasPilot: false, offsetKHz: 0 };
       }),
     }),
   },
@@ -253,7 +253,7 @@ export const LINKS_EXAMPLES = [
   {
     id: 'skm-low-intermod',
     title: 'Four analogue FM mics, standard mode (SKM 5200-II class, assumed figures)',
-    note: 'Compare: four 10 mW handhelds share a hybrid combiner with 25 dB isolation, and Mic A and Mic B beat to a product at 605.7 MHz, exactly on Mic C: the worst channel sees its noise floor rise by 20.3 dB. Switching all four to the low-intermod mode lowers the transmitter-side product by an assumed 6 dB and the worst rise to 14.8 dB. The 6 dB is an assumption standing in for a trade-report claim of about 30 percent more compatible channels. Based on published specs, some figures assumed.',
+    note: 'Compare: four 10 mW handhelds share a hybrid combiner with 25 dB isolation, and Mic A and Mic B beat to a product at 605.7 MHz, exactly on Mic C: the worst channel sees its noise floor rise by 20.4 dB. Switching all four to the low-intermod mode lowers the transmitter-side product by an assumed 6 dB and the worst rise to 14.9 dB. The 6 dB is an assumption standing in for a trade-report claim of about 30 percent more compatible channels. Based on published specs, some figures assumed.',
     build: () => ({
       scene: make('mic', (s) => {
         s.stage = { width: 16, depth: 10 };

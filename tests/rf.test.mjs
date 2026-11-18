@@ -91,15 +91,15 @@ test('metal wall |G| ~ 1 at all incidence angles (+/-0.005); drapes absorb (|G| 
 test('omni gain is 0 dBi in all directions', () => {
   for (const b of [{ az: 0, el: 0 }, { az: 123, el: 40 }, { az: -90, el: -20 }]) near(rf.antennaGainDb(omni, b), 0, 1e-9);
 });
-test('paddle: boresight = 7 dBi; behind = 7-15 = -8 dBi; follows orientation az (+/-0.05)', () => {
+test('paddle: boresight = 7 dBi; behind = 7-18 = -11 dBi; follows orientation az (+/-0.05)', () => {
   const pad = { type: 'paddle', gainDbi: 7, orientation: { az: 90, el: 0 } }; // pointing +x
   near(rf.antennaGainDb(pad, { az: 90, el: 0 }), 7, 0.05);
-  near(rf.antennaGainDb(pad, { az: -90, el: 0 }), -8, 0.05);
+  near(rf.antennaGainDb(pad, { az: -90, el: 0 }), -11, 0.05);
   assert.ok(rf.antennaGainDb(pad, { az: 0, el: 0 }) < 7 - 3); // 90 deg off is well down
 });
-test('paddle HPBW: table lobe -12*(a/75)^2 at 37.5 deg = -3 dB (+/-0.2)', () => {
+test('paddle HPBW: table lobe -12*(a/100)^2 at 50 deg = -3 dB (+/-0.2)', () => {
   const pad = { type: 'paddle', gainDbi: 7, orientation: { az: 0, el: 0 } };
-  near(rf.antennaGainDb(pad, { az: 37.5, el: 0 }), 7 - 3, 0.2);
+  near(rf.antennaGainDb(pad, { az: 50, el: 0 }), 7 - 3, 0.2);
 });
 test('dipole: broadside = gainDbi, along axis (el 90) is >= 30 dB down', () => {
   const dp = { type: 'dipole', gainDbi: 2.15, orientation: { az: 0, el: 0 } };
@@ -169,12 +169,12 @@ test('free-space link: 10 dBm, 600 MHz, 10 m, omni -> rx = -38.009 dBm (+/-0.01)
   near(r.marginDb, 90 - 38.009, 0.01);
   assert.equal(r.status, 'pass');
 });
-test('antenna gain at true bearing: paddle aimed at Rx +7 dBi; aimed away -8 dBi (+/-0.05)', () => {
+test('antenna gain at true bearing: paddle aimed at Rx +7 dBi; aimed away -11 dBi (+/-0.05)', () => {
   const sc = mkScene({ model: 'free-space' });
   const toward = rf.solveLink(sc, mkLink({ txAnt: { type: 'paddle', gainDbi: 7, orientation: { az: 0, el: 0 } } }));
   const away = rf.solveLink(sc, mkLink({ txAnt: { type: 'paddle', gainDbi: 7, orientation: { az: 180, el: 0 } } }));
   near(toward.rxPowerDbm, 10 + 7 - 48.009, 0.05);
-  near(away.rxPowerDbm, 10 - 8 - 48.009, 0.05);
+  near(away.rxPowerDbm, 10 - 11 - 48.009, 0.05);
 });
 test('rx antenna gain evaluated at arrival bearing (rx paddle pointing at tx: az 180)', () => {
   const r = rf.solveLink(mkScene({ model: 'free-space' }),

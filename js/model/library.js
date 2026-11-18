@@ -185,28 +185,37 @@ export const ANTENNAS = {
     pattern: { azDb: table(flat), elDb: table(dipoleEl) } }, // approx, see PHYSICS.md
   omni: { name: 'Omni (0 dBi reference)', gainDbi: 0, patternFn: 'omni',
     pattern: { azDb: table(flat), elDb: table(flat) } },
-  // Shure PA805 / UA860 style paddle (~7 dBi, HPBW ~70-80 deg, F/B 15 dB, same as FRONT_TO_BACK_DB in rf.js)
-  paddle: { name: 'Paddle / directional panel', gainDbi: 7, patternFn: 'paddle',
-    pattern: { azDb: table(lobe(75, 15)), elDb: table(lobe(65, 15)) } },
-  // Log-periodic (Shure PA805Z2 / Sennheiser A 1031 type, 6-10 dBi, F/B 15 dB as FRONT_TO_BACK_DB)
-  logperiodic: { name: 'Log-periodic (LPDA)', gainDbi: 8, patternFn: 'logperiodic',
-    pattern: { azDb: table(lobe(65, 15)), elDb: table(lobe(75, 15)) } },
-  // Normal-mode/axial helical (IEM), F/B 13 dB as FRONT_TO_BACK_DB. approx; circular polarisation not modelled here
-  helical: { name: 'Helical', gainDbi: 5, patternFn: 'helical',
-    pattern: { azDb: table(lobe(80, 13)), elDb: table(lobe(80, 13)) } }, // approx
+  // UHF paddle (Shure PA805 / PA805SWB datasheet family): 6 dBi (PA805) to 6.5 dBi typ (SWB), 3 dB beamwidth 100 deg (plane not
+  // stated, applied to azimuth). Elevation 65 deg and F/B 18 dB are ASSUMED (no UHF front-to-back published). Same HPBW and F/B as
+  // FRONT_TO_BACK_DB / DIRECTIONAL_HPBW_DEG in rf.js.
+  paddle: { name: 'Paddle / directional panel', gainDbi: 6.5, patternFn: 'paddle',
+    pattern: { azDb: table(lobe(100, 18)), elDb: table(lobe(65, 18)) } },
+  // UHF log-periodic (RF Venue Diversity Fin, Lectrosonics ALP, Wisycom LNNA datasheet family): 6-7.15 dBi, azimuth beamwidth
+  // 90-140 deg (110 used), F/B 8 dB (Fin datasheet) to 12-15 dB (application note), 12 used. Elevation 75 deg ASSUMED (generic LPDA).
+  // Same HPBW and F/B as rf.js.
+  logperiodic: { name: 'Log-periodic (LPDA)', gainDbi: 7, patternFn: 'logperiodic',
+    pattern: { azDb: table(lobe(110, 12)), elDb: table(lobe(75, 12)) } },
+  // Compact generic helical, about 5 dBi: a short, low-gain directional helix (the id stays 'helical' for saved scenes). Full-size
+  // mic-class helicals (9-11 dBi, circular) are 'helical-cp'. Beamwidth 70 deg and F/B 14 dB from the Shure HA-8091 / RF Venue
+  // CP Beam datasheet family (same as rf.js); the 5 dBi gain is ASSUMED (approx). Modelled with linear polarisation.
+  helical: { name: 'Helical, compact (generic, about 5 dBi)', gainDbi: 5, patternFn: 'helical',
+    pattern: { azDb: table(lobe(70, 14)), elDb: table(lobe(70, 14)) } }, // approx
   // Yagi-Uda directional antenna for fixed point-to-point links (about 10 dBi, HPBW about 55 degrees, F/B about 18 dB). ASSUMED class figures (flag U).
   yagi: { name: 'Yagi (directional, point-to-point)', gainDbi: 10, patternFn: 'yagi', confidence: { gainDbi: 'U' },
     pattern: { azDb: table(lobe(55, 18)), elDb: table(lobe(60, 18)) } },
   // Cardioid antenna / pickup pattern (approx, 3 dBi forward gain)
   cardioid: { name: 'Cardioid antenna', gainDbi: 3, patternFn: 'cardioid',
     pattern: { azDb: table(cardioid(-25)), elDb: table(lobe(120, 15)) } }, // approx
-  // Body-worn bodypack or handheld mic: lossy, human body shadow (approx -3 dBi)
+  // Body-worn bodypack or handheld mic: lossy, human body shadow (approx -3 dBi, free-air antenna). ECC Report 286 mean body effect
+  // (about -12 dBd worn or handheld at 600 MHz, about -10 dBi) is this figure plus the skin / cupped contact loss
+  // (ANTENNA_CONTACT_LOSS_DB); lower one or the other, never both, or the body is counted twice.
   body: { name: 'Body-worn / handheld (body loss)', gainDbi: -3, patternFn: 'body',
     pattern: { azDb: table(bodyAz), elDb: table(bodyEl) } }, // approx, see PHYSICS.md
-  // Circularly polarised passive directional helical (a Sennheiser A 5000-CP class antenna: circular, about 450-960 MHz, 8 dBi minimum).
-  // Figures recalled from public product literature, flag I (check the datasheet); no endorsement. Pattern approximate.
-  'helical-cp': { name: 'Helical, circular polarisation (directional)', gainDbi: 8, patternFn: 'helical', circular: true, bandMHz: [450, 960],
-    confidence: { gainDbi: 'I', bandMHz: 'I' }, pattern: { azDb: table(lobe(70, 20)), elDb: table(lobe(70, 20)) } },
+  // Circularly polarised passive directional helical, about 450-960 MHz (Sennheiser A 5000-CP, AKG Helical, Shure HA-8091
+  // datasheet family): 8 dBi minimum, 9 typical (9-11 published), beamwidth 63-80 deg (70 used), rear rejection 14 dB (HA-8091;
+  // RF Venue CP Beam 9-10 dB). Figures from datasheet copies, flag I; no endorsement. Same HPBW and F/B as rf.js.
+  'helical-cp': { name: 'Helical, circular polarisation (directional)', gainDbi: 9, patternFn: 'helical', circular: true, bandMHz: [450, 960],
+    confidence: { gainDbi: 'I', bandMHz: 'I' }, pattern: { azDb: table(lobe(70, 14)), elDb: table(lobe(70, 14)) } },
   custom: { name: 'Custom (user gain, omni)', gainDbi: 0, patternFn: 'custom',
     pattern: { azDb: table(flat), elDb: table(flat) } },
 };
