@@ -265,3 +265,10 @@ test('rack actions keep receive and transmit antennas in their own pools, and su
   A.setLinkKind(st, mic.id, 'iem'); A.setLinkKind(st, mic.id, 'mic'); A.setLinkKind(st, iem.id, 'mic'); A.setLinkKind(st, iem.id, 'iem');
   assert.deepEqual(validateScene(st.getScene()), { ok: true, errors: [] });
 });
+
+test('unattachedAntennas lists rack antennas that no radio uses', async () => {
+  const { unattachedAntennas } = await import('../js/model/rack.js');
+  const rack = { antennas: [{ id: 'a' }, { id: 'b' }, { id: 'c', role: 'tx' }], splitters: [], combiners: [], transmitters: [], receivers: [{ id: 'r', channels: [{ id: 'c1', linkId: 'l', antA: 'a', antB: null }] }] };
+  assert.deepEqual(unattachedAntennas(rack).map((a) => a.id), ['b', 'c']);
+  assert.deepEqual(unattachedAntennas(null), []);
+});

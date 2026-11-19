@@ -115,8 +115,8 @@ export function removeRackItem(store, kind, id) {
 }
 
 /** setRackAntenna(store, id, { pos?, antenna? }): move or change an antenna; every link it feeds follows. */
-export function setRackAntenna(store, id, patch) {
-  return store.update((d) => { const a = adopt(d).antennas.find((x) => x.id === id); if (!a) return; if (patch.pos) a.pos = { ...a.pos, ...patch.pos }; if (patch.antenna) a.antenna = { ...a.antenna, ...patch.antenna }; if (patch.load !== undefined) { if (patch.load) a.load = true; else delete a.load; } });
+export function setRackAntenna(store, id, patch, opts) {
+  return store.update((d) => { const a = adopt(d).antennas.find((x) => x.id === id); if (!a) return; if (patch.pos) a.pos = { ...a.pos, ...patch.pos }; if (patch.antenna) a.antenna = { ...a.antenna, ...patch.antenna }; if (patch.load !== undefined) { if (patch.load) a.load = true; else delete a.load; } }, opts);
 }
 
 const txChan = (rack, linkId) => { for (const t of rack.transmitters) for (const c of t.channels) if (c.linkId === linkId) return { r: t, c }; return null; };

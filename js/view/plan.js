@@ -14,7 +14,7 @@ import { squelch } from '../squelchTracker.js';
 import { gateOf, drawSquelchLed, rxInfo, drawActiveRing, drawOverloadHalo } from './squelchUi.js';
 import { rxState } from '../rxTracker.js';
 import { coverage } from '../coverageTracker.js';
-import { createHeatmap, drawHeatLegend, drawZones, drawBranches, drawImd, drawRxCableTags, drawPlatforms, drawElevationLegend, createLabelPlacer } from './planOverlay.js';
+import { createHeatmap, drawHeatLegend, drawZones, drawBranches, drawImd, drawPlatforms, drawElevationLegend, createLabelPlacer } from './planOverlay.js';
 import { covView, subscribeCovView } from './coverageUi.js';
 import { imd } from '../imdTracker.js';
 import { getRipples } from './ripples.js';
@@ -43,6 +43,8 @@ import { moveNoiseSource } from '../actionsAreas.js';
 import { movePerson } from '../actions.js';
 import { offsetFromPack, linkOwners } from '../model/people.js';
 import { updateOverheadPanel } from '../actionsAreas.js';
+import { setRackAntenna } from '../actionsRack.js';
+import { unattachedAntennas } from '../model/rack.js';
 
 const LOBE_STEP = 6; // degrees
 
@@ -170,6 +172,7 @@ export function createPlanView(canvas, store) {
     { const rank = (l) => { if (l === link0) return 0; const s = (solveCached(scene, l) || {}).status; return s === 'fail' ? 1 : s === 'marginal' ? 2 : 3; };
       for (const link of scene.links.map((l, i) => [rank(l), i, l]).sort((p, q) => p[0] - q[0] || p[1] - q[1]).map((e) => e[2])) drawLinkLine(ctx, th, scene, link, link === link0, w); }
     for (const link of scene.links) drawLinkEnds(ctx, th, scene, link, sel, w);
+    drawFreeAntennas(ctx, th, scene, sel, w);
     const placedLabels = [...linkLabelRects];
     for (const lk of scene.links) for (const role of ['tx', 'rx']) { if (role === 'rx' && lk.rx.sharedAntennaOf !== undefined) continue; if (frameHidden(lk, role)) continue; const q = vp.worldToScreen(lk[role].pos); placedLabels.push({ x: q.x - 45, y: q.y + 8, w: 90, h: 30 }, { x: q.x - 16, y: q.y - 16, w: 32, h: 32 }); }
     drawPeoplePlan(ctx, th, vp, scene, sel, handles, hoverKey, w, placedLabels, { collapsed: frameCollapsed, statusOf: (ids) => { const rank = { fail: 3, marginal: 2, pass: 1 }; let worst = null; for (const id of ids) { const l = scene.links.find((q) => q.id === id), st = l && (solveCached(scene, l) || {}).status; if (st && (!worst || (rank[st] || 0) > (rank[worst] || 0))) worst = st; } return worst ? { color: statusColor(th, worst), word: worst } : null; } });
@@ -177,7 +180,6 @@ export function createPlanView(canvas, store) {
     drawMeasurementsPlan(ctx, th, vp, scene, placedLabels, w, h);
     for (const link of scene.links) drawAntennaB(ctx, th, link, sel);
     for (const link of scene.links) drawBranches(ctx, th, vp, link, handles);
-    for (const link of scene.links) drawRxCableTags(ctx, th, vp, link, placer, scene.units.length, w);
     if (covView.zones) drawZones(ctx, th, vp, scene, cov, sel, handles);
     drawImd(ctx, th, vp, scene, sel, handles, placer, w);
     drawElevationLegend(ctx, th, w, scene, scene.units.length);
@@ -308,6 +310,22 @@ export function createPlanView(canvas, store) {
     if (inf.active === 'B') drawActiveRing(ctx, th, p.x, p.y, 14);
     if (inf.overload !== 'ok' && inf.div && inf.div.bDbm >= inf.div.aDbm) drawOverloadHalo(ctx, th, p.x, p.y, inf.overload, 20);
     handles.push({ kind: 'rxB', itemId: link.rx.id, linkId: link.id, sx: p.x, sy: p.y, r: 14, wx: inf.B.pos.x, wy: inf.B.pos.y });
+  }
+
+  /** Rack antennas not wired to any radio have no link end, so draw them here: draggable to place them, selectable by their id. */
+  function drawFreeAntennas(ctx, th, scene, sel, w) {
+    for (const a of unattachedAntennas(scene.rack)) {
+      const p = vp.worldToScreen(a.pos), selected = sel === a.id, ant = a.antenna || {}, az = ant.orientation?.az ?? 0;
+      const R = clamp(0.9 * vp.pxPerM, 26, 80), pts = lobePoints(ant, p, R);
+      ctx.beginPath(); pts.forEach((q, i) => (i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y))); ctx.closePath();
+      ctx.fillStyle = inkAlpha(th, 0.05); ctx.fill();
+      ctx.save(); ctx.setLineDash([4, 3]); ctx.strokeStyle = th.inkSoft; ctx.lineWidth = selected ? 1.4 : 0.9; ctx.stroke(); ctx.restore();
+      icons.drawStand(ctx, vp, a.pos.x, a.pos.y, { view: 'plan', ink: th.ink, fill: th.paper });
+      icons.drawAntenna(ctx, vp, a.pos.x, a.pos.y, { view: 'plan', ink: th.ink, fill: th.paper, type: ant.type, pol: ant.polarisation, rollDeg: ant.rollDeg, groundPlane: ant.groundPlane, angleDeg: 180 - az });
+      if (selected) ringAt(ctx, th, p.x, p.y, 17);
+      if (w >= 520 || selected) haloText(ctx, th, a.name || 'Antenna', p.x, p.y + Math.max(22, 0.35 * vp.pxPerM + 12), { align: 'center', color: selected ? th.ink : th.inkSoft, weight: selected ? '600' : '' });
+      handles.push({ kind: 'rackAnt', itemId: a.id, sx: p.x, sy: p.y, r: 15, wx: a.pos.x, wy: a.pos.y });
+    }
   }
 
   function drawLinkEnds(ctx, th, scene, link, sel, w) {
@@ -454,6 +472,11 @@ export function createPlanView(canvas, store) {
       movePerson(store, hd.itemId, { x: clamp(snap(state.startPos.x + ptr.x - state.startPtr.x), bd.x0, bd.x1), y: clamp(snap(state.startPos.y + ptr.y - state.startPtr.y), bd.y0, bd.y1) }, { coalesce: state.key });
       return;
     }
+    if (hd.kind === 'rackAnt') {
+      const bd = bounds(store.getScene().stage);
+      setRackAntenna(store, hd.itemId, { pos: { x: round2(clamp(target.x, bd.x0, bd.x1)), y: round2(clamp(target.y, bd.y0, bd.y1)) } }, { coalesce: state.key });
+      return;
+    }
     if (hd.kind === 'rxBRot') {
       const l = store.getScene().links.find((q) => q.id === hd.linkId); const b = l && l.rx.diversity && l.rx.diversity.antennaB;
       if (!b || !b.pos) return;
@@ -561,7 +584,7 @@ export function createPlanView(canvas, store) {
   const detach = attachInteraction(canvas, vp, {
     hitTest, dragStart, dragMove,
     isLocked: (hd) => !/Rot$|^tilt/.test(hd.kind) && isLocked(store.getScene(), hd.itemId), // aiming a locked antenna is still allowed; only its position is pinned
-    select: (id) => store.select(id),
+    select: (id) => store.select(id && (store.getScene().rack?.antennas || []).some((a) => a.id === id) && !findItem(store.getScene(), id) ? null : id), // a free rack antenna is dragged but has no inspector page
     hover: (hd) => { hoverKey = hd ? hd.kind + ':' + hd.itemId : null; setLinkFocus(hd ? linkIdOfItem(store.getScene(), hd.itemId) : null); host.invalidate(); },
     onView: () => { userView = true; host.invalidate(); },
     fit, nudge, rotate, cycle, escape: () => store.select(null), toggleLock: () => toggleSelectionLock(store, announce),

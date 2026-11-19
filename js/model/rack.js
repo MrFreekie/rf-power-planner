@@ -445,3 +445,15 @@ export function tuningClashes(scene, bwOf, guardKHz) {
   }
   return out;
 }
+
+/** unattachedAntennas(rack) -> the rack antennas that no receiver channel, splitter, transmitter channel or combiner uses. They have no link end to draw, so the plan draws them itself. */
+export function unattachedAntennas(rack) {
+  if (!rack || !Array.isArray(rack.antennas)) return [];
+  const used = new Set();
+  const add = (id) => { if (id) used.add(id); };
+  for (const r of rack.receivers || []) for (const c of r.channels || []) { add(c.antA); add(c.antB); }
+  for (const s of rack.splitters || []) { add(s.antA); add(s.antB); }
+  for (const t of rack.transmitters || []) for (const c of t.channels || []) add(c.antennaId);
+  for (const cb of rack.combiners || []) { add(cb.antennaId); if (cb.fanout && Array.isArray(cb.fanout.outputs)) for (const o of cb.fanout.outputs) if (o) add(o.antennaId); }
+  return rack.antennas.filter((a) => !used.has(a.id));
+}
