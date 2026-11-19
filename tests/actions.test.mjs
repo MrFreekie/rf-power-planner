@@ -185,3 +185,29 @@ test('a rack-fed antenna can be moved by editing the link end, and a new mic reu
   assert.equal(st.getScene().rack.antennas.length, n, 'no extra antenna for the new mic');
   assert.equal(st.getScene().links.find((l) => l.id === id).rx.pos.x, x0 + 2, 'the new mic listens on the same antenna');
 });
+
+test('a new IEM is added without an antenna of its own', async () => {
+  const { adoptRack } = await import('../js/actionsRack.js');
+  const { addLink } = await import('../js/actions.js');
+  const st = createStore(createDefaultScene()); adoptRack(st);
+  const first = addLink(st, 'iem'); assert.ok(first);
+  const n = st.getScene().rack.antennas.length;
+  const second = addLink(st, 'iem'); assert.ok(second);
+  assert.equal(st.getScene().rack.antennas.length, n, 'no extra antenna for the second IEM');
+  const tx = st.getScene().rack.transmitters.flatMap((t) => t.channels).find((c) => c.linkId === second);
+  assert.ok(tx && !tx.antennaId, 'the second IEM has a transmitter channel and no antenna');
+});
+
+test('adding a mic adds no antenna and removing a mic keeps its antenna', async () => {
+  const { addLink, removeLink } = await import('../js/actions.js');
+  const st = createStore(createDefaultScene());
+  const rxAnts = () => (st.getScene().rack ? st.getScene().rack.antennas.filter((a) => a.role !== 'tx').length : 0);
+  const id0 = st.getScene().links[0].id;
+  const id = addLink(st, 'mic'); assert.ok(id);
+  const n = rxAnts();
+  assert.equal(n, 1, 'only the antenna the first mic already had');
+  assert.ok(removeLink(st, id));
+  assert.equal(rxAnts(), n, 'removing the new mic leaves the antennas');
+  assert.ok(removeLink(st, id0));
+  assert.equal(rxAnts(), n, 'removing the first mic leaves its antenna too');
+});

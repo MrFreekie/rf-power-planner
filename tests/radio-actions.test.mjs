@@ -58,15 +58,14 @@ test('addRadioChannels: IEMs share the combiner of the reference channel', () =>
   assert.equal(sc.rack.antennas.length, nAnt);
 });
 
-test('addRadioChannels: an IEM whose reference goes straight to an antenna gets its own antenna, never a shared one', () => {
+test('addRadioChannels: an IEM whose reference goes straight to an antenna is added without an antenna', () => {
   const s = mk(); adoptRack(s);
   const nAnt = s.getScene().rack.antennas.filter((a) => a.role === 'tx').length;
   const [id] = addRadioChannels(s, 'iem', {});
   const sc = s.getScene(), mine = tchan(sc, id).c;
   assert.equal(mine.combinerId, null);
-  assert.ok(mine.antennaId);
-  assert.equal(sc.rack.transmitters.flatMap((t) => t.channels).filter((c) => !c.combinerId && c.antennaId === mine.antennaId).length, 1);
-  assert.equal(sc.rack.antennas.filter((a) => a.role === 'tx').length, nAnt + 1);
+  assert.ok(!mine.antennaId, 'left for the user to wire');
+  assert.equal(sc.rack.antennas.filter((a) => a.role === 'tx').length, nAnt, 'no new transmit antenna');
 });
 
 test('addRadioChannels: a mic added at the top of a full band stays near the block', () => {

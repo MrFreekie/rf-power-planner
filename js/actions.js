@@ -1,6 +1,7 @@
 // Scene mutations. Every action takes the store first and goes through store.update,
 // so undo/redo and subscribers behave uniformly. Pure of the DOM.
 import { RACK_LIMITS } from './model/rack.js';
+import { rackDraft } from './actionsRack.js';
 import { AUDIO_SOURCE_IDS, TONE_HZ_LIMITS } from './model/audio-source.js';
 import { buildExample } from './examples.js';
 import { findLockable } from './model/lock.js';
@@ -1089,6 +1090,7 @@ export function addLink(store, kind, partial = {}) {
   let id = null;
   store.update((d) => {
     if (!Array.isArray(d.links) || d.links.length >= SCENE_LIMITS.maxLinks) return;
+    rackDraft(d); // a rack of their own, so a new radio never brings an antenna with it
     const link = createDefaultLink(kind), word = kind === 'mic' ? 'Mic' : 'IEM';
     const same = d.links.filter((l) => l.kind === kind), ref = same[same.length - 1];
     const taken = new Set(d.links.map((l) => l.name));
@@ -1107,10 +1109,17 @@ export function addLink(store, kind, partial = {}) {
     d.links.push(link); id = link.id;
     if (kind === 'mic' && d.rack && Array.isArray(d.rack.receivers)) { // with a rack, a new mic listens on the receive antenna already there instead of getting an antenna of its own
       const ants = (d.rack.antennas || []).filter((a) => a.role !== 'tx'), host = ants[ants.length - 1];
-      if (host && d.rack.receivers.length < RACK_LIMITS.maxReceivers) {
+      if (d.rack.receivers.length < RACK_LIMITS.maxReceivers) {
         const taken = (list) => new Set(list), rids = taken(d.rack.receivers.map((r) => r.id)), cids = taken(d.rack.receivers.flatMap((r) => r.channels.map((c) => c.id)));
         let rid = `rr_${link.id}`, cid = `rc_${link.id}`; while (rids.has(rid)) rid += '_'; while (cids.has(cid)) cid += '_';
-        d.rack.receivers.push({ id: rid, name: `Rx ${d.rack.receivers.length + 1}`, channels: [{ id: cid, linkId: link.id, splitterId: null, antA: host.id, antB: null }] });
+        d.rack.receivers.push({ id: rid, name: `Rx ${d.rack.receivers.length + 1}`, channels: [{ id: cid, linkId: link.id, splitterId: null, antA: host ? host.id : null, antB: null }] });
+      }
+    }
+    if (kind === 'iem' && d.rack && Array.isArray(d.rack.transmitters)) { // likewise an IEM gets a transmitter but no antenna: two transmitters cannot share one without a combiner, so the user wires it
+      if (d.rack.transmitters.length < RACK_LIMITS.maxTransmitters) {
+        const tids = new Set(d.rack.transmitters.map((t) => t.id)), cids = new Set(d.rack.transmitters.flatMap((t) => t.channels.map((c) => c.id)));
+        let tid = `rt_${link.id}`, cid = `tc_${link.id}`; while (tids.has(tid)) tid += '_'; while (cids.has(cid)) cid += '_';
+        d.rack.transmitters.push({ id: tid, name: `IEM Tx ${d.rack.transmitters.length + 1}`, channels: [{ id: cid, linkId: link.id, combinerId: null, antennaId: null }] });
       }
     }
   });
@@ -1165,6 +1174,7 @@ export function removeLink(store, linkId) {
     if (!Array.isArray(d.links)) return;
     const first = d.links.find((l) => l.id === linkId);
     if (!first) return;
+    if (!d.links.some((l) => l.rx && (l.rx.sharedAntennaOf === linkId || (l.id === linkId && l.rx.sharedAntennaOf)))) rackDraft(d); // antennas live in the rack, so removing the radio leaves them where they are (a shared-antenna group keeps its own clean-up)
     const gone = new Set([linkId]);
     const removed = d.links.filter((l) => gone.has(l.id));
     d.links = d.links.filter((l) => !gone.has(l.id));
