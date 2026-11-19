@@ -1205,3 +1205,7 @@ body.vnalab-open { overflow: hidden; }
 .refl-walls { display: flex; gap: 6px; margin: 6px 0; flex-wrap: wrap; }
 .venue-floor { display: flex; gap: 8px; align-items: center; margin: 6px 0; }
 .venue-import-row { margin: 6px 0; }
+
+/* A radio item's own transmitter / receiver fields sit directly in the item, without a second collapsible heading. */
+.rack-docked > details.dock-merged > summary { display: none; }
+.rack-docked > details.dock-merged { border: 0; padding: 0; margin: 0; background: none; }

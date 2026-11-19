@@ -182,7 +182,7 @@ export function mountRack({ container, store }) {
       adv.append(el('p', 'hint rf-conn', `Connections: ${it.text}`));
       if (l && dock && act && act.id === l.id) {
         const host = el('div', 'rack-docked');
-        for (const n of DOCK_FOR[kind] || []) if (dock[n]) host.append(dock[n]);
+        for (const n of DOCK_FOR[kind] || []) if (dock[n]) { if (n === 'tx' || n === 'rx') dock[n].classList.add('dock-merged'); host.append(dock[n]); } // the item already says what it is: its own fields show without a second heading
         if (l.kind === 'p2p' && dock.link) host.append(dock.link);
         for (const id of LIVE_FOR[kind] || []) { const n = document.getElementById(id); if (n) host.append(n); }
         adv.append(host);
