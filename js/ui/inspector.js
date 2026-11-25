@@ -668,7 +668,7 @@ export function mountInspector({ container, store }) {
     // This element is a hidden form engine now: every section is handed to its panel (radio items, Venue builder, People, Point-to-point, Intermodulation).
     const docked = LINK_DOCK_SECTIONS.filter((n) => refs[n]);
     const venueDocked = [...VENUE_DOCK_SECTIONS, 'ppl', 'imd'].filter((n) => refs[n]);
-    container.append(...secs.filter((n) => !docked.includes(n) && !venueDocked.includes(n)).map((n) => refs[n].details));
+    container.append(...secs.filter((n) => refs[n] && !docked.includes(n) && !venueDocked.includes(n)).map((n) => refs[n].details)); // a listed name with no section built is skipped, never a throw
     { const vmap = {}; for (const n of venueDocked) vmap[n] = refs[n].details; setVenueDock(vmap); } // shown in the Venue builder panel (ui/venueBuilderUi.js)
     if (docked.length) { const map = {}; for (const n of docked) { refs[n].details.open = true; map[n] = refs[n].details; } setLinkDock(map); } else setLinkDock(null);
   }
