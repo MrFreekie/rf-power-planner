@@ -1107,15 +1107,8 @@ export function addLink(store, kind, partial = {}) {
       if (kind === 'iem') syncBranches(link);
     }
     d.links.push(link); id = link.id;
-    if (kind === 'mic' && d.rack && Array.isArray(d.rack.receivers)) { // with a rack, a new mic listens on the receive antenna already there instead of getting an antenna of its own
-      const ants = (d.rack.antennas || []).filter((a) => a.role !== 'tx'), host = ants[ants.length - 1];
-      if (d.rack.receivers.length < RACK_LIMITS.maxReceivers) {
-        const taken = (list) => new Set(list), rids = taken(d.rack.receivers.map((r) => r.id)), cids = taken(d.rack.receivers.flatMap((r) => r.channels.map((c) => c.id)));
-        let rid = `rr_${link.id}`, cid = `rc_${link.id}`; while (rids.has(rid)) rid += '_'; while (cids.has(cid)) cid += '_';
-        d.rack.receivers.push({ id: rid, name: `Rx ${d.rack.receivers.length + 1}`, channels: [{ id: cid, linkId: link.id, splitterId: null, antA: host ? host.id : null, antB: null }] });
-      }
-    }
-    if (kind === 'iem' && d.rack && Array.isArray(d.rack.transmitters)) { // likewise an IEM gets a transmitter but no antenna: two transmitters cannot share one without a combiner, so the user wires it
+    // a new mic is just a mic: its receiver is another item, and the two pair when they are tuned to the same frequency
+    if (kind === 'iem' && d.rack && d.rack.byFreq !== true && Array.isArray(d.rack.transmitters)) { // likewise an IEM gets a transmitter but no antenna: two transmitters cannot share one without a combiner, so the user wires it
       if (d.rack.transmitters.length < RACK_LIMITS.maxTransmitters) {
         const tids = new Set(d.rack.transmitters.map((t) => t.id)), cids = new Set(d.rack.transmitters.flatMap((t) => t.channels.map((c) => c.id)));
         let tid = `rt_${link.id}`, cid = `tc_${link.id}`; while (tids.has(tid)) tid += '_'; while (cids.has(cid)) cid += '_';
@@ -1182,10 +1175,14 @@ export function removeLink(store, linkId) {
     for (const q of d.links) if (gone.has(q.rx.sharedAntennaOf)) { delete q.rx.sharedAntennaOf; q.chain = (q.chain || []).filter((it) => !isShareItem(it)); } // the source went: followers keep their own antenna
     for (const g of removed) if (g.rx.sharedAntennaOf && !gone.has(g.rx.sharedAntennaOf)) rebalanceShare(d, g.rx.sharedAntennaOf); // a follower went: resize the splitter for the rest
     if (d.rack) {
-      for (const r of d.rack.receivers || []) r.channels = r.channels.filter((c) => !gone.has(c.linkId));
-      d.rack.receivers = (d.rack.receivers || []).filter((r) => r.channels.length);
-      for (const t of d.rack.transmitters || []) t.channels = t.channels.filter((c) => !gone.has(c.linkId));
-      d.rack.transmitters = (d.rack.transmitters || []).filter((t) => t.channels.length);
+      if (d.rack.byFreq !== true) { // before receivers were independent devices, a receiver went with its mic
+        for (const r of d.rack.receivers || []) r.channels = r.channels.filter((c) => !gone.has(c.linkId));
+        d.rack.receivers = (d.rack.receivers || []).filter((r) => r.channels.length);
+      }
+      if (d.rack.byFreq !== true) {
+        for (const t of d.rack.transmitters || []) t.channels = t.channels.filter((c) => !gone.has(c.linkId));
+        d.rack.transmitters = (d.rack.transmitters || []).filter((t) => t.channels.length);
+      }
     }
     if (Array.isArray(d.people)) prunePeople(d);
     pruneMeasurements(d);

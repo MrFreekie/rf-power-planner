@@ -17,10 +17,41 @@ const presetFor = (table, type, ports) => (type === 'active' ? table.active : pa
 export const DUMMY_LOAD_GAIN_DBI = -60;
 const isRackItem = (it) => !!it && it.rackSplitter === true;
 
+// Receiver devices own their settings and their tuned frequency (rack.byFreq): a mic pairs with a receiver channel when both are on exactly the same frequency.
+// The channel keeps the receiver's own settings in channel.rx; the matched link only shows them (compileRack puts them on link.rx, edits to link.rx go back to the channel).
+const RX_OWN_SKIP = new Set(['id', 'pos', 'antenna', 'name']); // the link's own end: its id, where it sits (the rack antenna), and its label
+/** Two tuned frequencies are the same when they agree to well under 1 Hz (typed values are compared exactly, float noise is not). */
+export const sameFreq = (a, b) => Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) < 5e-7;
+/** rxDevice(rx) -> the receiver-owned settings of a link end (everything but its id, place, antenna and label). */
+export function rxDevice(rx) { const o = {}; for (const k of Object.keys(rx || {})) if (!RX_OWN_SKIP.has(k)) o[k] = structuredClone(rx[k]); return o; }
+/** txDevice(tx) -> the transmitter-owned settings of a link end (same split as rxDevice). */
+export const txDevice = rxDevice;
+function projectTx(l, ch) { if (ch.tx && l.tx) for (const k of Object.keys(ch.tx)) if (!RX_OWN_SKIP.has(k)) l.tx[k] = structuredClone(ch.tx[k]); }
+function projectRx(l, ch) { if (ch.rx && l.rx) for (const k of Object.keys(ch.rx)) if (!RX_OWN_SKIP.has(k)) l.rx[k] = structuredClone(ch.rx[k]); }
+/**
+ * matchByFrequency(rack, links): sets every receiver channel's linkId to the mic link on exactly its frequency (first channel in rack order, first link in scene order, each used once),
+ * or null when none is. A channel from before frequencies were stored is tuned where its link was. Returns the set of matched link ids.
+ */
+export function matchByFrequency(rack, links) {
+  const taken = new Set(), mics = (links || []).filter((l) => l && l.kind === 'mic' && l.txOf === undefined);
+  for (const r of rack.receivers || []) for (const c of r.channels || []) {
+    if (!Number.isFinite(c.freqMHz)) { const old = mics.find((q) => q.id === c.linkId); c.freqMHz = old ? old.freqMHz : 600; }
+    const l = mics.find((q) => !taken.has(q.id) && sameFreq(q.freqMHz, c.freqMHz));
+    c.linkId = l ? l.id : null; if (l) taken.add(l.id);
+  }
+  const iems = (links || []).filter((l) => l && l.kind === 'iem' && l.txOf === undefined), takenT = new Set();
+  for (const t of rack.transmitters || []) for (const c of t.channels || []) {
+    if (!Number.isFinite(c.freqMHz)) { const old = iems.find((q) => q.id === c.linkId); c.freqMHz = old ? old.freqMHz : 100; }
+    const l = iems.find((q) => !takenT.has(q.id) && sameFreq(q.freqMHz, c.freqMHz));
+    c.linkId = l ? l.id : null; if (l) takenT.add(l.id);
+  }
+  return taken;
+}
+
 /** deriveRack(scene) -> a rack describing the mic links as they are now (shared antennas become one splitter, antenna B an antenna of its own). */
 export function deriveRack(scene) {
   const links = ((scene && scene.links) || []).filter((l) => l && l.kind === 'mic');
-  const rack = { antennas: [], splitters: [], receivers: [] };
+  const rack = { byFreq: true, antennas: [], splitters: [], receivers: [] };
   const sources = links.filter((l) => l.rx.sharedAntennaOf === undefined);
   const groups = sources.map((s) => [s, ...links.filter((l) => l.rx.sharedAntennaOf === s.id)]);
   const multi = groups.filter((g) => g.length > 1).length > 1;
@@ -40,13 +71,13 @@ export function deriveRack(scene) {
     }
     for (const l of g) {
       ri += 1;
-      rack.receivers.push({ id: `rr_${l.id}`, name: `Rx ${ri}`, channels: [{ id: `rc_${l.id}`, linkId: l.id, splitterId: spId, ...(spId ? {} : { antA: aId, antB: b ? bId : null }) }] });
+      rack.receivers.push({ id: `rr_${l.id}`, name: `Rx ${ri}`, channels: [{ id: `rc_${l.id}`, linkId: l.id, freqMHz: l.freqMHz, rx: rxDevice(l.rx), splitterId: spId, ...(spId ? {} : { antA: aId, antB: b ? bId : null }) }] });
     }
   }
   rack.transmitters = []; rack.combiners = [];
   ((scene && scene.links) || []).filter((l) => l && l.kind === 'iem' && l.txOf === undefined).forEach((l, i) => {
     rack.antennas.push({ id: `ta_${l.id}`, role: 'tx', name: `Tx Antenna ${i + 1}`, pos: structuredClone(l.tx.pos), antenna: structuredClone(l.tx.antenna) });
-    rack.transmitters.push({ id: `rt_${l.id}`, name: `IEM Tx ${i + 1}`, channels: [{ id: `tc_${l.id}`, linkId: l.id, combinerId: null, antennaId: `ta_${l.id}` }] });
+    rack.transmitters.push({ id: `rt_${l.id}`, name: `IEM Tx ${i + 1}`, channels: [{ id: `tc_${l.id}`, linkId: l.id, freqMHz: l.freqMHz, tx: txDevice(l.tx), combinerId: null, antennaId: `ta_${l.id}` }] });
   });
   return rack;
 }
@@ -142,8 +173,20 @@ export function adoptLinkEdits(prev, next) {
     if (end.pos && typeof end.pos === 'object' && !same(end.pos, prevEnd.pos)) fa.pos = structuredClone(end.pos);
     if (end.antenna && typeof end.antenna === 'object' && !same(end.antenna, prevEnd.antenna)) fa.antenna = structuredClone(end.antenna);
   };
+  const wasCh = new Map(); for (const r of (prev.rack && prev.rack.receivers) || []) for (const c of r.channels || []) wasCh.set(c.id, c);
+  const wasTc = new Map(); for (const t of (prev.rack && prev.rack.transmitters) || []) for (const c of t.channels || []) wasTc.set(c.id, c);
   for (const l of next.links) {
     const p = was.get(l.id); if (!p) continue;
+    if (rack.byFreq === true && l.kind === 'iem' && l.txOf === undefined && l.tx && p.tx) for (const t of rack.transmitters || []) for (const c of t.channels || []) { // a transmitter setting edited on the link is edited on its transmitter
+      if (c.linkId !== l.id) continue;
+      const pc = wasTc.get(c.id), c0 = (pc && pc.tx) || {};
+      for (const k of Object.keys(l.tx)) if (!RX_OWN_SKIP.has(k) && !same(l.tx[k], p.tx[k]) && same(c0[k], (c.tx || {})[k])) { c.tx = c.tx || {}; c.tx[k] = structuredClone(l.tx[k]); }
+    }
+    if (rack.byFreq === true && l.kind === 'mic' && l.rx && p.rx) for (const r of rack.receivers || []) for (const c of r.channels || []) { // a receiver setting edited on the link is edited on its receiver
+      if (c.linkId !== l.id) continue;
+      const pc = wasCh.get(c.id), c0 = (pc && pc.rx) || {};
+      for (const k of Object.keys(l.rx)) if (!RX_OWN_SKIP.has(k) && !same(l.rx[k], p.rx[k]) && same(c0[k], (c.rx || {})[k])) { c.rx = c.rx || {}; c.rx[k] = structuredClone(l.rx[k]); }
+    }
     pull(feedAntenna(rack, l.id, 'rx'), l.rx, p.rx);
     pull(feedAntenna(rack, l.id, 'tx'), l.tx, p.tx);
     const b = l.rx && l.rx.diversity && l.rx.diversity.antennaB, pb = p.rx && p.rx.diversity && p.rx.diversity.antennaB;
@@ -160,11 +203,13 @@ export function compileRack(scene, mk) {
   const links = scene.links || [], used = new Map();
   const zoneIds = new Set((scene.zones || []).map((z) => z.id));
   for (const a of rack.antennas || []) if (Array.isArray(a.zones)) a.zones = a.zones.filter((z) => zoneIds.has(z)); // a deleted zone leaves the list
-  for (const r of rack.receivers) r.channels = (r.channels || []).filter((c) => links.some((l) => l.id === c.linkId && l.kind === 'mic')); // a link that went or changed kind leaves its channel
-  rack.receivers = rack.receivers.filter((r) => r.channels.length);
+  const byFreq = rack.byFreq === true;
+  if (byFreq) matchByFrequency(rack, links); // devices are independent: a receiver channel keeps existing with no mic, and a mic with no receiver
+  else for (const r of rack.receivers) r.channels = (r.channels || []).filter((c) => links.some((l) => l.id === c.linkId && l.kind === 'mic')); // a link that went or changed kind leaves its channel
+  if (!byFreq) rack.receivers = rack.receivers.filter((r) => r.channels.length);
   const placed = new Set(rack.receivers.flatMap((r) => r.channels.map((c) => c.linkId)));
   for (const l of links) { // a mic link added after the rack was made gets its own receiver and antenna
-    if (l.kind !== 'mic' || placed.has(l.id) || rack.receivers.length >= RACK_LIMITS.maxReceivers || rack.antennas.length >= RACK_LIMITS.maxAntennas) continue;
+    if (byFreq || l.kind !== 'mic' || placed.has(l.id) || rack.receivers.length >= RACK_LIMITS.maxReceivers || rack.antennas.length >= RACK_LIMITS.maxAntennas) continue;
     if (!rack.antennas.some((x) => x.id === `ra_${l.id}`)) rack.antennas.push({ id: `ra_${l.id}`, name: `Rx antenna for ${l.name || 'mic'}`, pos: structuredClone(l.rx.pos), antenna: structuredClone(l.rx.antenna) }); // reuse one left behind by the same link
     const rid = freeId(`rr_${l.id}`, rack.receivers.map((r) => r.id)), cid = freeId(`rc_${l.id}`, rack.receivers.flatMap((r) => r.channels.map((c) => c.id))); // a stale id of the same link is not reused
     rack.receivers.push({ id: rid, name: `Rx ${rack.receivers.length + 1}`, channels: [{ id: cid, linkId: l.id, splitterId: null, antA: `ra_${l.id}`, antB: null }] });
@@ -173,6 +218,7 @@ export function compileRack(scene, mk) {
   for (const r of rack.receivers) for (const ch of r.channels || []) {
     const l = links.find((q) => q.id === ch.linkId);
     if (!l || l.kind !== 'mic') continue;
+    if (byFreq) projectRx(l, ch); // the receiver's own settings are what the link shows
     delete l.rx.sharedAntennaOf; // the rack owns the sharing now
     l.chain = (l.chain || []).filter((it) => !isRackItem(it));
     const { splitter, stages, antA, antB, hops, loopLossDb } = channelRoute(rack, ch, r);
@@ -201,11 +247,14 @@ export function compileRack(scene, mk) {
 function compileTxRack(scene, rack, links, mk) {
   if (!Array.isArray(rack.transmitters)) rack.transmitters = [];
   if (!Array.isArray(rack.combiners)) rack.combiners = [];
-  for (const t of rack.transmitters) t.channels = (t.channels || []).filter((c) => links.some((l) => l.id === c.linkId && l.kind === 'iem' && l.txOf === undefined));
-  rack.transmitters = rack.transmitters.filter((t) => t.channels.length);
+  const byFreq = rack.byFreq === true; // devices are independent: matchByFrequency (run for the receivers) already paired each transmitter channel with the bodypack link on its exact frequency
+  if (!byFreq) {
+    for (const t of rack.transmitters) t.channels = (t.channels || []).filter((c) => links.some((l) => l.id === c.linkId && l.kind === 'iem' && l.txOf === undefined));
+    rack.transmitters = rack.transmitters.filter((t) => t.channels.length);
+  }
   const placed = new Set(rack.transmitters.flatMap((t) => t.channels.map((c) => c.linkId)));
   for (const l of links) {
-    if (l.kind !== 'iem' || l.txOf !== undefined || placed.has(l.id) || rack.transmitters.length >= RACK_LIMITS.maxTransmitters || rack.antennas.length >= RACK_LIMITS.maxAntennas) continue;
+    if (byFreq || l.kind !== 'iem' || l.txOf !== undefined || placed.has(l.id) || rack.transmitters.length >= RACK_LIMITS.maxTransmitters || rack.antennas.length >= RACK_LIMITS.maxAntennas) continue;
     if (!rack.antennas.some((x) => x.id === `ta_${l.id}`)) rack.antennas.push({ id: `ta_${l.id}`, role: 'tx', name: `Tx antenna for ${l.name || 'IEM'}`, pos: structuredClone(l.tx.pos), antenna: structuredClone(l.tx.antenna) }); // an antenna left behind by a link that changed kind or was deleted is reused
     const tid = freeId(`rt_${l.id}`, rack.transmitters.map((t) => t.id)), cid = freeId(`tc_${l.id}`, rack.transmitters.flatMap((t) => t.channels.map((c) => c.id)));
     rack.transmitters.push({ id: tid, name: `IEM Tx ${rack.transmitters.length + 1}`, channels: [{ id: cid, linkId: l.id, combinerId: null, antennaId: `ta_${l.id}` }] });
@@ -214,6 +263,7 @@ function compileTxRack(scene, rack, links, mk) {
   for (const t of rack.transmitters) for (const c of t.channels) if (c.combinerId) used.set(c.combinerId, (used.get(c.combinerId) || 0) + 1);
   for (const t of rack.transmitters) for (const c of t.channels) {
     const l = links.find((q) => q.id === c.linkId); if (!l) continue;
+    if (byFreq) projectTx(l, c);
     const cb = c.combinerId ? rack.combiners.find((x) => x.id === c.combinerId) : null;
     const fan = cb && cb.fanout && Array.isArray(cb.fanout.outputs) ? cb.fanout : null;
     const fanOut = fan ? fan.outputs.find((o) => o && rack.antennas.some((a) => a.id === o.antennaId)) || null : null; // the output this link is solved on: the first one with an antenna
@@ -255,7 +305,9 @@ export function validateRack(scene) {
   rack.receivers.forEach((r, i) => {
     take(r && r.id, `rack.receivers[${i}]`);
     if (!Array.isArray(r.channels) || r.channels.length > RACK_LIMITS.maxChannels) errors.push(`rack.receivers[${i}].channels must be an array of at most ${RACK_LIMITS.maxChannels}`);
-    else r.channels.forEach((c, j) => { take(c && c.id, `rack.receivers[${i}].channels[${j}]`); if (!safe(c.linkId)) errors.push(`rack.receivers[${i}].channels[${j}].linkId invalid`); });
+    else r.channels.forEach((c, j) => { take(c && c.id, `rack.receivers[${i}].channels[${j}]`); if (!safe(c.linkId) && !(rack.byFreq === true && (c.linkId === null || c.linkId === undefined))) errors.push(`rack.receivers[${i}].channels[${j}].linkId invalid`);
+      if (c.freqMHz !== undefined && !(typeof c.freqMHz === 'number' && Number.isFinite(c.freqMHz) && c.freqMHz > 0 && c.freqMHz <= 100000)) errors.push(`rack.receivers[${i}].channels[${j}].freqMHz must be a frequency in MHz`);
+      if (c.rx !== undefined && !isObj(c.rx)) errors.push(`rack.receivers[${i}].channels[${j}].rx must be an object`); });
   });
   for (const [k, max] of [['transmitters', RACK_LIMITS.maxTransmitters], ['combiners', RACK_LIMITS.maxCombiners]]) if (rack[k] !== undefined && (!Array.isArray(rack[k]) || rack[k].length > max)) errors.push(`rack.${k} must be an array of at most ${max}`);
   if (errors.length) return errors;
@@ -301,7 +353,8 @@ export function validateRack(scene) {
   (rack.transmitters || []).forEach((t, i) => {
     take(t && t.id, `rack.transmitters[${i}]`);
     if (!Array.isArray(t.channels) || t.channels.length > RACK_LIMITS.maxChannels) errors.push(`rack.transmitters[${i}].channels must be an array of at most ${RACK_LIMITS.maxChannels}`);
-    else t.channels.forEach((c, j) => { take(c && c.id, `rack.transmitters[${i}].channels[${j}]`); if (!safe(c.linkId)) errors.push(`rack.transmitters[${i}].channels[${j}].linkId invalid`);
+    else t.channels.forEach((c, j) => { take(c && c.id, `rack.transmitters[${i}].channels[${j}]`); if (!safe(c.linkId) && !(rack.byFreq === true && (c.linkId === null || c.linkId === undefined))) errors.push(`rack.transmitters[${i}].channels[${j}].linkId invalid`);
+      if (rack.byFreq === true && c.freqMHz !== undefined && !(num(c.freqMHz) && c.freqMHz > 0 && c.freqMHz <= 100000)) errors.push(`rack.transmitters[${i}].channels[${j}].freqMHz invalid`);
       if (c.isolatorDb !== undefined && !(num(c.isolatorDb) && c.isolatorDb >= 10 && c.isolatorDb <= 60)) errors.push(`rack.transmitters[${i}].channels[${j}].isolatorDb must be 10 to 60`); });
   });
   return errors;
@@ -313,15 +366,22 @@ export function validateRack(scene) {
  *   [{ key, title, items:[{ id, kind, text }] }] with kinds mic, antenna, splitter, receiver (one item per channel), transmitter (per channel), combiner, txantenna, bodypack,
  *   in signal order: microphones, receive antennas, splitters, receivers; then IEM transmitters, combiners, transmit antennas, bodypacks.
  */
+const fmtF = (f) => (Number.isFinite(f) ? String(Math.round(f * 1e4) / 1e4) : '?');
+/** The id a receiver channel's list item and warnings go by: its mic's id while paired (so the mic's own rows follow it), else its own channel id. */
+export const channelItemId = (c) => c.linkId || c.id;
+
 export function rackSections(scene, formOf) {
   const rack = scene.rack || deriveRack(scene), links = scene.links || [];
   const nameOf = (id) => { const l = links.find((q) => q.id === id); return l ? String(l.name || l.id) : '?'; };
   const an = (id) => { const a = (rack.antennas || []).find((x) => x.id === id); return a ? a.name : 'no antenna'; };
   const rxAnts = (rack.antennas || []).filter((a) => a.role !== 'tx'), txAnts = (rack.antennas || []).filter((a) => a.role === 'tx');
   const sp = (id) => (rack.splitters || []).find((x) => x.id === id), cb = (id) => (rack.combiners || []).find((x) => x.id === id);
+  const chanName = (c) => (c.linkId ? nameOf(c.linkId) : `${fmtF(c.freqMHz)} MHz`);
   const sections = [];
   const mic = links.filter((l) => l.kind === 'mic' && l.txOf === undefined); // an extra receiver of a mic has no transmitter item of its own
-  const micItems = (list) => list.map((l) => ({ id: l.id, kind: 'mic', text: String(l.name || l.id) }));
+  const heard = new Set((rack.receivers || []).flatMap((r) => r.channels.map((c) => c.linkId)).filter(Boolean));
+  const byFreq = rack.byFreq === true;
+  const micItems = (list) => list.map((l) => ({ id: l.id, kind: 'mic', matched: !byFreq || heard.has(l.id), text: `${String(l.name || l.id)}${byFreq && !heard.has(l.id) ? ' (no receiver on this frequency)' : ''}` }));
   if (mic.length && typeof formOf !== 'function') sections.push({ key: 'mics', title: 'Microphones', items: micItems(mic) });
   else for (const [f, title] of [['handheld', 'Handheld microphones'], ['bodypack', 'Bodypack transmitters'], ['plug-on', 'Plug-on transmitters'], ['other', 'Other microphones (no model chosen)']]) {
     const group = mic.filter((l) => (['handheld', 'bodypack', 'plug-on'].includes(formOf(l)) ? formOf(l) : 'other') === f);
@@ -330,7 +390,7 @@ export function rackSections(scene, formOf) {
   if (rxAnts.length) sections.push({ key: 'rxant', title: 'Receive antennas', items: rxAnts.map((a) => {
     const to = [];
     for (const s of rack.splitters || []) { if (s.fromSplitter) continue; if (s.antA === a.id) to.push(`${s.name} A`); if (s.antB === a.id) to.push(`${s.name} B`); }
-    for (const r of rack.receivers || []) for (const c of r.channels) if (!c.splitterId && !r.loopFrom && (c.antA === a.id || c.antB === a.id)) to.push(`${r.name} (${nameOf(c.linkId)})${c.antB === a.id ? ' B' : ''}`);
+    for (const r of rack.receivers || []) for (const c of r.channels) if (!c.splitterId && !r.loopFrom && (c.antA === a.id || c.antB === a.id)) to.push(`${r.name} (${chanName(c)})${c.antB === a.id ? ' B' : ''}`);
     return { id: a.id, kind: 'antenna', text: `${a.name}${to.length ? ` connected to ${to.join(', ')}` : ' not connected'}` };
   }) });
   if ((rack.splitters || []).length) sections.push({ key: 'splitters', title: 'Splitters', items: rack.splitters.map((s) => {
@@ -341,7 +401,7 @@ export function rackSections(scene, formOf) {
     const lh = loopHops(rack, r), up = lh.hops.length ? rack.receivers.find((x) => x.id === r.loopFrom) : null;
     const s = !up && c.splitterId ? sp(c.splitterId) : null;
     const to = up ? `the loop-through of ${up.name} (${lh.hops.length} hop${lh.hops.length === 1 ? '' : 's'}, ${lh.hops.reduce((t, h) => t + loopLossOf(h), 0)} dB${lh.hops.some((h) => !Number.isFinite(h.loopLossDb)) ? ' assumed' : ''})` : s ? `${s.name}${s.antB ? ' A&B' : ' A'}` : `${an(c.antA)}${c.antB ? ` and ${an(c.antB)}` : ''}`;
-    return { id: c.linkId, kind: 'receiver', text: `${nameOf(c.linkId)} > ${r.name}${r.channels.length > 1 ? ` channel ${i + 1}` : ''} connected to ${to}` };
+    return { id: channelItemId(c), channelId: c.id, linkId: c.linkId || null, freqMHz: c.freqMHz, matched: !!c.linkId, kind: 'receiver', text: `${c.linkId ? nameOf(c.linkId) : `${fmtF(c.freqMHz)} MHz, no mic on this frequency`} > ${r.name}${r.channels.length > 1 ? ` channel ${i + 1}` : ''} connected to ${to}` };
   })) });
   const iem = (rack.transmitters || []);
   if (iem.length) sections.push({ key: 'iems', title: 'In-ear transmitters', items: iem.flatMap((t) => t.channels.map((c, i) => {
@@ -349,12 +409,12 @@ export function rackSections(scene, formOf) {
     const fo = b && b.fanout && Array.isArray(b.fanout.outputs) ? b.fanout.outputs : null;
     const tail = fo ? `splitter > ${fo.map((o) => `${o.cable ? `${o.cable.lengthM} m cable > ` : ''}${an(o.antennaId)}`).join(' and ') || 'no antenna'}` : an(b ? b.antennaId : c.antennaId);
     const path = b ? `${b.name}${b.cable ? ` > ${b.cable.lengthM} m cable` : ''} > ${tail}` : tail;
-    return { id: c.linkId, kind: 'transmitter', text: `${t.name} Channel ${i + 1} (${nameOf(c.linkId)}) > ${c.isolator ? `isolator (${ISOLATOR_LOSS_DB} dB loss, ${isolatorDb(c)} dB isolation) > ` : ''}${path}` };
+    return { id: channelItemId(c), channelId: c.id, linkId: c.linkId || null, freqMHz: c.freqMHz, matched: !!c.linkId, kind: 'transmitter', text: `${t.name} Channel ${i + 1} (${c.linkId ? nameOf(c.linkId) : `${fmtF(c.freqMHz)} MHz, no bodypack on this frequency`}) > ${c.isolator ? `isolator (${ISOLATOR_LOSS_DB} dB loss, ${isolatorDb(c)} dB isolation) > ` : ''}${path}` };
   })) });
   if ((rack.combiners || []).length) sections.push({ key: 'combiners', title: 'Combiners', items: rack.combiners.map((b) => ({ id: b.id, kind: 'combiner', text: `${b.name} (${b.type}) > ${b.cable ? `${b.cable.lengthM} m cable > ` : ''}${b.fanout && Array.isArray(b.fanout.outputs) ? `splitter > ${b.fanout.outputs.map((o) => `${o.cable ? `${o.cable.lengthM} m cable > ` : ''}${an(o.antennaId)}`).join(' and ') || 'no antenna'}` : an(b.antennaId)}` })) });
   if (txAnts.length) sections.push({ key: 'txant', title: 'Transmit antennas', items: txAnts.map((a) => ({ id: a.id, kind: 'txantenna', text: a.load ? `${a.name} (50 ohm dummy load)` : a.name })) });
-  const iemLinks = links.filter((l) => l.kind === 'iem');
-  if (iemLinks.length) sections.push({ key: 'bodypacks', title: 'In-ear bodypacks', items: iemLinks.map((l) => ({ id: l.id, kind: 'bodypack', text: `${l.name || l.id} bodypack` })) });
+  const iemLinks = links.filter((l) => l.kind === 'iem'), hearsTx = new Set((rack.transmitters || []).flatMap((t) => t.channels.map((c) => c.linkId)).filter(Boolean));
+  if (iemLinks.length) sections.push({ key: 'bodypacks', title: 'In-ear bodypacks', items: iemLinks.map((l) => { const own = l.txOf === undefined, lone = byFreq && own && !hearsTx.has(l.id); return { id: l.id, kind: 'bodypack', matched: !lone, text: `${l.name || l.id} bodypack${lone ? ' (no transmitter on this frequency)' : ''}` }; }) });
   return sections;
 }
 
@@ -374,7 +434,7 @@ export function rackWarnings(scene, bwOf, opts) { // opts.erpOf(link) -> { level
   const ant = (id) => (rack.antennas || []).find((a) => a.id === id);
   const open = 'it can be damaged transmitting into an open output. Connect an antenna or fit a 50 ohm load';
   for (const t of rack.transmitters || []) for (const c of t.channels) {
-    if (!c.combinerId && !ant(c.antennaId)) w.push({ key: `transmitter:${c.linkId}`, level: 'warn', text: `${nm(c.linkId)} has no antenna or load: ${open}.` });
+    if (!c.combinerId && !ant(c.antennaId)) w.push({ key: `transmitter:${channelItemId(c)}`, level: 'warn', text: `${c.linkId ? nm(c.linkId) : `The ${fmtF(c.freqMHz)} MHz transmitter`} has no antenna or load: ${open}.` });
   }
   for (const b of rack.combiners || []) {
     const n = (rack.transmitters || []).reduce((k, t) => k + t.channels.filter((c) => c.combinerId === b.id).length, 0);
@@ -398,7 +458,15 @@ export function rackWarnings(scene, bwOf, opts) { // opts.erpOf(link) -> { level
     const r = opts.erpOf(l);
     if (r && r.level) w.push({ key: `${l.kind === 'iem' ? 'transmitter' : 'mic'}:${l.id}`, level: r.level === 'info' ? 'info' : 'warn', text: `${nm(l.id)}: ${r.text}` });
   }
-  for (const r of rack.receivers || []) { const lh = loopHops(rack, r); if (lh.hops.length && lh.hops.some((h) => !Number.isFinite(h.loopLossDb))) for (const c of r.channels) w.push({ key: `receiver:${c.linkId}`, level: 'info', text: `${nm(c.linkId)} is fed through ${lh.hops.length} receiver loop-through hop${lh.hops.length === 1 ? '' : 's'}: the loss per hop is assumed (${DEFAULT_LOOP_LOSS_DB} dB); check the receiver data sheet.` }); }
+  for (const r of rack.receivers || []) { const lh = loopHops(rack, r); if (lh.hops.length && lh.hops.some((h) => !Number.isFinite(h.loopLossDb))) for (const c of r.channels) w.push({ key: `receiver:${channelItemId(c)}`, level: 'info', text: `${c.linkId ? nm(c.linkId) : `${fmtF(c.freqMHz)} MHz`} is fed through ${lh.hops.length} receiver loop-through hop${lh.hops.length === 1 ? '' : 's'}: the loss per hop is assumed (${DEFAULT_LOOP_LOSS_DB} dB); check the receiver data sheet.` }); }
+  if (rack.byFreq === true) {
+    const heard = new Set((rack.receivers || []).flatMap((r) => r.channels.map((c) => c.linkId)).filter(Boolean));
+    for (const l of links) if (l.kind === 'mic' && l.txOf === undefined && !heard.has(l.id)) w.push({ key: `mic:${l.id}`, level: 'warn', text: `${nm(l.id)} has no receiver tuned to ${fmtF(l.freqMHz)} MHz: it is not heard and no link is solved for it. Add a receiver on exactly this frequency.` });
+    const hearsTx = new Set((rack.transmitters || []).flatMap((t) => t.channels.map((c) => c.linkId)).filter(Boolean));
+    for (const l of links) if (l.kind === 'iem' && l.txOf === undefined && !hearsTx.has(l.id)) w.push({ key: `bodypack:${l.id}`, level: 'warn', text: `${nm(l.id)} has no transmitter tuned to ${fmtF(l.freqMHz)} MHz: nothing is sent to it and no link is solved for it. Add a transmitter on exactly this frequency.` });
+    for (const t of rack.transmitters || []) for (const c of t.channels) if (!c.linkId) w.push({ key: `transmitter:${c.id}`, level: 'warn', text: `${t.name} is tuned to ${fmtF(c.freqMHz)} MHz and no bodypack is on exactly that frequency.` });
+    for (const r of rack.receivers || []) for (const c of r.channels) if (!c.linkId) w.push({ key: `receiver:${c.id}`, level: 'warn', text: `${r.name} is tuned to ${fmtF(c.freqMHz)} MHz and no mic is on exactly that frequency.` });
+  }
   for (const f of freePorts(rack)) w.push({ key: `${f.kind}:${f.id}`, level: 'info', text: `${f.name} has ${f.free} unused ${f.kind === 'combiner' ? 'input' : 'output'}${f.free === 1 ? '' : 's'}: fit a 50 ohm load on ${f.free === 1 ? 'it' : 'each'} (1 W is plenty for an IEM, 2 W gives margin).` });
   return w;
 }
@@ -451,9 +519,12 @@ export function unattachedAntennas(rack) {
   if (!rack || !Array.isArray(rack.antennas)) return [];
   const used = new Set();
   const add = (id) => { if (id) used.add(id); };
-  for (const r of rack.receivers || []) for (const c of r.channels || []) { add(c.antA); add(c.antB); }
-  for (const s of rack.splitters || []) { add(s.antA); add(s.antB); }
-  for (const t of rack.transmitters || []) for (const c of t.channels || []) add(c.antennaId);
-  for (const cb of rack.combiners || []) { add(cb.antennaId); if (cb.fanout && Array.isArray(cb.fanout.outputs)) for (const o of cb.fanout.outputs) if (o) add(o.antennaId); }
+  // with receivers tuned by frequency, only a receiver paired with a mic has a link end on the plan; the rest (and what only they use) are drawn as free antennas so they can be seen, selected and removed
+  const live = (c) => rack.byFreq !== true || !!c.linkId, liveSp = new Set();
+  for (const r of rack.receivers || []) for (const c of r.channels || []) if (live(c)) { add(c.antA); add(c.antB); for (let id = c.splitterId, n = 0; id && n < 8; n++) { liveSp.add(id); const sp = (rack.splitters || []).find((x) => x.id === id); id = sp && sp.fromSplitter; } }
+  for (const s of rack.splitters || []) if (rack.byFreq !== true || liveSp.has(s.id)) { add(s.antA); add(s.antB); }
+  const liveCb = new Set();
+  for (const t of rack.transmitters || []) for (const c of t.channels || []) if (live(c)) { add(c.antennaId); if (c.combinerId) liveCb.add(c.combinerId); }
+  for (const cb of rack.combiners || []) if (rack.byFreq !== true || liveCb.has(cb.id)) { add(cb.antennaId); if (cb.fanout && Array.isArray(cb.fanout.outputs)) for (const o of cb.fanout.outputs) if (o) add(o.antennaId); }
   return rack.antennas.filter((a) => !used.has(a.id));
 }

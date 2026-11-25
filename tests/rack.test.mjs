@@ -52,10 +52,37 @@ test('three mics on one splitter with A and B antennas, a fourth on a dual-chann
   renameRackItem(s, 'splitters', sp2, 'Split 9'); assert.equal(s.getScene().rack.splitters[0].name, 'Split 9');
 });
 
-test('a mic added after the rack exists gets its own receiver', () => {
+test('a mic added after the rack exists stays on its own: no receiver, no antenna', () => {
   const s = mk(); adoptRack(s);
-  s.update((d) => { const c = structuredClone(d.links[0]); c.id = 'newmic'; c.name = 'Extra'; d.links.push(c); });
-  assert.ok(s.getScene().rack.receivers.some((r) => r.channels.some((c) => c.linkId === 'newmic')));
+  const nAnt = s.getScene().rack.antennas.length, nRx = s.getScene().rack.receivers.length;
+  s.update((d) => { const c = structuredClone(d.links[0]); c.id = 'newmic'; c.name = 'Extra'; c.freqMHz = 611.125; d.links.push(c); });
+  const rk = s.getScene().rack;
+  assert.ok(!rk.receivers.some((r) => r.channels.some((c) => c.linkId === 'newmic')));
+  assert.equal(rk.antennas.length, nAnt); assert.equal(rk.receivers.length, nRx);
+});
+
+test('a mic and a receiver channel pair only when tuned to exactly the same frequency', () => {
+  const s = mk(); adoptRack(s);
+  s.update((d) => { const c = structuredClone(d.links[0]); c.id = 'newmic'; c.freqMHz = 611.125; d.links.push(c); d.rack.receivers.push({ id: 'rrx', name: 'Rx 9', channels: [{ id: 'rcx', linkId: null, freqMHz: 611.125, antA: d.rack.antennas[0].id, antB: null }] }); });
+  const ch = () => s.getScene().rack.receivers.find((r) => r.id === 'rrx').channels[0];
+  assert.equal(ch().linkId, 'newmic');
+  s.update((d) => { d.rack.receivers.find((r) => r.id === 'rrx').channels[0].freqMHz = 611.126; });
+  assert.equal(ch().linkId, null); // a near miss is not a match, and nothing is deleted
+  assert.ok(s.getScene().links.some((l) => l.id === 'newmic'));
+  s.update((d) => { d.rack.receivers.find((r) => r.id === 'rrx').channels[0].freqMHz = 611.125; });
+  assert.equal(ch().linkId, 'newmic');
+});
+
+test('receiver settings live on the receiver: an edit on the matched link goes to the device, and a different receiver brings its own', () => {
+  const s = mk(); adoptRack(s);
+  const first = () => s.getScene().links.find((l) => l.kind === 'mic'), ch = (id) => s.getScene().rack.receivers.flatMap((r) => r.channels).find((c) => c.id === id);
+  const cid = s.getScene().rack.receivers.flatMap((r) => r.channels).find((c) => c.linkId === first().id).id;
+  s.update((d) => { d.links.find((l) => l.id === first().id).rx.sensitivityDbm = -101; });
+  assert.equal(ch(cid).rx.sensitivityDbm, -101);
+  s.update((d) => { d.rack.receivers.flatMap((r) => r.channels).find((c) => c.id === cid).rx.sensitivityDbm = -99; });
+  assert.equal(first().rx.sensitivityDbm, -99); // the link shows what its receiver says
+  s.update((d) => { d.rack.receivers.flatMap((r) => r.channels).find((c) => c.id === cid).freqMHz = 650; }); // unmatched now: the link keeps its last shown value, nothing is copied back
+  assert.equal(ch(cid).linkId, null);
 });
 
 import { addRackCombiner, setCombiner, connectTxChannel, moveTxChannel, addRackAntenna } from '../js/actionsRack.js';

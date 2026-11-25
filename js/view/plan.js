@@ -44,7 +44,7 @@ import { movePerson } from '../actions.js';
 import { offsetFromPack, linkOwners } from '../model/people.js';
 import { updateOverheadPanel } from '../actionsAreas.js';
 import { setRackAntenna } from '../actionsRack.js';
-import { unattachedAntennas } from '../model/rack.js';
+import { unattachedAntennas, feedAntenna } from '../model/rack.js';
 
 const LOBE_STEP = 6; // degrees
 
@@ -160,6 +160,7 @@ export function createPlanView(canvas, store) {
     for (const link of scene.links) for (const role of ['tx', 'rx']) {
       if (role === 'rx' && link.rx.sharedAntennaOf !== undefined) continue; // a shared receive antenna is drawn once, with its source link
       if (frameHidden(link, role)) continue; // bundled into the person's icon
+      if (!endPlaced(scene, link, role)) continue; // no antenna feeds this end: there is nothing to draw or delete there
       const e = link[role], p = vp.worldToScreen(e.pos), tw = ctx.measureText(e.name).width;
       placer.reserve({ x: p.x - tw / 2 - 2, y: p.y + Math.max(22, 0.35 * vp.pxPerM + 12) - 12, w: tw + 4, h: 16 });
     }
@@ -268,7 +269,15 @@ export function createPlanView(canvas, store) {
     ctx.beginPath(); ctx.arc(x, y, reducedMotion() ? 17 : 15 + 2 * a, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
   }
 
+  /** Is this end of the link a real place on the plan? With a rack, a mic's receive end and an IEM's transmit end exist only where a rack antenna feeds them. */
+  function endPlaced(scene, link, role) {
+    if (!scene.rack) return true;
+    if (role === 'rx') return link.kind !== 'mic' || !!feedAntenna(scene.rack, link.id, 'rx');
+    return link.kind !== 'iem' || link.txOf !== undefined || !!feedAntenna(scene.rack, link.id, 'tx');
+  }
+
   function drawLinkLine(ctx, th, scene, link, isActive, w) {
+    if (!endPlaced(scene, link, 'tx') || !endPlaced(scene, link, 'rx')) return; // an end with no antenna: no ray to draw
     const res = solveCached(scene, link);
     const t = vp.worldToScreen(link.tx.pos), r = vp.worldToScreen(link.rx.pos);
     const col = statusColor(th, res?.status);
@@ -313,7 +322,7 @@ export function createPlanView(canvas, store) {
   }
 
   function drawAntennaB(ctx, th, link, sel) {
-    const inf = rxInfo(link); if (!inf.B) return;
+    const inf = rxInfo(link); if (!inf.B || !endPlaced(store.getScene(), link, 'rx')) return;
     const p = vp.worldToScreen(inf.B.pos);
     const eff = effectiveAntennaB(link), az = eff.orientation.az;
     const antRef = { type: eff.type, gainDbi: eff.gainDbi, orientation: eff.orientation };
@@ -357,6 +366,7 @@ export function createPlanView(canvas, store) {
   function drawLinkEnds(ctx, th, scene, link, sel, w) {
     const personIsTx = link.kind !== 'iem';
     for (const role of ['tx', 'rx']) {
+      if (!endPlaced(scene, link, role)) continue;
       if (role === 'rx' && link.rx.sharedAntennaOf !== undefined) continue; // drawn once, with the link that owns the antenna; its line still ends here
       if (frameHidden(link, role)) continue; // bundled into the person's icon
       const e = link[role], p = vp.worldToScreen(e.pos);

@@ -152,6 +152,9 @@ test('every radio item can be removed, leaving a valid empty plan', async () => 
   assert.equal(st.getScene().links[0].txOf, undefined);
   assert.equal(removeLink(st, extra), true);
   assert.equal(st.getScene().links.length, 0);
+  assert.ok(st.getScene().rack.receivers.length > 0, 'receivers are their own items: they outlast their mics');
+  const { removeReceiverChannel } = await import('../js/actionsRack.js');
+  for (const u of [...st.getScene().rack.receivers]) for (const c of [...u.channels]) removeReceiverChannel(st, c.id);
   assert.equal(st.getScene().rack.receivers.length, 0, 'no empty receivers left in the rack');
   assert.deepEqual(validateScene(st.getScene()).errors, [], 'empty plan validates');
   for (const x of [...st.getScene().rack.antennas]) removeRackItem(st, 'antennas', x.id);
@@ -171,7 +174,7 @@ test('newScene gives an empty valid plan with the stage, keeps units, and undoes
   st.undo(); assert.equal(st.getScene().links.length, 1);
 });
 
-test('a rack-fed antenna can be moved by editing the link end, and a new mic reuses the rack antenna', async () => {
+test('a rack-fed antenna can be moved by editing the link end, and a receiver tuned to a new mic listens on the rack antenna', async () => {
   const { adoptRack } = await import('../js/actionsRack.js');
   const { addLink } = await import('../js/actions.js');
   const st = createStore(createDefaultScene()); adoptRack(st);
@@ -183,7 +186,10 @@ test('a rack-fed antenna can be moved by editing the link end, and a new mic reu
   const id = addLink(st, 'mic');
   assert.ok(id);
   assert.equal(st.getScene().rack.antennas.length, n, 'no extra antenna for the new mic');
-  assert.equal(st.getScene().links.find((l) => l.id === id).rx.pos.x, x0 + 2, 'the new mic listens on the same antenna');
+  const { addReceiver } = await import('../js/actionsRack.js');
+  assert.equal(st.getScene().rack.receivers.flatMap((u) => u.channels).some((c) => c.linkId === id), false, 'a new mic has no receiver yet');
+  addReceiver(st, { freqMHz: st.getScene().links.find((l) => l.id === id).freqMHz, antA: st.getScene().rack.antennas[0].id });
+  assert.equal(st.getScene().links.find((l) => l.id === id).rx.pos.x, x0 + 2, 'the mic now listens on the same antenna');
 });
 
 test('a new IEM is added without an antenna of its own', async () => {
@@ -194,8 +200,11 @@ test('a new IEM is added without an antenna of its own', async () => {
   const n = st.getScene().rack.antennas.length;
   const second = addLink(st, 'iem'); assert.ok(second);
   assert.equal(st.getScene().rack.antennas.length, n, 'no extra antenna for the second IEM');
-  const tx = st.getScene().rack.transmitters.flatMap((t) => t.channels).find((c) => c.linkId === second);
-  assert.ok(tx && !tx.antennaId, 'the second IEM has a transmitter channel and no antenna');
+  assert.equal(st.getScene().rack.transmitters.flatMap((t) => t.channels).some((c) => c.linkId === second), false, 'a new IEM has no transmitter yet: that is another item, paired by frequency');
+  const { addTransmitter } = await import('../js/actionsRack.js');
+  const cid = addTransmitter(st, { freqMHz: st.getScene().links.find((l) => l.id === second).freqMHz });
+  const tx = st.getScene().rack.transmitters.flatMap((t) => t.channels).find((c) => c.id === cid);
+  assert.ok(tx && tx.linkId === second && !tx.antennaId, 'the transmitter pairs with it by frequency and has no antenna');
 });
 
 test('adding a mic adds no antenna and removing a mic keeps its antenna', async () => {

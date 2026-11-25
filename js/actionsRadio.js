@@ -2,7 +2,7 @@
 // in one step. Each call is one undo step: the actions it reuses share one coalesce key (batch()).
 import { addLink, assignMic, assignIem, assignExtraMic } from './actions.js';
 import { adoptRack, rackDraft } from './actionsRack.js';
-import { channelRoute, canLoopReceiver, RACK_LIMITS } from './model/rack.js';
+import { channelRoute, canLoopReceiver, RACK_LIMITS, rxDevice, txDevice } from './model/rack.js';
 import { nextFreeFrequency } from './model/radio-items.js';
 import { newId } from './model/scene.js';
 import { PEOPLE_LIMITS } from './model/people.js';
@@ -14,7 +14,7 @@ export function batch(store) {
   return { ...store, update: (fn, o = {}) => store.update(fn, { ...o, coalesce: key }) };
 }
 
-const chanOf = (units, linkId) => { for (const r of units || []) for (const c of r.channels || []) if (c.linkId === linkId) return { r, c }; return null; };
+const chanOf = (units, linkId) => { for (const r of units || []) for (const c of r.channels || []) if (c.linkId === linkId || c.id === linkId) return { r, c }; return null; };
 const primaries = (scene, kind) => scene.links.filter((l) => l.kind === kind && l.txOf === undefined);
 const COPY_KEYS = ['modulation', 'audio', 'mpx'];
 
@@ -32,28 +32,40 @@ function copyGear(n, r) {
   if (n.kind === 'iem') delete n.branches; // rebuilt from tx and chain by syncScene
 }
 
-/** Feed the new link's rack channel like the reference one (same splitter or antennas; same combiner or antenna), in the unit asked for, and drop the antenna the rack made for it. */
-function placeChannel(d, id, ref, unitId) {
-  const rack = rackDraft(d), mic = d.links.find((l) => l.id === id).kind === 'mic';
-  const units = mic ? rack.receivers : rack.transmitters, own = chanOf(units, id); if (!own) return;
-  const target = unitId && units.find((u) => u.id === unitId && u.channels.length < RACK_LIMITS.maxChannels && u !== own.r);
-  const refCh = (target && target.channels[0] && { r: target, c: target.channels[0] }) || (ref && chanOf(units, ref.id));
-  if (target) { own.r.channels = own.r.channels.filter((c) => c !== own.c); target.channels.push(own.c); if (!own.r.channels.length) { if (mic) rack.receivers = rack.receivers.filter((u) => u !== own.r); else rack.transmitters = rack.transmitters.filter((u) => u !== own.r); } }
+/** A new mic gets a receiver channel tuned to its frequency, fed like the reference mic's one (same splitter or antennas), in the unit asked for or a unit of its own. Matching is by frequency, so this is a convenience, not a link. */
+function addMicReceiver(d, id, ref, unitId) {
+  const rack = rackDraft(d), nl = d.links.find((l) => l.id === id); if (!nl) return;
+  if (rack.byFreq !== true) rack.byFreq = true;
+  const refCh = ref && chanOf(rack.receivers, ref.id);
+  const ch = { id: newId('rc'), linkId: null, freqMHz: nl.freqMHz, rx: rxDevice(nl.rx), splitterId: null, antA: null, antB: null };
   if (refCh) {
-    if (mic) {
-      const rt = channelRoute(rack, refCh.c, refCh.r), sp = rt.splitter;
-      if (target) { own.c.splitterId = refCh.c.splitterId || null; if (!own.c.splitterId) { own.c.antA = refCh.c.antA || null; own.c.antB = refCh.c.antB || null; } else { delete own.c.antA; delete own.c.antB; } }
-      else if (sp) { own.c.splitterId = sp.id; delete own.c.antA; delete own.c.antB; }
-      else { own.c.splitterId = null; own.c.antA = rt.antA ? rt.antA.id : null; own.c.antB = rt.antB ? rt.antB.id : null; }
-    } else {
-      // a combiner is shared; an antenna wired straight to the reference transmitter is not (two transmitters cannot share one antenna without a combiner)
-      if (refCh.c.combinerId) { own.c.combinerId = refCh.c.combinerId; delete own.c.antennaId; }
-      if (refCh.c.isolator) { own.c.isolator = true; if (Number.isFinite(refCh.c.isolatorDb)) own.c.isolatorDb = refCh.c.isolatorDb; }
-    }
+    const rt = channelRoute(rack, refCh.c, refCh.r);
+    if (rt.splitter) { ch.splitterId = rt.splitter.id; delete ch.antA; delete ch.antB; }
+    else { ch.antA = rt.antA ? rt.antA.id : null; ch.antB = rt.antB ? rt.antB.id : null; }
   }
-  const made = `${mic ? 'ra' : 'ta'}_${id}`, still = (aid) => [...rack.receivers, ...rack.transmitters].some((u) => u.channels.some((c) => c.antA === aid || c.antB === aid || c.antennaId === aid))
-    || rack.splitters.some((s) => s.antA === aid || s.antB === aid) || rack.combiners.some((c) => c.antennaId === aid || (c.fanout && c.fanout.outputs.some((o) => o && o.antennaId === aid)));
-  if (refCh && !still(made)) rack.antennas = rack.antennas.filter((a) => a.id !== made);
+  const target = unitId && rack.receivers.find((u) => u.id === unitId && u.channels.length < RACK_LIMITS.maxChannels);
+  if (target) target.channels.push(ch);
+  else rack.receivers.push({ id: newId('rr'), name: `Rx ${rack.receivers.length + 1}`, channels: [ch] });
+}
+
+/** A new IEM gets a transmitter channel tuned to its frequency, through the reference IEM's combiner (an antenna wired straight to the reference is not shared: the user wires one), in the unit asked for or a unit of its own. */
+function addIemTransmitter(d, id, ref, unitId) {
+  const rack = rackDraft(d), nl = d.links.find((l) => l.id === id); if (!nl) return;
+  if (rack.byFreq !== true) rack.byFreq = true;
+  const refCh = ref && chanOf(rack.transmitters, ref.id);
+  const ch = { id: newId('tc'), linkId: null, freqMHz: nl.freqMHz, tx: txDevice(nl.tx), combinerId: null, antennaId: null };
+  if (refCh) {
+    if (refCh.c.combinerId) ch.combinerId = refCh.c.combinerId;
+    if (refCh.c.isolator) { ch.isolator = true; if (Number.isFinite(refCh.c.isolatorDb)) ch.isolatorDb = refCh.c.isolatorDb; }
+  }
+  const target = unitId && rack.transmitters.find((u) => u.id === unitId && u.channels.length < RACK_LIMITS.maxChannels);
+  if (target) target.channels.push(ch);
+  else rack.transmitters.push({ id: newId('rt'), name: `IEM Tx ${rack.transmitters.length + 1}`, channels: [ch] });
+}
+
+/** Give the new link its device: a receiver channel for a mic, a transmitter channel for an IEM. Matching is by frequency, so this is a convenience, not a link. */
+function placeChannel(d, id, ref, unitId) {
+  if (d.links.find((l) => l.id === id).kind === 'mic') addMicReceiver(d, id, ref, unitId); else addIemTransmitter(d, id, ref, unitId);
 }
 
 /**

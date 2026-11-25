@@ -1,7 +1,7 @@
 // Add bar of the Radio items list: one-click adds (a mic or IEM copies the selected or last one: same model, same feed, next clean frequency),
 // and "Add several" for N mics or IEMs on a chosen receiver or transmitter unit and person, as one undo step.
 import { addReceiverFor } from '../actions.js';
-import { addRackAntenna, addRackSplitter, addRackCombiner } from '../actionsRack.js';
+import { addRackAntenna, addRackSplitter, addRackCombiner, addReceiver, addTransmitter } from '../actionsRack.js';
 import { addRadioChannels } from '../actionsRadio.js';
 import { activeLink } from '../view/util.js';
 import { RACK_LIMITS } from '../model/rack.js';
@@ -23,6 +23,8 @@ export function addBar({ store, say, reveal }) {
   };
   quick.append(
     btn('Add mic', () => addLinks('mic', { refLinkId: refOf('mic') }), 'Another microphone: copies the selected (or last) mic\'s model and receive feed, at the next clean frequency'),
+    btn('Add receiver', () => { const id = addReceiver(store); if (id) { const c = store.getScene().rack.receivers.flatMap((u) => u.channels).find((x) => x.id === id); reveal([`receiver:${c ? c.linkId || c.id : id}`]); } say(id ? 'Receiver added, tuned to a mic that had none (else 600 MHz). Pick its antennas, and tune it to the exact frequency of a mic to pair them.' : 'Could not add a receiver (limit reached).'); }, 'A receiver of its own: it hears the mic tuned to exactly its frequency'),
+    btn('Add transmitter', () => { const id = addTransmitter(store); if (id) { const c = store.getScene().rack.transmitters.flatMap((u) => u.channels).find((x) => x.id === id); reveal([`transmitter:${c ? c.linkId || c.id : id}`]); } say(id ? 'Transmitter added, tuned to a bodypack that had none. Pick its combiner or antenna, and tune it to the exact frequency of a bodypack to pair them.' : 'Could not add a transmitter (limit reached).'); }, 'An IEM transmitter of its own: it sends to the bodypack tuned to exactly its frequency'),
     btn('Add IEM', () => addLinks('iem', { refLinkId: refOf('iem') }), 'Another in-ear mix: copies the selected (or last) IEM transmitter\'s model and combiner, at the next clean frequency'),
     btn('Add bodypack', () => {
       const sc = store.getScene(), act = activeLink(sc, store.getSelection()), prim = sc.links.filter((q) => q.kind === 'iem' && q.txOf === undefined);

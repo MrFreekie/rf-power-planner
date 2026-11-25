@@ -15,7 +15,7 @@ import { getCoordRegion } from './region.js';
 import { setLinkFocus } from '../view/linkFocus.js';
 import { getLinkDock, subscribeLinkDock } from './linkDock.js';
 import { peopleLinkOwners, addReceiverFor, removeLink } from '../actions.js';
-import { removeRackItem, removeCombiner } from '../actionsRack.js';
+import { removeRackItem, removeCombiner, removeReceiverChannel, removeTxChannel } from '../actionsRack.js';
 import { duplicateRadioLink, moveRadioItem } from '../actionsRadio.js';
 import { makeEditors, runLossDb } from './rackEditors.js';
 import { addBar } from './rackAddBar.js';
@@ -89,6 +89,7 @@ export function mountRack({ container, store }) {
     const warns = [...rackWarnings(scene, bwOf, { erpOf: (l) => erpCheck(l, getCoordRegion()) }), ...radioChecks(scene)], warnBy = new Map();
     const dcOf = new Map(); // bias warnings from the link maths, shown on the receiver and on the antennas that feed it
     for (const l of scene.links) if (l.kind === 'mic') { const r = resOf(l.id); const ws = ((r && r.warnings) || []).filter((t) => /bias|DC/i.test(t)); if (ws.length) dcOf.set(l.id, ws); }
+    const chanFind = (id) => { for (const r of rack.receivers || []) { const c = r.channels.find((x) => x.linkId === id || x.id === id); if (c) return { r, c }; } return null; };
     const chanOf = (lid) => { for (const r of rack.receivers || []) { const c = r.channels.find((x) => x.linkId === lid); if (c) return { r, c }; } return null; };
     for (const [lid, ws] of dcOf) {
       const m = chanOf(lid); if (!m) continue;
@@ -119,14 +120,17 @@ export function mountRack({ container, store }) {
       mic: (it) => { const l = linkOf(it.id); return [l.name, [freqChip(l), modelChip(l), whoChip(l, 'Worn or held by'), marginChip(l.id)]]; },
       bodypack: (it) => { const l = linkOf(it.id); return [l.name, [freqChip(l), whoChip(l, 'Worn by'), marginChip(l.id)]]; },
       receiver: (it) => {
-        const l = linkOf(it.id), m = chanOf(it.id); if (!m) return [l.name, []];
+        const m = chanFind(it.id), l = linkOf(it.linkId || it.id); if (!m) return [l ? l.name : it.text, []];
+        if (!l) { const up0 = m.r.loopFrom && rack.receivers.find((x) => x.id === m.r.loopFrom), sp0 = m.c.splitterId && rack.splitters.find((s) => s.id === m.c.splitterId); return [`${m.c.freqMHz} MHz receiver`, [chip(`${m.c.freqMHz.toFixed(3)} MHz`, 'Tuned to'), chip('no mic on this frequency', 'No mic is tuned to exactly this frequency', 'bad'), chip(m.r.name, 'Receiver unit'), chip(up0 ? `loop from ${up0.name}` : sp0 ? `from ${sp0.name}` : `from ${[antName(m.c.antA), antName(m.c.antB)].filter(Boolean).join(' + ') || 'no antenna'}`, 'Antenna feed')]]; }
         const up = m.r.loopFrom && rack.receivers.find((x) => x.id === m.r.loopFrom), sp = m.c.splitterId && rack.splitters.find((s) => s.id === m.c.splitterId);
         const feed = up ? `loop from ${up.name}` : sp ? `from ${sp.name}` : `from ${[antName(m.c.antA), antName(m.c.antB)].filter(Boolean).join(' + ') || 'no antenna'}`;
         return [l.name, [freqChip(l), chip(`${m.r.name}${m.r.channels.length > 1 ? ` ch ${m.r.channels.indexOf(m.c) + 1}` : ''}`, 'Receiver unit and channel'), chip(feed, 'Antenna feed', up || sp || m.c.antA ? '' : 'bad'), marginChip(l.id)]];
       },
       transmitter: (it) => {
-        const l = linkOf(it.id); let m = null; for (const t of rack.transmitters || []) { const c = t.channels.find((x) => x.linkId === it.id); if (c) m = { r: t, c }; }
-        if (!m) return [l.name, []];
+        let m = null; for (const t of rack.transmitters || []) { const c = t.channels.find((x) => x.linkId === it.id || x.id === it.id); if (c) m = { r: t, c }; }
+        const l = linkOf(m && m.c.linkId ? m.c.linkId : it.id);
+        if (!m) return [l ? l.name : it.text, []];
+        if (!l) { const cb0 = m.c.combinerId && rack.combiners.find((x) => x.id === m.c.combinerId); return [`${m.c.freqMHz} MHz transmitter`, [chip(`${m.c.freqMHz.toFixed(3)} MHz`, 'Tuned to'), chip('no bodypack on this frequency', 'No bodypack is tuned to exactly this frequency', 'bad'), chip(m.r.name, 'Transmitter unit'), chip(cb0 ? `via ${cb0.name}` : antName(m.c.antennaId) ? `to ${antName(m.c.antennaId)}` : 'no antenna', 'Output path', cb0 || antName(m.c.antennaId) ? '' : 'bad')]]; }
         const cb = m.c.combinerId && rack.combiners.find((x) => x.id === m.c.combinerId), path = cb ? `via ${cb.name}` : antName(m.c.antennaId) ? `to ${antName(m.c.antennaId)}` : 'no antenna';
         return [l.name, [freqChip(l), chip(formatPower(l.tx.powerDbm, pu), 'Transmit power'), chip(`${m.r.name}${m.r.channels.length > 1 ? ` ch ${m.r.channels.indexOf(m.c) + 1}` : ''}`, 'Transmitter unit and channel'), chip(path, 'Output path', cb || antName(m.c.antennaId) ? '' : 'bad'), marginChip(l.id)]];
       },
@@ -154,17 +158,18 @@ export function mountRack({ container, store }) {
       },
     };
     const editors = makeEditors({ store, scene, rack, say, linkName, borrow, isActive: (id) => !!(act && act.id === id && dock) });
-    const lastRxAnt = rack.antennas.filter((x) => x.role !== 'tx').length < 2;
     const tools = (kind, id, box) => {
       const row = el('div', 'rf-tools'), name = (facts[kind] ? facts[kind]({ id })[0] : id);
       row.append(btn('Up', () => moveRadioItem(store, kind, id, -1), `Move ${name} up the list`), btn('Down', () => moveRadioItem(store, kind, id, 1), `Move ${name} down the list`));
-      const l = LINK_KINDS.includes(kind) && linkOf(id);
+      const l = kind !== 'receiver' && kind !== 'transmitter' && LINK_KINDS.includes(kind) && linkOf(id);
+      if (kind === 'transmitter') { const m = (rack.transmitters || []).flatMap((t) => t.channels).find((c) => c.linkId === id || c.id === id); if (m) row.append(btn('Remove', () => { removeTxChannel(store, m.id); say(`Removed the transmitter on ${m.freqMHz} MHz. A bodypack it served stays on the plan, with no transmitter. Undo brings it back.`); }, 'Removes this transmitter channel; bodypacks, antennas and combiners stay', 'danger')); }
+      if (kind === 'receiver') { const m = chanFind(id); if (m) row.append(btn('Remove', () => { removeReceiverChannel(store, m.c.id); say(`Removed the receiver on ${m.c.freqMHz} MHz. A mic it heard stays on the plan, with no receiver. Undo brings it back.`); }, 'Removes this receiver channel; mics, antennas and splitters stay', 'danger')); }
       if (l && l.txOf === undefined && (kind === 'mic' || kind === 'transmitter')) row.append(btn('Duplicate', () => { const nid = duplicateRadioLink(store, id); if (nid) { const n = store.getScene().links.find((q) => q.id === nid); say(`Added ${n.name} at ${n.freqMHz.toFixed(3)} MHz, a copy of ${l.name}.`); reveal([`${kind}:${nid}`], n.tx.id); } else say('Could not duplicate (link limit reached).'); }, `A copy of ${name} at the next clean frequency, fed the same way`));
       if (l && l.txOf !== undefined) row.append(btn('Duplicate', () => { const nid = addReceiverFor(store, l.txOf); say(nid ? `Added another ${l.kind === 'iem' ? 'bodypack' : 'receiver'} on ${linkName(l.txOf)}.` : 'Could not add (link limit reached).'); if (nid) reveal([`${kind}:${nid}`]); }, `Another ${l.kind === 'iem' ? 'bodypack' : 'receiver'} listening to ${linkName(l.txOf)}`));
       if (l) {
         row.append(btn('Remove', () => { if (removeLink(store, id)) say(`Removed ${name}. Undo brings it back.`); }, 'Removes it from the plan; people and walk-test readings that used it are cleared', 'danger'));
       }
-      if (kind === 'antenna' || kind === 'txantenna') { const rm = btn('Remove', () => removeRackItem(store, 'antennas', id), kind === 'antenna' && lastRxAnt ? 'The last receive antenna cannot be removed' : 'Whatever it fed is left with no antenna', 'danger'); rm.disabled = kind === 'antenna' && lastRxAnt; row.append(rm); }
+      if (kind === 'antenna' || kind === 'txantenna') row.append(btn('Remove', () => removeRackItem(store, 'antennas', id), 'Whatever it fed is left with no antenna', 'danger'));
       if (kind === 'splitter') row.append(btn('Remove', () => removeRackItem(store, 'splitters', id), 'Receivers on it connect straight to its antennas', 'danger'));
       if (kind === 'combiner') row.append(btn('Remove', () => removeCombiner(store, id), 'Its channels go straight to the antenna', 'danger'));
       box.append(row);

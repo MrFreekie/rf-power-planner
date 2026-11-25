@@ -1,8 +1,8 @@
 // Receive rack edits (antennas, splitters, receivers and their connections). Each runs as one undo step through store.update.
 // The first edit adopts the links as they are into scene.rack (deriveRack); from then on the rack drives each mic link's receive path.
-import { deriveRack, RACK_LIMITS, canFeedSplitter, canLoopReceiver, loopHops } from './model/rack.js';
+import { deriveRack, RACK_LIMITS, canFeedSplitter, canLoopReceiver, loopHops, rxDevice, txDevice } from './model/rack.js';
 import { ANTENNAS, allowedPolarisations, defaultPolarisation } from './model/library.js';
-import { newId, createChainItem, createChainItemFromPreset } from './model/scene.js';
+import { newId, createChainItem, createChainItemFromPreset, createDefaultLink } from './model/scene.js';
 
 const LEGACY_SPLIT = (it) => !!it && (it.presetId === 'splitter-2' || it.presetId === 'active-splitter-4') && !it.rackSplitter;
 
@@ -18,7 +18,8 @@ function adopt(d) {
 }
 const isTx = (rack, id) => { const a = rack.antennas.find((x) => x.id === id); return !!a && a.role === 'tx'; }; // receive and transmit antennas are separate pools
 const hasRole = (rack, id, tx) => !id || (rack.antennas.some((x) => x.id === id) && isTx(rack, id) === tx);
-const chan = (rack, linkId) => { for (const r of rack.receivers) for (const c of r.channels) if (c.linkId === linkId) return { r, c }; return null; };
+// a receiver channel is found by its mic's id or by its own id (an unpaired channel has only its own)
+const chan = (rack, id) => { for (const r of rack.receivers) for (const c of r.channels) if (c.linkId === id || c.id === id) return { r, c }; return null; };
 
 /** rackDraft(draft) -> draft.rack, adopting the links into a rack first when there is none (for other action files working inside store.update). */
 export const rackDraft = adopt;
@@ -119,7 +120,8 @@ export function setRackAntenna(store, id, patch, opts) {
   return store.update((d) => { const a = adopt(d).antennas.find((x) => x.id === id); if (!a) return; if (patch.pos) a.pos = { ...a.pos, ...patch.pos }; if (patch.antenna) a.antenna = { ...a.antenna, ...patch.antenna }; if (patch.load !== undefined) { if (patch.load) a.load = true; else delete a.load; } }, opts);
 }
 
-const txChan = (rack, linkId) => { for (const t of rack.transmitters) for (const c of t.channels) if (c.linkId === linkId) return { r: t, c }; return null; };
+// a transmitter channel is found by its bodypack link's id or by its own id (an unpaired channel has only its own)
+const txChan = (rack, id) => { for (const t of rack.transmitters) for (const c of t.channels) if (c.linkId === id || c.id === id) return { r: t, c }; return null; };
 
 /** addRackCombiner(store, { type?, name?, cableM?, cableType? }) -> id: an IEM transmit combiner, optionally with a cable run to its antenna. */
 export function addRackCombiner(store, { type = 'passive', name, cableM = 0, cableType = 'rg58' } = {}) {
@@ -303,3 +305,74 @@ export const setReceiverLoopLoss = (store, receiverId, db) => store.update((d) =
   const r = adopt(d).receivers.find((x) => x.id === receiverId); if (!r) return;
   const v = Number(db); if (db === null || db === '' || !Number.isFinite(v)) delete r.loopLossDb; else r.loopLossDb = Math.min(20, Math.max(0, v));
 });
+
+/**
+ * addReceiver(store, { freqMHz?, unitId?, name?, antA? }) -> channel id. A receiver is its own item: it is tuned to a frequency and listens through the antenna it is given (none by default).
+ * Without a frequency it takes that of the first mic nobody listens to yet, so adding one next to a lone mic pairs them; else 600 MHz. unitId adds a further channel to that receiver unit.
+ */
+export function addReceiver(store, { freqMHz, unitId, name, antA = null } = {}) {
+  let id = null;
+  store.update((d) => {
+    const rack = adopt(d); if (rack.byFreq !== true) rack.byFreq = true;
+    const linked = new Set(rack.receivers.flatMap((r) => r.channels.map((c) => c.linkId)).filter(Boolean));
+    const lone = d.links.find((l) => l.kind === 'mic' && l.txOf === undefined && !linked.has(l.id));
+    const f = Number.isFinite(freqMHz) && freqMHz > 0 ? freqMHz : lone ? lone.freqMHz : 600;
+    let unit = unitId ? rack.receivers.find((r) => r.id === unitId) : null;
+    if (unit && unit.channels.length >= RACK_LIMITS.maxChannels) return;
+    if (!unit) { if (rack.receivers.length >= RACK_LIMITS.maxReceivers) return; unit = { id: newId('rr'), name: name || `Rx ${rack.receivers.length + 1}`, channels: [] }; rack.receivers.push(unit); }
+    if (antA && !hasRole(rack, antA, false)) antA = null;
+    id = newId('rc');
+    unit.channels.push({ id, linkId: null, freqMHz: Math.round(f * 1e6) / 1e6, rx: rxDevice(createDefaultLink('mic').rx), splitterId: null, antA: antA || null, antB: null });
+  });
+  return id;
+}
+
+/** setChannelFreq(store, channelId, freqMHz): retune a receiver channel. It pairs with whichever mic is on exactly that frequency; nothing else changes. */
+export function setChannelFreq(store, channelId, freqMHz) {
+  if (!Number.isFinite(freqMHz) || freqMHz <= 0 || freqMHz > 100000) return false;
+  return store.update((d) => { for (const r of adopt(d).receivers) { const c = r.channels.find((x) => x.id === channelId); if (c) c.freqMHz = Math.round(freqMHz * 1e6) / 1e6; } });
+}
+
+/** removeReceiverChannel(store, channelId): the receiver channel goes (its unit too when it was the last); a mic that listened to it stays, unmatched. Antennas and splitters stay where they are. */
+export function removeReceiverChannel(store, channelId) {
+  return store.update((d) => {
+    const rack = adopt(d);
+    for (const r of rack.receivers) r.channels = r.channels.filter((c) => c.id !== channelId);
+    rack.receivers = rack.receivers.filter((r) => r.channels.length);
+  });
+}
+
+/**
+ * addTransmitter(store, { freqMHz?, unitId?, name?, antennaId? }) -> channel id. An IEM transmitter is its own item: tuned to a frequency, with no antenna until the user wires one.
+ * Without a frequency it takes that of the first IEM bodypack nobody transmits to; else the default IEM frequency. unitId adds a further channel to that unit.
+ */
+export function addTransmitter(store, { freqMHz, unitId, name, antennaId = null } = {}) {
+  let id = null;
+  store.update((d) => {
+    const rack = adopt(d); if (rack.byFreq !== true) rack.byFreq = true;
+    const sent = new Set(rack.transmitters.flatMap((t) => t.channels.map((c) => c.linkId)).filter(Boolean));
+    const lone = d.links.find((l) => l.kind === 'iem' && l.txOf === undefined && !sent.has(l.id)), dflt = createDefaultLink('iem');
+    const f = Number.isFinite(freqMHz) && freqMHz > 0 ? freqMHz : lone ? lone.freqMHz : dflt.freqMHz;
+    let unit = unitId ? rack.transmitters.find((t) => t.id === unitId) : null;
+    if (unit && unit.channels.length >= RACK_LIMITS.maxChannels) return;
+    if (!unit) { if (rack.transmitters.length >= RACK_LIMITS.maxTransmitters) return; unit = { id: newId('rt'), name: name || `IEM Tx ${rack.transmitters.length + 1}`, channels: [] }; rack.transmitters.push(unit); }
+    id = newId('tc');
+    unit.channels.push({ id, linkId: null, freqMHz: Math.round(f * 1e6) / 1e6, tx: txDevice(dflt.tx), combinerId: null, antennaId: antennaId && hasRole(rack, antennaId, true) ? antennaId : null });
+  });
+  return id;
+}
+
+/** setTxChannelFreq(store, channelId, freqMHz): retune an IEM transmitter channel. It pairs with whichever bodypack link is on exactly that frequency. */
+export function setTxChannelFreq(store, channelId, freqMHz) {
+  if (!Number.isFinite(freqMHz) || freqMHz <= 0 || freqMHz > 100000) return false;
+  return store.update((d) => { for (const t of adopt(d).transmitters) { const c = t.channels.find((x) => x.id === channelId); if (c) c.freqMHz = Math.round(freqMHz * 1e6) / 1e6; } });
+}
+
+/** removeTxChannel(store, channelId): the transmitter channel goes (its unit too when it was the last); a bodypack it served stays, unmatched. Antennas and combiners stay. */
+export function removeTxChannel(store, channelId) {
+  return store.update((d) => {
+    const rack = adopt(d);
+    for (const t of rack.transmitters) t.channels = t.channels.filter((c) => c.id !== channelId);
+    rack.transmitters = rack.transmitters.filter((t) => t.channels.length);
+  });
+}

@@ -13,7 +13,7 @@ import { addReceiverFor, assignMic, assignIem, assignExtraMic, removeExtraMic, p
 import {
   renameRackItem, setSplitterType, setSplitterInput, connectChannel, moveChannel, setRackAntenna,
   setCombiner, setSplitterPorts, setRxBias, setRackAntennaType, setRackAntennaAim, setRackAntennaDetail, addAntennaChainItem, setAntennaChainItem, removeAntennaChainItem, setAntennaZones, connectTxChannel, moveTxChannel,
-  setCombinerFanout, setFanoutOutput, setTxIsolator, setSplitterFeed, setReceiverLoopLoss,
+  setCombinerFanout, setFanoutOutput, setTxIsolator, setSplitterFeed, setReceiverLoopLoss, setChannelFreq, setTxChannelFreq,
 } from '../actionsRack.js';
 import { setChannelFeed, feedValue } from '../actionsRadio.js';
 import { el, field, select, text, num, btn, posFields } from './rackWidgets.js';
@@ -33,7 +33,7 @@ export function makeEditors(ctx) {
   const { store, scene, rack, say, linkName, borrow, isActive } = ctx;
   const link = (id) => scene.links.find((q) => q.id === id);
   const antOpts = (role) => [['', 'No antenna'], ...rack.antennas.filter((a) => (a.role === 'tx') === (role === 'tx')).map((a) => [a.id, a.name])];
-  const find = (units, id) => { for (const r of units || []) { const c = r.channels.find((x) => x.linkId === id); if (c) return { r, c }; } return null; };
+  const find = (units, id) => { for (const r of units || []) { const c = r.channels.find((x) => x.linkId === id || x.id === id); if (c) return { r, c }; } return null; };
   const fact = (box, label, value) => { const p = el('p', 'rf-fact'); p.append(el('span', 'rf-fact-k', `${label}: `), el('span', '', value)); box.append(p); };
 
   /** Name, frequency, band and power: the inspector's own rows while this link is the selected one (one control each), else a button to select it. */
@@ -132,23 +132,27 @@ export function makeEditors(ctx) {
     },
     receiver: (it, ess, adv) => {
       const m = find(rack.receivers, it.id); if (!m) return;
-      const lk = link(it.id), src0 = lk.txOf !== undefined && link(lk.txOf);
-      fact(ess, 'Frequency', `${lk.freqMHz.toFixed(3)} MHz${src0 ? ` (follows ${src0.name})` : ''}`);
-      ess.append(gearPickers(store, lk, 'rx'));
+      const lk = link(m.c.linkId) || null, src0 = lk && lk.txOf !== undefined && link(lk.txOf), nm = lk ? lk.name : `${m.c.freqMHz} MHz receiver`, f0 = lk ? lk.freqMHz : m.c.freqMHz;
+      if (src0) fact(ess, 'Frequency', `${lk.freqMHz.toFixed(3)} MHz (follows ${src0.name})`);
+      else ess.append(field('Tuned to', num('Receiver frequency for ' + nm, m.c.freqMHz, (v) => setChannelFreq(store, m.c.id, v), 1, 100000, 0.025), 'MHz'));
+      ess.append(el('p', 'hint', lk ? `Heard on exactly this frequency: ${lk.name}. Retune the receiver or the mic and the pairing follows the frequencies.` : 'No mic is on exactly this frequency yet. Tune a mic to it (or retune this receiver to a mic): they pair by frequency alone. Its antennas and feed are kept either way.'));
+      if (lk) ess.append(gearPickers(store, lk, 'rx'));
+      else ess.append(el('p', 'hint', 'The receiver model and settings show here once a mic is paired with it, and stay with this receiver afterwards.'));
       const recvOpts = [...rack.receivers.map((r) => [r.id, `${r.name} (${r.channels.length} channel${r.channels.length === 1 ? '' : 's'})`]), ['new', 'A new receiver unit']];
-      ess.append(field('Receiver unit', select('Receiver unit for ' + linkName(it.id), recvOpts, m.r.id, (v) => moveChannel(store, it.id, v))));
+      ess.append(field('Receiver unit', select('Receiver unit for ' + nm, recvOpts, m.r.id, (v) => moveChannel(store, it.id, v))));
       const feeds = [['antennas', 'Antennas directly'], ...rack.splitters.map((s) => [`splitter:${s.id}`, `${s.name} (${s.type})`]),
         ...rack.receivers.filter((x) => x.id !== m.r.id && (canLoopReceiver(rack, m.r.id, x.id) || x.id === m.r.loopFrom)).map((x) => [`loop:${x.id}`, `${x.name} loop-through`])];
-      ess.append(field('Fed from', select('Feed for ' + linkName(it.id), feeds, feedValue(m.r, m.c), (v) => setChannelFeed(store, it.id, v))));
-      if (!m.r.loopFrom && !m.c.splitterId) ess.append(field('Antenna A', select('Antenna A for ' + linkName(it.id), antOpts('rx'), m.c.antA, (v) => connectChannel(store, it.id, { antA: v, antB: m.c.antB }))), field('Antenna B', select('Antenna B for ' + linkName(it.id), antOpts('rx'), m.c.antB, (v) => connectChannel(store, it.id, { antA: m.c.antA, antB: v }))));
+      ess.append(field('Fed from', select('Feed for ' + nm, feeds, feedValue(m.r, m.c), (v) => setChannelFeed(store, it.id, v))));
+      if (!m.r.loopFrom && !m.c.splitterId) ess.append(field('Antenna A', select('Antenna A for ' + nm, antOpts('rx'), m.c.antA, (v) => connectChannel(store, it.id, { antA: v, antB: m.c.antB }))), field('Antenna B', select('Antenna B for ' + nm, antOpts('rx'), m.c.antB, (v) => connectChannel(store, it.id, { antA: m.c.antA, antB: v }))));
       const route = channelRoute(rack, m.c, m.r);
-      for (const [w, a] of [['A', route.antA], ['B', route.antB]]) if (a) fact(ess, `Antenna ${w}`, `${a.name}${runText(a) ? `, cable run ${runText(a)} (${runLossDb(a, lk.freqMHz).toFixed(1)} dB)` : ', no cable run set'}`);
+      for (const [w, a] of [['A', route.antA], ['B', route.antB]]) if (a) fact(ess, `Antenna ${w}`, `${a.name}${runText(a) ? `, cable run ${runText(a)} (${runLossDb(a, f0).toFixed(1)} dB)` : ', no cable run set'}`);
       if (route.antA || route.antB) ess.append(el('p', 'hint', 'Cable, booster and filter between the antenna and this receiver are edited in the antenna item.'));
       // advanced: unit name, loop loss, bias supply
       adv.append(field('Receiver unit name', text('Receiver unit name', m.r.name, (v) => renameRackItem(store, 'receivers', m.r.id, v))));
       if (m.r.loopFrom) adv.append(field(`Loss of this loop-through hop (${Number.isFinite(m.r.loopLossDb) ? 'set by you' : 'assumed ' + DEFAULT_LOOP_LOSS_DB + ' dB'})`, num('Loop-through loss', loopLossOf(m.r), (v) => setReceiverLoopLoss(store, m.r.id, v), 0, 20), 'dB'),
         el('p', 'hint', `This receiver takes the antenna signal passed on by ${(rack.receivers.find((x) => x.id === m.r.loopFrom) || {}).name || 'another receiver'}, with one small insertion loss per hop (about 1 to 3 dB, an assumption: check the data sheet). At most ${RACK_LIMITS.maxLoopHops} hops; the whole unit follows.`));
       else if (m.c.splitterId) adv.append(el('p', 'hint', 'It takes antenna A and B from the splitter. A splitter costs each output its share of the signal.'));
+      if (!lk) { adv.append(el('p', 'hint', 'Bias supply and the other receiver fields appear once a mic is paired with this receiver.')); return; }
       const on = lk.rx.antennaBiasV > 0, bias = el('input'); bias.type = 'checkbox'; bias.checked = on; bias.setAttribute('aria-label', 'Antenna bias for ' + lk.name);
       bias.addEventListener('change', () => setRxBias(store, it.id, { on: bias.checked }));
       const bl = el('label', 'inv-field rf-check'); bl.append(bias, el('span', '', ' Supply antenna bias from this receiver (powers a booster or active antenna up the cable)')); adv.append(bl);
@@ -158,20 +162,22 @@ export function makeEditors(ctx) {
     },
     transmitter: (it, ess, adv) => {
       const m = find(rack.transmitters, it.id); if (!m) return;
-      const l = link(it.id);
-      tuning(l, ess, false);
-      ess.append(gearPickers(store, l, 'tx', { modulation: false }));
-      power(l, ess);
+      const l = link(m.c.linkId) || null, nm = l ? l.name : `${m.c.freqMHz} MHz transmitter`;
+      ess.append(field('Tuned to', num('Transmitter frequency for ' + nm, m.c.freqMHz, (v) => setTxChannelFreq(store, m.c.id, v), 1, 100000, 0.025), 'MHz'));
+      ess.append(el('p', 'hint', l ? `Sent to exactly this frequency: ${l.name}. Retune the transmitter or the bodypack and the pairing follows the frequencies.` : 'No bodypack is on exactly this frequency yet. Tune a bodypack to it (or retune this transmitter to one): they pair by frequency alone. Its combiner and antenna are kept either way.'));
+      if (l) { tuning(l, ess, false); ess.append(gearPickers(store, l, 'tx', { modulation: false })); power(l, ess); }
+      else ess.append(el('p', 'hint', 'The transmitter model and power show here once a bodypack is paired with it, and stay with this transmitter afterwards.'));
       const opts = [...rack.transmitters.map((r) => [r.id, `${r.name} (${r.channels.length} channel${r.channels.length === 1 ? '' : 's'})`]), ['new', 'A new transmitter unit']];
-      ess.append(field('Transmitter unit', select('Transmitter unit for ' + linkName(it.id), opts, m.r.id, (v) => moveTxChannel(store, it.id, v))),
-        field('Through', select('Combiner for ' + linkName(it.id), [['', 'Straight to an antenna'], ...rack.combiners.map((c) => [c.id, c.name])], m.c.combinerId || '', (v) => connectTxChannel(store, it.id, v ? { combinerId: v } : { antennaId: m.c.antennaId }))));
-      if (!m.c.combinerId) ess.append(field('Antenna', select('Transmit antenna for ' + linkName(it.id), antOpts('tx'), m.c.antennaId, (v) => connectTxChannel(store, it.id, { antennaId: v }))));
+      ess.append(field('Transmitter unit', select('Transmitter unit for ' + nm, opts, m.r.id, (v) => moveTxChannel(store, it.id, v))),
+        field('Through', select('Combiner for ' + nm, [['', 'Straight to an antenna'], ...rack.combiners.map((c) => [c.id, c.name])], m.c.combinerId || '', (v) => connectTxChannel(store, it.id, v ? { combinerId: v } : { antennaId: m.c.antennaId }))));
+      if (!m.c.combinerId) ess.append(field('Antenna', select('Transmit antenna for ' + nm, antOpts('tx'), m.c.antennaId, (v) => connectTxChannel(store, it.id, { antennaId: v }))));
       else ess.append(el('p', 'hint', 'The combiner sets the antenna and any cable run; each channel pays the combining loss.'));
-      const own = scene.people && peopleLinkOwners(scene).get(it.id);
+      const own = l && scene.people && peopleLinkOwners(scene).get(it.id);
       if (own) fact(ess, 'Bodypack worn by', ((scene.people || []).find((p) => p.id === own.personId) || {}).name || '-');
       adv.append(field('Transmitter unit name', text('Transmitter unit name', m.r.name, (v) => renameRackItem(store, 'transmitters', m.r.id, v))),
-        field('Isolator', select('Isolator for ' + linkName(it.id), [['', 'None'], ['20', 'Isolator, 20 dB'], ['25', 'Isolator, 25 dB'], ['30', 'Circulator, 30 dB']], m.c.isolator ? String(m.c.isolatorDb || 25) : '', (v) => setTxIsolator(store, it.id, !!v, v ? Number(v) : undefined))));
+        field('Isolator', select('Isolator for ' + nm, [['', 'None'], ['20', 'Isolator, 20 dB'], ['25', 'Isolator, 25 dB'], ['30', 'Circulator, 30 dB']], m.c.isolator ? String(m.c.isolatorDb || 25) : '', (v) => setTxIsolator(store, it.id, !!v, v ? Number(v) : undefined))));
       if (m.c.isolator) adv.append(el('p', 'hint', 'Fitted at the transmitter output: 0.5 dB loss, and reflected power returning to the output stage is cut by the isolation. The combiner-to-combiner IMD isolation setting is separate.'));
+      if (!l) return;
       adv.append(gearPickers(store, l, 'tx', { modulation: 'only' }));
       owner(it.id, adv, 'iem');
       props(it.id, adv, [1]);
