@@ -107,6 +107,7 @@ export function createPlanView(canvas, store) {
     const scene = store.getScene(), sel = store.getSelection();
     const st = scene.stage, link0 = activeLink(scene, sel);
     handles = [];
+    if (!isSnap && stepHover()) host.invalidate(); // keep drawing frames while a hover ring is easing in or out
     ctx.fillStyle = th.paper; ctx.fillRect(0, 0, w, h);
     // stage coordinates: x = 0 on the centre line, y = 0 on the front (audience-side) edge, y up the screen
     drawGrid(ctx, vp, w, h, th, { xName: 'x (m, 0 = centre line)', yName: 'y (m, 0 = front edge)', xOrigin: st.width / 2, yOrigin: st.depth, yFlip: true });
@@ -242,6 +243,31 @@ export function createPlanView(canvas, store) {
     ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
   }
 
+  // Hover feedback eases in and out (about 100ms) instead of switching on in one frame: an amount per handle key, 0..1.
+  const hoverAmt = new Map(); let hoverLast = 0;
+  const reducedMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  /** Moves every hover amount toward its target for the time since the last frame; true while any is still moving. */
+  function stepHover() {
+    const now = performance.now(), dt = hoverLast ? Math.min(64, now - hoverLast) : 16; hoverLast = now;
+    if (hoverKey && !hoverAmt.has(hoverKey)) hoverAmt.set(hoverKey, 0);
+    const k = reducedMotion() ? 1 : 1 - Math.exp(-dt / 45);
+    let busy = false;
+    for (const [key, a] of hoverAmt) {
+      const target = key === hoverKey ? 1 : 0, n = a + (target - a) * k;
+      if (Math.abs(target - n) < 0.02) { if (target === 0) hoverAmt.delete(key); else hoverAmt.set(key, 1); continue; }
+      hoverAmt.set(key, n); busy = true;
+    }
+    if (!busy) hoverLast = 0;
+    return busy;
+  }
+  /** Soft ring around a body handle while the pointer is over it; it grows slightly and fades in (size stays fixed under reduced motion). */
+  function hoverRingAt(ctx, th, x, y, key) {
+    const a = hoverAmt.get(key) || 0;
+    if (a < 0.03) return;
+    ctx.save(); ctx.strokeStyle = th.ink; ctx.globalAlpha = 0.45 * a; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.arc(x, y, reducedMotion() ? 17 : 15 + 2 * a, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+  }
+
   function drawLinkLine(ctx, th, scene, link, isActive, w) {
     const res = solveCached(scene, link);
     const t = vp.worldToScreen(link.tx.pos), r = vp.worldToScreen(link.rx.pos);
@@ -322,7 +348,7 @@ export function createPlanView(canvas, store) {
       ctx.save(); ctx.setLineDash([4, 3]); ctx.strokeStyle = th.inkSoft; ctx.lineWidth = selected ? 1.4 : 0.9; ctx.stroke(); ctx.restore();
       icons.drawStand(ctx, vp, a.pos.x, a.pos.y, { view: 'plan', ink: th.ink, fill: th.paper });
       icons.drawAntenna(ctx, vp, a.pos.x, a.pos.y, { view: 'plan', ink: th.ink, fill: th.paper, type: ant.type, pol: ant.polarisation, rollDeg: ant.rollDeg, groundPlane: ant.groundPlane, angleDeg: 180 - az });
-      if (selected) ringAt(ctx, th, p.x, p.y, 17);
+      if (selected) ringAt(ctx, th, p.x, p.y, 17); else hoverRingAt(ctx, th, p.x, p.y, 'rackAnt:' + a.id);
       if (w >= 520 || selected) haloText(ctx, th, a.name || 'Antenna', p.x, p.y + Math.max(22, 0.35 * vp.pxPerM + 12), { align: 'center', color: selected ? th.ink : th.inkSoft, weight: selected ? '600' : '' });
       handles.push({ kind: 'rackAnt', itemId: a.id, sx: p.x, sy: p.y, r: 15, wx: a.pos.x, wy: a.pos.y });
     }
@@ -354,7 +380,7 @@ export function createPlanView(canvas, store) {
         icons.drawStand(ctx, vp, e.pos.x, e.pos.y, { view: 'plan', ink, fill });
         icons.drawAntenna(ctx, vp, e.pos.x, e.pos.y, { view: 'plan', ink, fill, type: ant.type, pol: ant.polarisation, rollDeg: ant.rollDeg, groundPlane: ant.groundPlane, angleDeg: 180 - az });
       }
-      if (selected) ringAt(ctx, th, p.x, p.y, 17);
+      if (selected) ringAt(ctx, th, p.x, p.y, 17); else hoverRingAt(ctx, th, p.x, p.y, role + ':' + e.id);
       if (w >= 520 || selected) haloText(ctx, th, sharers ? `${e.name} (+${sharers} shared)` : e.name, p.x, p.y + Math.max(22, 0.35 * vp.pxPerM + 12), { align: 'center', color: selected ? th.ink : th.inkSoft, weight: selected ? '600' : '' });
       if (role === 'rx') {
         const inf = rxInfo(link);
