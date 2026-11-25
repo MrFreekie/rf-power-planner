@@ -61,7 +61,7 @@ export function mountTelemetry({ container, store }) {
     gauge.dataset.level = batteryLevel(pct, b.lowWarning);
     const rep = Number.isFinite(b.reportedPercent) ? b.reportedPercent : pct;
     const tru = Number.isFinite(b.trueSocPercent) ? b.trueSocPercent : rep;
-    fill.style.width = `${Math.max(0, Math.min(100, rep))}%`;
+    fill.style.transform = `scaleX(${Math.max(0, Math.min(100, rep)) / 100})`;
     trueTick.style.left = `calc(${Math.max(0, Math.min(100, tru))}% - 1.5px)`;
     trueTick.hidden = !Number.isFinite(b.trueSocPercent);
     gaugeErr = Number.isFinite(b.gaugeErrorPct) ? b.gaugeErrorPct : rep - tru;
