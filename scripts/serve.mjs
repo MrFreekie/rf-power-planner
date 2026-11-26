@@ -8,7 +8,8 @@ const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const port = Number(process.argv[2] || 8080);
 const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon' };
+  '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon',
+  '.webmanifest': 'application/manifest+json' };
 
 // Never served, even locally: dot-folders and dot-files (.git, .claude), private notes and private test data.
 const DENIED = ['docs/lessons', 'docs/research', 'docs/agents', 'docs/contract.md', 'tests/private-venues', 'claude.md', 'claude.local.md'];

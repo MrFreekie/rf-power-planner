@@ -585,5 +585,14 @@ const openHash = () => handleHash().catch((err) => { console.error(err); showErr
 openHash();
 window.addEventListener('hashchange', openHash);
 
+// Offline install: register the service worker (https or localhost only; optional, never breaks the planner).
+try {
+  const secure = location.protocol === 'https:' || ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+  if ('serviceWorker' in navigator && secure) {
+    const reg = () => navigator.serviceWorker.register('sw.js').catch((err) => console.warn('service worker', err));
+    if (document.readyState === 'complete') reg(); else window.addEventListener('load', reg);
+  }
+} catch (err) { console.warn('service worker', err); }
+
 // Debug handle for the console.
 window.rfPlanner = { store, squelch, history, mpx, rxState, telemetry, digital, coverage, imd };
