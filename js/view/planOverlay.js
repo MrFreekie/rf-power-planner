@@ -172,7 +172,7 @@ export function drawImd(ctx, th, vp, scene, sel, handles, placer, w) {
     for (let j = i + 1; j < txs.length; j++) {
       const a = txs[i], b = txs[j];
       const d = Math.hypot(a.pos.x - b.pos.x, a.pos.y - b.pos.y);
-      if (d > 4) continue;
+      if (d > 4 || d < 0.05) continue; // transmitters on one antenna have no antenna-to-antenna coupling to draw
       const loss = couplingLossDb(a, b, (a.freqMHz + b.freqMHz) / 2);
       const pa = vp.worldToScreen(a.pos), pb = vp.worldToScreen(b.pos);
       ctx.save(); ctx.setLineDash([4, 3]); ctx.strokeStyle = th.ink; ctx.lineWidth = 1.2;

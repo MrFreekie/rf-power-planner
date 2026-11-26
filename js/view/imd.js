@@ -1,6 +1,6 @@
 // Intermodulation demo panel: spectrum analyser plot with carriers and IM3/IM5 markers, noise-floor numbers,
 // distance sweep and coordination table. Reads imd.get() (js/imdTracker.js); draws only.
-import { setImdEnabled } from '../actions.js';
+import { setImdEnabled, setImdRxLink } from '../actions.js';
 import { createCanvasHost, activeLink, setFont, haloText } from './util.js';
 import { imd } from '../imdTracker.js';
 import { formatPower } from '../model/units.js';
@@ -97,9 +97,9 @@ export function mountImd({ container, store }) {
   tableWrap.append(table);
   const note = el('p', 'hint', 'Two strong carriers mix in a non-linear stage and create products at 2f1 - f2 and similar frequencies. When a product lands on a wanted channel it raises that channel’s noise floor or becomes a tone you can hear. Moving transmitters apart, adding isolation, or choosing different frequencies lowers the products. Values are illustrative.');
   const evenH = el('h3', 'cv-sug-h', 'Even-order products (second and fourth order)');
-  const bpH = el('h4', 'imd-sub', 'At each bodypack'), bpNote = el('p', 'hint', 'Products worked out at every in-ear bodypack in turn, using its own position and antenna. Worst product landing on its own channel (not made from its own transmitter).');
+  const bpH = el('h4', 'imd-sub', 'At each receiver'), bpNote = el('p', 'hint', 'Products worked out at every in-ear bodypack and microphone receiver in turn, using its own position and antenna. Worst product landing on its own channel (not made from its own transmitter).');
   const bpWrap = el('div', 'cv-table-wrap'), bpTable = el('table', 'cv-table');
-  bpTable.innerHTML = '<thead><tr><th scope="col">Bodypack</th><th class="num" scope="col">Wanted</th><th scope="col">Worst product</th><th class="num" scope="col">C/I</th><th scope="col">Severity</th></tr></thead><tbody></tbody>';
+  bpTable.innerHTML = '<thead><tr><th scope="col">Receiver</th><th class="num" scope="col">Wanted</th><th scope="col">Worst product</th><th class="num" scope="col">C/I</th><th scope="col">Severity</th></tr></thead><tbody></tbody>';
   const bpBody = bpTable.querySelector('tbody'); bpWrap.append(bpTable);
   const evenWrap = el('div', 'cv-table-wrap'), evenTable = el('table', 'cv-table');
   evenTable.innerHTML = '<caption class="hint">Products of the transmitter tones in the nonlinear stage, and radiated second harmonics. Levels are at the receiver input.</caption><thead><tr><th scope="col">Product</th><th class="num" scope="col">Frequency</th><th class="num" scope="col">Level</th><th scope="col">Lands in</th><th scope="col">Severity</th></tr></thead><tbody></tbody>';
@@ -363,7 +363,9 @@ export function mountImd({ container, store }) {
     bpH.hidden = bpNote.hidden = bpWrap.hidden = !bp || !bp.length;
     bpBody.textContent = '';
     for (const r of bp || []) {
-      const tr = el('tr'), chip = el('span', 'chip', r.severity === 'ok' ? 'CLEAR' : r.severity.toUpperCase()); chip.dataset.sev = r.severity === 'ok' ? 'info' : r.severity;
+      const tr = el('tr'), chip = el('span', 'chip', r.severity === 'ok' ? 'CLEAR' : r.severity.toUpperCase());
+      tr.style.cursor = 'pointer'; tr.title = 'Show the spectrum and tables for this bodypack'; tr.addEventListener('click', () => setImdRxLink(store, r.linkId));
+      if (r.linkId === state.rxLinkId) tr.style.fontWeight = '700'; chip.dataset.sev = r.severity === 'ok' ? 'info' : r.severity;
       const sevTd = el('td'); sevTd.append(chip);
       tr.append(el('td', null, `${shortName(r.name)} ${r.freqMHz.toFixed(3)} MHz`), el('td', 'num', Number.isFinite(r.wantedDbm) ? fmtDbm(r.wantedDbm, scene.units.power) : '-'),
         el('td', null, r.hits ? `${r.label}${r.hits > 1 ? ` (+${r.hits - 1} more)` : ''}` : 'none lands here'), el('td', 'num', r.worstCiDb === null ? '-' : `${r.worstCiDb.toFixed(1)} dB`), sevTd);

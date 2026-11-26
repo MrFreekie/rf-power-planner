@@ -41,7 +41,7 @@ import { effectiveAntennaB } from '../model/diversity.js';
 import { floorHeightAt } from '../model/floor.js';
 import { PLATFORM_MATERIALS } from '../model/scene.js';
 import { setStage, addPlatform, updatePlatform, removePlatform } from '../actions.js';
-import { setImdPreset, setImdCombiner, setImdPim, addImdTransmitter, removeImdTransmitter, updateImdTransmitter } from '../actions.js';
+import { setImdPreset, setImdRxLink, setImdFromRack, setImdCombiner, setImdPim, addImdTransmitter, removeImdTransmitter, updateImdTransmitter } from '../actions.js';
 
 const IMD_PRESETS = [['mic-rack-typical', 'Mic rack, typical'], ['iem-combiner-no-isolation', 'IEM combiner, no isolation'],
   ['iem-combiner-isolated', 'IEM combiner, isolated'], ['pim-corroded-connector', 'PIM: corroded connector']];
@@ -676,8 +676,13 @@ export function mountInspector({ container, store }) {
   function buildImd(body, c) {
     const m = c.scene.imd;
     const upd = (id) => (cc, patch, o) => updateImdTransmitter(store, id, patch, o);
-    if (m.fromRack) body.append(el('p', 'hint', 'The in-ear transmitters, their antennas and the combiners come from the rack, so change them there. Transmitters added below are extra sources, such as a neighbouring venue.'));
+    if (m.fromRack) body.append(el('p', 'hint', 'The in-ear and microphone transmitters, their antennas and the combiners come from the rack, so change them there. Transmitters added below are extra sources, such as a neighbouring venue.'));
+    body.append(selectField({ key: 'imd-fromrack', label: 'Transmitters from the rack', visible: (cc) => !!(cc.scene.rack && cc.scene.rack.byFreq === true), options: [['on', 'On: every in-ear and mic link'], ['off', 'Off: only those listed below']], get: (cc) => (cc.scene.imd.fromRack ? 'on' : 'off'), set: (cc, v) => setImdFromRack(store, v === 'on') }));
     body.append(
+      selectField({
+        key: 'imd-rxlink', label: 'Worked out at receiver', visible: (cc) => !!cc.scene.imd.fromRack, options: (cc) => (cc.scene.links || []).filter((l) => l.kind === 'iem').map((l) => [l.id, l.name]),
+        get: (cc) => (cc.scene.imd.rxLinkId && (cc.scene.links || []).some((l) => l.id === cc.scene.imd.rxLinkId) ? cc.scene.imd.rxLinkId : ((cc.scene.links || [])[0] || {}).id) || '', set: (cc, v) => setImdRxLink(store, v),
+      }),
       selectField({ key: 'imd-preset', label: 'Preset', options: IMD_PRESETS, get: (cc) => cc.scene.imd.preset, set: (cc, v) => setImdPreset(store, v) }),
       selectField({
         key: 'imd-comb', label: 'Combiner', visible: (cc) => !cc.scene.imd.fromRack, options: [['none', 'None (separate antennas)'], ['hybrid', 'Passive hybrid'], ['isolated', 'Isolated (cavity / isolators)']],

@@ -77,3 +77,26 @@ test('imdPerBodypack: one row per in-ear link, evaluated at that bodypack; null 
   const after = imdPerBodypack(moved);
   assert.notEqual(after[3].wantedDbm, rows[3].wantedDbm);
 });
+
+test('rack-fed intermod includes microphone links at their own position; actions: bodypack selection and the rack switch', async () => {
+  const { createDefaultLink, syncScene } = await import('../js/model/scene.js');
+  const { setImdRxLink, setImdFromRack } = await import('../js/actions.js');
+  const { createStore } = await import('../js/store.js');
+  const { imdPerBodypack } = await import('../js/model/imd.js');
+  const s = iem8Scene('A');
+  const mic = createDefaultLink('mic'); mic.name = 'Vocal'; mic.freqMHz = 590.5; mic.tx.pos = { x: 9, y: 6, z: 1.5 };
+  s.links.push(mic); syncScene(s);
+  const d = imdFromRack(s), m = d.transmitters.find((t) => t.id === mic.id);
+  assert.equal(d.transmitters.length, 9);
+  assert.deepEqual(m.pos, { x: 9, y: 6, z: 1.5 });
+  assert.equal(imdPerBodypack(s).length, 9);
+  const store = createStore(s);
+  setImdRxLink(store, s.links[3].id);
+  assert.equal(store.getScene().imd.rxLinkId, s.links[3].id);
+  setImdRxLink(store, 'nope');
+  assert.equal(store.getScene().imd.rxLinkId, undefined);
+  setImdFromRack(store, false);
+  assert.equal(store.getScene().imd.fromRack, undefined);
+  setImdFromRack(store, true);
+  assert.equal(store.getScene().imd.fromRack, true);
+});

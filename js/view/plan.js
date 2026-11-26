@@ -324,6 +324,19 @@ export function createPlanView(canvas, store) {
     const mx = (t.x + r.x) / 2, my = (t.y + r.y) / 2;
     setFont(ctx, th, 12, isActive || focused ? '600' : '');
     const important = isActive || focused || (res && res.status !== 'pass'); // selected, hovered and FAIL/MARGINAL links always keep their label
+    if (!important) { // quiet links lying on one another (a combiner's links to one bodypack spot) share one label, carried by the first of them
+      const fid2 = getLinkFocus(), quiet = scene.links.filter((q) => {
+        if (q === link) return false;
+        if (!endPlaced(scene, q, 'tx') || !endPlaced(scene, q, 'rx') || q.id === fid2) return false;
+        const a = vp.worldToScreen(q.tx.pos), b = vp.worldToScreen(q.rx.pos);
+        if (Math.hypot((a.x + b.x) / 2 - mx, (a.y + b.y) / 2 - my) > 14) return false;
+        const qr = solveCached(scene, q); return !(qr && qr.status !== 'pass') && q !== activeLink(scene, store.getSelection());
+      });
+      if (quiet.length) {
+        if (scene.links.indexOf(quiet[0]) < scene.links.indexOf(link)) return; // the first one speaks for the group
+        txt = `${quiet.length + 1} links  ${fmtLen(d, scene.units)}`;
+      }
+    }
     const ly = placer.place(ctx.measureText(txt).width, mx, my - 8, 15, important ? null : { skip: true });
     if (ly === null) return; // a quiet link whose label would sit on another one: its line and ends still draw
     const ltw = ctx.measureText(txt).width;

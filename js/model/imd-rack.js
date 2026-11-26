@@ -1,6 +1,7 @@
 // Intermod inputs from the rack (pure): with scene.imd.fromRack the in-ear transmitters, their antennas and the combiner network come from scene.rack, so the intermod screen and the
 // rack cannot disagree. Manual scene.imd.transmitters stay as extra sources (a neighbouring venue, a transmitter that is not in the rack); they are "direct" (their own antenna).
 //
+// Mic links join as direct sources at their own transmitter position and antenna.
 // imdFromRack(scene) -> null (not a rack-fed scene) or { transmitters, topology }.
 //   transmitters: one per transmitter channel paired with an IEM link and fed by an antenna: { id: the link id, name, freqMHz, powerDbm, pos, antenna, fmPreset?, lowIntermod? }.
 //   topology: { groups, root? } in the shape imd.js documents. Every rack combiner with channels is a group (loss and port-to-port isolation from combinerParams; an isolated combiner carries half
@@ -40,6 +41,14 @@ export function imdFromRack(scene) {
     } else if (c.isolator) {
       groups.set(`iso_${l.id}`, { id: `iso_${l.id}`, name: 'Isolator', members: [l.id], lossDb: ISOLATOR_LOSS_DB, isolationDb: 0, isolatorDb: isolatorDb(c), underRoot: false, memberIsolatorDb: {} });
     }
+  }
+  // Microphone transmitters are body-worn radios with their own antenna: direct sources at the link's transmitter position (an extra receiver of the same frequency adds no second transmitter).
+  for (const l of scene.links) {
+    if (l.kind !== 'mic' || l.txOf !== undefined || !l.tx || !l.tx.pos || !Number.isFinite(l.freqMHz)) continue;
+    const tx = { id: l.id, name: String(l.name || l.id), freqMHz: l.freqMHz, powerDbm: l.tx.powerDbm, pos: structuredClone(l.tx.pos), antenna: structuredClone(l.tx.antenna) };
+    if (l.tx.fmPreset !== undefined) tx.fmPreset = l.tx.fmPreset;
+    if (l.tx.lowIntermod !== undefined) tx.lowIntermod = l.tx.lowIntermod;
+    transmitters.push(tx);
   }
   return { transmitters, topology: { groups: [...groups.values()], ...(root ? { root } : {}) } };
 }

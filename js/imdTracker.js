@@ -33,7 +33,7 @@ export function analyse(rackScene) {
   const spec = spectrum(scene);
   const near = nearestTx(scene);
   const sweep = near && m.transmitters.length > 1 ? sweepDistance(scene, { txId: near.id, from: 0.3, to: 10, n: 12 }) : null;
-  return { enabled: true, spectrum: spec, noise, products, coordination, sweep, perBodypack: imdPerBodypack(rackScene) };
+  return { enabled: true, spectrum: spec, noise, products, coordination, sweep, perBodypack: imdPerBodypack(rackScene), rxLinkId: rackScene.imd.rxLinkId || ((rackScene.links || [])[0] || {}).id };
 }
 
 export function createImdTracker({

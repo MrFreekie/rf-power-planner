@@ -472,6 +472,22 @@ export function setImdPreset(store, preset) {
   });
 }
 
+/** setImdFromRack(store, on): take the intermod transmitters from the rack's in-ear and microphone links (manual transmitters stay as extra sources). */
+export function setImdFromRack(store, on) {
+  return store.update((d) => {
+    const m = imdOf(d);
+    if (on && d.rack && d.rack.byFreq === true) m.fromRack = true; else delete m.fromRack;
+  });
+}
+
+/** setImdRxLink(store, linkId | null): the bodypack (link receiver) a rack-fed intermod view is worked out at; null goes back to the first link. */
+export function setImdRxLink(store, linkId) {
+  return store.update((d) => {
+    const m = imdOf(d);
+    if (linkId && (d.links || []).some((l) => l.id === linkId)) m.rxLinkId = linkId; else delete m.rxLinkId;
+  });
+}
+
 /** setImdCombiner(store, { type?: 'none'|'hybrid'|'isolated', isolationDb?, lossDb? }) */
 export function setImdCombiner(store, partial = {}) {
   return store.update((d) => {
