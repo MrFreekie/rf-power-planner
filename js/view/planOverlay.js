@@ -185,19 +185,9 @@ export function drawImd(ctx, th, vp, scene, sel, handles, placer, w) {
   }
   // With a frequency-paired rack the links are real: an intermod transmitter that is a link's own transmitter is drawn by that link (its antenna), and the receive antenna at a link's receiver is that link's end.
   const real = !!(scene.rack && scene.rack.byFreq === true), extra = real ? extraImdTransmitters(scene) : [], own = new Set(real ? txs.filter((t) => !extra.includes(t)) : []);
-  const fed = m.fromRack === true && real, r = fed ? ((scene.links || [])[0] || {}).rx && scene.links[0].rx.pos : m.rxAntennaPos; // rack-fed: the bodypacks are the receivers, no separate marker
-  const atLinkRx = fed || (real && !!r && (scene.links || []).some((l) => l.rx && l.rx.pos && l.rx.pos.x === r.x && l.rx.pos.y === r.y));
-  // receive antenna
-  let rp = null;
-  if (r) {
-    rp = vp.worldToScreen(r);
-    if (!atLinkRx) {
-      icons.drawStand(ctx, vp, r.x, r.y, { view: 'plan', ink: th.ink, fill: th.paper });
-      icons.drawAntenna(ctx, vp, r.x, r.y, { view: 'plan', ink: th.ink, fill: th.paper, type: (m.rxAntenna && m.rxAntenna.type) || 'paddle', angleDeg: 180 });
-      setFont(ctx, th, 11, '600');
-      haloText(ctx, th, 'Rx antenna', rp.x, placer.place(ctx.measureText('Rx antenna').width, rp.x, rp.y + 26), { align: 'center', px: 11, weight: '600' });
-    }
-  }
+  const fed = m.fromRack === true && real, r = fed ? ((scene.links || [])[0] || {}).rx && scene.links[0].rx.pos : m.rxAntennaPos;
+  // The intermod receive point is a calculation point, not equipment: it is not drawn (the link bodypacks and antennas are).
+  const rp = r ? vp.worldToScreen(r) : null;
   // transmitters
   for (const t of txs) {
     if (own.has(t)) continue;
