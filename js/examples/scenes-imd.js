@@ -165,6 +165,17 @@ export function micImdScene(plan = 'clean') {
 }
 
 /**
+ * iemHallRack(s, l, m): iemHall for an imdScene of in-ear transmitters that share one combiner (scene.imd.combiner): the transmitters become real links in the rack, all through
+ * one rack combiner of that type (hybrid = passive, isolated) on one antenna, and the intermod reads them from the rack.
+ */
+export function iemHallRack(s, l, m) {
+  iemHall(s, l, m);
+  const c = m.combiner || {}, isolated = c.type === 'isolated';
+  m.topology = { groups: [{ id: 'g1', name: isolated ? 'Isolated combiner' : 'Passive combiner', members: m.transmitters.map((t) => t.id), lossDb: c.lossDb, isolationDb: c.isolationDb, isolatorDb: isolated ? c.isolationDb / 2 : 0, perChannel: !isolated }] };
+  iem8Rack(s, l, m);
+}
+
+/**
  * iem8Rack(s, l, m): the eight transmitters of an iem8Scene as real links in a frequency-paired rack. Each link sits on its intermod transmitter's exact frequency (so the plan lists the pair once),
  * every combiner group with several members is a rack combiner on the shared antenna, a transmitter outside any group sits on an antenna of its own, and a single-member group is an isolator on that channel.
  * The rack's combiner is the generic passive one, so link margins use its loss; the intermod figures still come from scene.imd, whose combiner and isolation values are the assumed ones.

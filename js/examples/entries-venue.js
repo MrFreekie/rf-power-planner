@@ -2,7 +2,7 @@
 import { iemHall } from './helpers.js';
 import { bandScene, audienceScene, ceilingScene, rofScene, rofBranchScene } from './scenes-venue.js';
 import { sosScene, fohScene, videoWallScene } from './scenes-foh.js';
-import { evenScene, toneMpxScene, imdScene, iem8Scene, micImdScene } from './scenes-imd.js';
+import { evenScene, toneMpxScene, imdScene, iem8Scene, micImdScene, iemHallRack } from './scenes-imd.js';
 
 export const VENUE_EXAMPLES = [
   {
@@ -22,7 +22,7 @@ export const VENUE_EXAMPLES = [
     build: () => ({
       scene: imdScene('iem', 605.6, [
         ['IEM A (wanted)', 605.6, 10, 1.0, 1.0, 1.5], ['IEM B', 606.0, 10, 1.2, 1.0, 1.5], ['IEM C', 606.4, 10, 1.4, 1.0, 1.5],
-      ], { preset: 'iem-combiner-no-isolation', iip3Dbm: 10, combiner: { type: 'hybrid', isolationDb: 15, lossDb: 3.5 } }, iemHall),
+      ], { preset: 'iem-combiner-no-isolation', iip3Dbm: 10, combiner: { type: 'hybrid', isolationDb: 15, lossDb: 3.5 } }, iemHallRack),
     }),
   },
   {
@@ -32,7 +32,7 @@ export const VENUE_EXAMPLES = [
     build: () => ({
       scene: imdScene('iem', 605.6, [
         ['IEM A (wanted)', 605.6, 10, 1.0, 1.0, 1.5], ['IEM B', 606.0, 10, 1.2, 1.0, 1.5], ['IEM C', 606.4, 10, 1.4, 1.0, 1.5],
-      ], { preset: 'iem-combiner-isolated', iip3Dbm: 10, combiner: { type: 'isolated', isolationDb: 50, lossDb: 2 } }, iemHall),
+      ], { preset: 'iem-combiner-isolated', iip3Dbm: 10, combiner: { type: 'isolated', isolationDb: 50, lossDb: 2 } }, iemHallRack),
     }),
   },
   {

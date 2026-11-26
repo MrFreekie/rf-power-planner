@@ -223,19 +223,23 @@ function rxPointOf(scene, rxPoint) {
 }
 
 /**
- * imdPerBodypack(scene) -> null (not rack-fed) or one row per in-ear link in the rack: the third-order and fifth-order products are worked out at THAT bodypack's
+ * imdPerBodypack(scene) -> null (not rack-fed) or one row per receiver of an in-ear or microphone link in the rack (extra bodypacks and extra receivers on a shared frequency included): the third-order and fifth-order products are worked out at THAT bodypack's
  * position and antenna, and the worst one landing on its own channel (not made from its own transmitter) is reported:
  *   { linkId, name, freqMHz, wantedDbm, worstCiDb (null when nothing lands), severity: 'ok' | 'info' | 'warning' | 'critical', label, hits }.
  */
 export function imdPerBodypack(scene) {
   const d = imdFromRack(scene);
   if (!d) return null;
-  return d.transmitters.map((t) => {
-    const sc = { ...scene, imd: { ...scene.imd, rxLinkId: t.id } };
-    const hits = coordinationCheck(sc).filter((h) => h.channelId === t.id && !h.ownTone);
+  const wantedIds = new Set(d.transmitters.map((t) => t.id)), rows = [];
+  for (const l of scene.links) { // every receiver: a link's own, and the extra bodypacks or receivers that listen to another link's transmitter
+    const wid = l.txOf !== undefined ? l.txOf : l.id, t = wantedIds.has(wid) ? d.transmitters.find((q) => q.id === wid) : null;
+    if (!t || (l.kind !== 'iem' && l.kind !== 'mic')) continue;
+    const sc = { ...scene, imd: { ...scene.imd, rxLinkId: l.id } };
+    const hits = coordinationCheck(sc).filter((h) => h.channelId === wid && !h.ownTone);
     const w = hits[0];
-    return { linkId: t.id, name: t.name, freqMHz: t.freqMHz, wantedDbm: toneLevels(sc).find((_, i) => txOf(sc)[i].id === t.id)?.levelDbm ?? null, worstCiDb: w ? w.ciDb : null, severity: w ? w.severity : 'ok', label: w ? w.product.label : '', hits: hits.length };
-  });
+    rows.push({ linkId: l.id, name: l.name || t.name, freqMHz: t.freqMHz, wantedDbm: toneLevels(sc).find((_, i) => txOf(sc)[i].id === wid)?.levelDbm ?? null, worstCiDb: w ? w.ciDb : null, severity: w ? w.severity : 'ok', label: w ? w.product.label : '', hits: hits.length });
+  }
+  return rows;
 }
 
 // ---------------------------------------------------------------- coupling and received levels

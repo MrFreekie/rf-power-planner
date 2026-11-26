@@ -129,3 +129,18 @@ test('mic intermod examples: figures quoted in the notes are recomputed, equal-s
   assert.ok(noteE.includes(f1(re[0].worstCiDb) + ' dB') && noteE.includes(f1(re[2].worstCiDb) + ' dB') && noteE.includes(f1(imdSummary(equal).riseDb) + ' dB'), 'equal note numbers');
   assert.ok(rc.every((r) => r.severity === 'ok' || r.severity === 'info'));
 });
+
+test('imdPerBodypack: an extra bodypack on the same frequency gets its own row and is evaluated at its own position', async () => {
+  const { imdPerBodypack } = await import('../js/model/imd.js');
+  const { createStore } = await import('../js/store.js');
+  const { addReceiverFor } = await import('../js/actions.js');
+  const st = createStore(iem8Scene('C')), base = imdPerBodypack(st.getScene());
+  const src = st.getScene().links.find((l) => l.kind === 'iem');
+  const id = addReceiverFor(st, src.id);
+  assert.ok(id);
+  const rows = imdPerBodypack(st.getScene());
+  assert.equal(rows.length, base.length + 1);
+  const extra = rows.find((r) => r.linkId === id), first = rows.find((r) => r.linkId === src.id);
+  assert.ok(extra && first);
+  assert.equal(extra.freqMHz, first.freqMHz);
+});

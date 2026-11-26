@@ -6,6 +6,7 @@ import { createSquelchTracker } from '../js/squelchTracker.js';
 import { createImdTracker, analyse } from '../js/imdTracker.js';
 import { createHistory } from '../js/history.js';
 import { solveLink } from '../js/model/rf.js';
+import { imdTransmitters } from '../js/model/imd.js';
 import { buildExample, EXAMPLES } from '../js/examples.js';
 import * as A from '../js/actions.js';
 
@@ -143,7 +144,7 @@ test('imd examples validate and solve; contrasts hold (isolators, distance, freq
     assert.equal(ex.scene.imd.enabled, true);
     assert.ok(Number.isFinite(solveLink(ex.scene, ex.scene.links[0]).inputPowerDbm), id);
     assert.ok(analyse(ex.scene).products.length > 0, id);
-    assert.ok(ex.scene.imd.transmitters.some((t) => Math.abs(t.freqMHz - ex.scene.links[0].freqMHz) < 0.05), id + ': link sits on one of the channels');
+    assert.ok(imdTransmitters(ex.scene).some((t) => Math.abs(t.freqMHz - ex.scene.links[0].freqMHz) < 0.05), id + ': link sits on one of the channels');
   }
   assert.ok(EXAMPLES.length >= 25);
   assert.ok(rise('imd-iem-no-isolation') > rise('imd-iem-isolators') + 15);
