@@ -1226,3 +1226,24 @@ body.vnalab-open { overflow: hidden; }
 /* Opening a section fades its body in (opacity only, no layout); js/ui/openFade.js adds .just-opened on the open gesture. */
 details.just-opened > :not(summary) { animation: section-fade-in 150ms cubic-bezier(0.23, 1, 0.32, 1); }
 @keyframes section-fade-in { from { opacity: 0; } }
+
+/* ---- intermod view in the spectra column, and the bottom bar drag handle ---- */
+.spectra-imd-btn { min-height: 24px; padding: 0 10px; font-size: 12px; }
+.spectra-imd-panel[hidden], .spectra-grid[hidden], .spectra-tabs[hidden] { display: none; }
+.spectra-imd-panel { max-height: 60vh; overflow-y: auto; }
+.spectra-imd-panel .imd { border-bottom: 0; padding: 4px 6px; }
+.spectra-imd-panel .imd canvas.imd-spec { height: 170px !important; }
+.spectra-imd-panel .imd canvas.imd-sweep { height: 150px !important; }
+.bb-grip { display: none; }
+@media (min-width: 1100px) and (min-height: 560px) {
+  .bb-grip { display: block; position: absolute; top: -3px; left: 0; right: 0; height: 7px; cursor: ns-resize; z-index: 5; touch-action: none; }
+  .bb-grip:hover, .bb-grip:focus-visible { background: var(--ink); opacity: 0.35; }
+  .bb-grip:focus-visible { outline: 3px solid var(--focus); }
+  #bottombar { position: relative; }
+  #spectra .spectra-imd-panel { flex: 1 1 0; min-height: 0; max-height: none; overflow-x: auto; overflow-y: hidden; }
+  #spectra .spectra-imd-panel .imd { height: 100%; display: flex; flex-direction: column; }
+  #spectra .spectra-imd-panel .imd > div { flex: 1 1 0; min-height: 0; column-width: 400px; column-gap: 16px; column-fill: auto; }
+  #spectra .spectra-imd-panel .imd > div > * { break-inside: avoid; }
+  #spectra .spectra-imd-panel .imd canvas { width: 100%; }
+  #spectra.spectra-imd-on .spectra-grid { display: none; }
+}

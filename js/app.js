@@ -29,6 +29,7 @@ import { mountVenueBuilder } from './ui/venueBuilderUi.js';
 import { mountCoordination } from './ui/coordination.js';
 import { mountGlossary } from './ui/glossary.js';
 import { mountPanels } from './ui/panels.js';
+import { mountBottomResize } from './ui/bottomResize.js';
 import { activeLink as pickActiveLink, solveCached } from './view/util.js';
 import { confirmDialog } from './ui/confirmDialog.js';
 import { budgetExtras, modeContrast } from './ui/budgetExtras.js';
@@ -529,6 +530,7 @@ if (staleCleared) showStatus('Your previously saved scene could not be read, so 
 
 // collapsible panels (left budgets, right inspector, bottom bar) and the focus-plot toggle
 try { mountPanels(); } catch (err) { console.error('panels', err); }
+try { mountBottomResize(); } catch (err) { console.error('bottom resize', err); }
 
 // spectrum map pop-out (optional)
 try {

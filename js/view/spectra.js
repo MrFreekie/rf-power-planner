@@ -458,11 +458,23 @@ export function mountSpectra({ container, store, now = () => performance.now() }
   const tabs = el('div', 'spectra-tabs group', null, { role: 'tablist', 'aria-label': 'Spectrum views' });
   const pauseLabel = (on) => (on ? 'Pause spectra' : 'Play spectra');
   const pauseBtn = el('button', null, pauseLabel(!reduce), { type: 'button', id: 'btn-spectra-pause', title: 'Freeze or run the simulated signals in the Audio, MPX and RF spectra' });
-  head.append(h2, tabs);
+  const imdBtn = el('button', 'spectra-imd-btn', 'Intermod', { type: 'button', id: 'btn-spectra-imd', 'aria-pressed': 'false', title: 'Show the intermodulation view here instead of the three spectra' });
+  head.append(h2, tabs, imdBtn);
   const sourceBar = (() => { const tb = document.getElementById('toolbar'); return tb ? mountSourceBar({ host: tb, before: document.getElementById('btn-modlab'), store, tone: toneState }) : mountSourceBar({ host: head, store, tone: toneState }); })(); // top toolbar so it is reachable without the bottom panel
   { const tb = document.getElementById('toolbar'); if (tb) tb.insertBefore(pauseBtn, document.getElementById('btn-modlab') || null); else head.append(pauseBtn); } // top toolbar, beside the audio source, so it is reachable without the bottom panel
   const grid = el('div', 'spectra-grid');
-  container.append(head, grid);
+  const imdHost = document.getElementById('imd'), imdPanel = el('div', 'spectra-imd-panel', null, { id: 'spectra-imd-panel' });
+  imdPanel.hidden = true;
+  if (imdHost) imdPanel.append(imdHost); // the intermod section moves here from the inspector column
+  container.append(head, grid, imdPanel);
+  let imdOn = false, imdWas = !!(store.getScene().imd && store.getScene().imd.enabled);
+  const setImdView = (on) => {
+    imdOn = !!on; imdBtn.setAttribute('aria-pressed', String(imdOn)); imdPanel.hidden = !imdOn || !imdHost; grid.hidden = imdOn && !!imdHost; tabs.hidden = imdOn;
+    container.classList.toggle('spectra-imd-on', imdOn && !!imdHost);
+    try { localStorage.setItem('rf-spectra-view.v1', imdOn ? 'imd' : 'spectra'); } catch { /* not kept */ }
+    if (!imdOn) invalidateAll();
+  };
+  imdBtn.addEventListener('click', () => setImdView(!imdOn));
 
   const panels = {};
   let active = 'audio';
@@ -673,7 +685,8 @@ export function mountSpectra({ container, store, now = () => performance.now() }
   }) : null;
   if (ro) ro.observe(container);
   syncTabs();
-  const unsub = [store.subscribe(() => invalidateAll())];
+  try { if (localStorage.getItem('rf-spectra-view.v1') === 'imd') setImdView(true); } catch { /* default view */ }
+  const unsub = [store.subscribe(() => { const on = !!(store.getScene().imd && store.getScene().imd.enabled); if (on && !imdWas) setImdView(true); imdWas = on; invalidateAll(); })]; // turning the intermod demo on shows it
   if (S.running) loop = requestAnimationFrame(tick);
   return {
     setRunning, invalidate: invalidateAll, panels, zoom, openZoom,
