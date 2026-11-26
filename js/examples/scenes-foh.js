@@ -179,7 +179,7 @@ export function videoWallScene({ preset = 'class-a', construction = 'solid-metal
         if (i === 0) { wall0.construction = c; wall0.material = c.endsWith('plastic') ? 'drywall' : 'metal'; wall0.name = `LED video wall (${c})`; return; }
         const w = structuredClone(wall0); w.id = newId('refl'); w.construction = c; w.material = c.endsWith('plastic') ? 'drywall' : 'metal'; w.name = `LED video wall (${c})`;
         shift(w.p1); shift(w.p2); s.reflectors.push(w);
-        const k = structuredClone(l); k.id = newId('link'); k.tx.id = newId('tx'); k.rx.id = newId('rx'); k.name = `Mic behind ${c}`;
+        const k = structuredClone(l); k.id = newId('link'); k.tx.id = newId('tx'); k.rx.id = newId('rx'); k.name = `Mic behind ${c}`; k.freqMHz = Math.round((l.freqMHz + 0.5 * i) * 1e3) / 1e3; // its own frequency: two mics on one frequency would read as one transmitter heard twice
         shift(k.tx.pos); shift(k.rx.pos); if (k.rx.diversity && k.rx.diversity.antennaB && k.rx.diversity.antennaB.pos) shift(k.rx.diversity.antennaB.pos);
         s.links.push(k);
       });

@@ -192,7 +192,7 @@ export const VENUE_EXAMPLES = [
   {
     id: 'video-wall-solid-vs-mesh',
     title: 'Video wall: solid metal, mesh and carbon fibre construction',
-    note: 'Compare: three wall sections side by side on one stage (solid metal, 10 mm metal mesh and carbon mesh, class A noise), each with a receiver 2.5 m behind it: the crossing loss is 40.0, 27.9 and 28.9 dB, and the noise reaching each receiver is -87.5, -72.1 and -75.0 dBm (the solid one includes the neighbouring walls leaking in), leaving margins of 12.7, -2.6 and 0.2 dB. Seen from FOH the metal and metal mesh both reflect at -3.5 dB and carbon at -9.5 dB. Holes of 100 mm (a coarse curtain) shield only 7.9 dB at 606 MHz, so a mesh wall is no free pass at UHF. All construction figures are assumed. This source does not pulse: the floor is a steady line in the RF spectrum.',
+    note: 'Compare: three wall sections side by side on one stage (solid metal, 10 mm metal mesh and carbon mesh, class A noise), each with a receiver 2.5 m behind it: the crossing loss is 40.0, 27.9 and 28.9 dB, and the noise reaching each receiver is -87.5, -72.2 and -75.0 dBm (the solid one includes the neighbouring walls leaking in), leaving margins of 12.7, -2.6 and 0.3 dB. Seen from FOH the metal and metal mesh both reflect at -3.5 dB and carbon at -9.5 dB. Holes of 100 mm (a coarse curtain) shield only 7.9 dB at 606 MHz, so a mesh wall is no free pass at UHF. All construction figures are assumed. This source does not pulse: the floor is a steady line in the RF spectrum.',
     build: () => ({ scene: videoWallScene({ preset: 'class-a', rx: 'back', sections: ['solid-metal', 'mesh-metal', 'mesh-carbon'] }) }),
   },
   {

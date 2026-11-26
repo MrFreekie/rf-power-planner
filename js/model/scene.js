@@ -210,7 +210,7 @@ export function syncBranches(link) {
 }
 
 /**
- * Shared receive antenna (mic links only): a link with rx.sharedAntennaOf = <another link id> uses that link's receive antenna, through a splitter.
+ * Shared receive antenna (mic, IEM and point-to-point links): a link with rx.sharedAntennaOf = <another link id> uses that link's receive antenna, through a splitter.
  * The follower's rx.pos and rx.antenna are copied from the source on every store.update (the source wins; move the source receiver to move both).
  * A dangling, self, chained or non-mic reference is dropped. Run in place; called by syncScene.
  */
@@ -235,7 +235,7 @@ export function syncSharedTx(scene) {
   for (const l of links) {
     if (!l || l.txOf === undefined) continue;
     const src = links.find((q) => q && q.id === l.txOf);
-    if (!src || src === l || (l.kind !== 'mic' && l.kind !== 'iem') || src.kind !== l.kind || src.txOf !== undefined || !src.tx) { delete l.txOf; continue; }
+    if (!src || src === l || (l.kind !== 'mic' && l.kind !== 'iem' && l.kind !== 'p2p') || src.kind !== l.kind || src.txOf !== undefined || !src.tx) { delete l.txOf; continue; }
     const own = l.tx && l.tx.id; l.freqMHz = src.freqMHz; l.tx = structuredClone(src.tx); if (own) l.tx.id = own; // the id stays unique
     if (l.kind === 'iem') l.chain = structuredClone(src.chain || []); // an extra bodypack hears the same rack-side path (combiner, cable, antenna)
   }

@@ -49,16 +49,16 @@ export function matchByFrequency(rack, links) {
 }
 
 /**
- * deriveSharedTx(scene): with frequency pairing, "another bodypack on the same mix" is just a bodypack on the same frequency. For IEM links the first one on a frequency (scene order) is the
- * mix's primary and every other one on exactly that frequency gets txOf = the primary's id; nothing is ever remembered, so retuning a bodypack changes who it hears. No-op without a frequency-paired rack.
- * Mics are not merged this way: two mics on one frequency are two transmitters (a clash to flag), so a mic's extra receiver keeps its stored txOf and is paired to a receiver channel by frequency.
+ * deriveSharedTx(scene): with frequency pairing, "another receiver for the same transmitter" is just one more link of that kind on the same exact frequency. For mic, IEM and point-to-point links the
+ * first one on a frequency (scene order) is the primary and every other one of its kind on exactly that frequency gets txOf = the primary's id (one transmitter, many receivers); nothing is
+ * ever remembered, so retuning a link changes what it hears. rackWarnings flags every shared frequency. No-op without a frequency-paired rack.
  */
 export function deriveSharedTx(scene) {
   if (!scene || !scene.rack || scene.rack.byFreq !== true || !Array.isArray(scene.links)) return scene;
   const prim = [];
   for (const l of scene.links) {
-    if (!l || l.kind !== 'iem') continue;
-    const p = prim.find((q) => sameFreq(q.freqMHz, l.freqMHz));
+    if (!l || (l.kind !== 'iem' && l.kind !== 'mic' && l.kind !== 'p2p')) continue;
+    const p = prim.find((q) => q.kind === l.kind && sameFreq(q.freqMHz, l.freqMHz));
     if (p) l.txOf = p.id; else { delete l.txOf; prim.push(l); }
   }
   return scene;
@@ -476,6 +476,12 @@ export function rackWarnings(scene, bwOf, opts) { // opts.erpOf(link) -> { level
     if (r && r.level) w.push({ key: `${l.kind === 'iem' ? 'transmitter' : 'mic'}:${l.id}`, level: r.level === 'info' ? 'info' : 'warn', text: `${nm(l.id)}: ${r.text}` });
   }
   for (const r of rack.receivers || []) { const lh = loopHops(rack, r); if (lh.hops.length && lh.hops.some((h) => !Number.isFinite(h.loopLossDb))) for (const c of r.channels) w.push({ key: `receiver:${channelItemId(c)}`, level: 'info', text: `${c.linkId ? nm(c.linkId) : `${fmtF(c.freqMHz)} MHz`} is fed through ${lh.hops.length} receiver loop-through hop${lh.hops.length === 1 ? '' : 's'}: the loss per hop is assumed (${DEFAULT_LOOP_LOSS_DB} dB); check the receiver data sheet.` }); }
+  const kindKey = { mic: 'mic', iem: 'transmitter', p2p: 'p2p' };
+  for (const l of links) { // one transmitter heard by several receivers is allowed, but two transmitters on one frequency are not, and the scene cannot tell which was meant
+    if (l.txOf === undefined || !kindKey[l.kind]) continue;
+    const src = links.find((q) => q.id === l.txOf); if (!src) continue;
+    w.push({ key: `${kindKey[l.kind]}:${src.id}`, level: 'warn', text: `${nm(l.id)} and ${nm(src.id)} are both tuned to ${fmtF(src.freqMHz)} MHz. That is read as one transmitter heard by several receivers. If they are separate transmitters they will interfere: give each its own frequency.` });
+  }
   if (rack.byFreq === true) {
     const heard = new Set((rack.receivers || []).flatMap((r) => r.channels.map((c) => c.linkId)).filter(Boolean));
     for (const l of links) if (l.kind === 'mic' && !heard.has(l.id)) w.push({ key: `mic:${l.txOf === undefined ? l.id : l.txOf}`, level: 'warn', text: l.txOf === undefined ? `${nm(l.id)} has no receiver tuned to ${fmtF(l.freqMHz)} MHz: it is not heard and no link is solved for it. Add a receiver on exactly this frequency.` : `${nm(l.id)} (another receiver for ${nm(l.txOf)}) has no receiver channel of its own on ${fmtF(l.freqMHz)} MHz: no link is solved for it. Add one more receiver on exactly this frequency.` });

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createStore } from '../js/store.js';
-import { createDefaultScene, validateScene } from '../js/model/scene.js';
+import { createDefaultScene, createDefaultLink, validateScene } from '../js/model/scene.js';
 import { addLink, removeLink, addReceiverFor } from '../js/actions.js';
 import { addTransmitter, setTxChannelFreq, removeTxChannel, adoptRack, addReceiver, setChannelFreq, removeReceiverChannel, addRackAntenna, removeRackItem } from '../js/actionsRack.js';
 import { rackSections, rackWarnings, unattachedAntennas } from '../js/model/rack.js';
@@ -109,6 +109,23 @@ test('a mic extra receiver pairs with the second receiver channel on its frequen
   assert.ok(rackWarnings(sc).some((w) => w.key === `mic:${mic}` && /another receiver/.test(w.text)), 'the extra has no channel yet');
   const r2 = addReceiver(st); sc = st.getScene();
   assert.equal(chans(sc).find((c) => c.id === r2).linkId, extra, 'the second channel on that frequency hears the extra');
-  assert.ok(!rackWarnings(sc).some((w) => w.key === `mic:${mic}`));
+  assert.ok(!rackWarnings(sc).some((w) => w.key === `mic:${mic}` && /no receiver channel/.test(w.text)));
+  assert.ok(rackWarnings(sc).some((w) => w.key === `mic:${mic}` && /both tuned to/.test(w.text)), 'a shared frequency is always flagged');
   assert.deepEqual(validateScene(sc).errors, []);
+});
+
+test('mics and point-to-point links on one exact frequency are one transmitter with several receivers, and retuning splits them', () => {
+  for (const kind of ['mic', 'p2p']) {
+    const st = createStore(createDefaultScene()); adoptRack(st);
+    const mk = () => { let id = null; st.update((d) => { const l = createDefaultLink(kind); l.freqMHz = 650 + 3 * d.links.length; d.links.push(l); id = l.id; }); return id; };
+    const a = mk(), b = mk();
+    const at = (id) => st.getScene().links.find((l) => l.id === id);
+    assert.equal(at(b).txOf, undefined, 'a new link starts on its own frequency');
+    st.update((d) => { d.links.find((l) => l.id === b).freqMHz = at(a).freqMHz; });
+    assert.equal(at(b).txOf, a, `${kind}: the second link on the frequency hears the first`);
+    assert.ok(rackWarnings(st.getScene()).some((w) => /both tuned to/.test(w.text)), `${kind}: shared frequency flagged`);
+    st.update((d) => { d.links.find((l) => l.id === b).freqMHz += 0.5; });
+    assert.equal(at(b).txOf, undefined, `${kind}: retuned away it is its own transmitter again`);
+    assert.deepEqual(validateScene(st.getScene()).errors, []);
+  }
 });

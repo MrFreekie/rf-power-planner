@@ -200,7 +200,7 @@ export function addReceiverFor(store, linkId) {
   let id = null;
   store.update((d) => {
     const src = d.links.find((l) => l.id === linkId);
-    if (!src || (src.kind !== 'mic' && src.kind !== 'iem') || src.txOf !== undefined || d.links.length >= SCENE_LIMITS.maxLinks) return;
+    if (!src || (src.kind !== 'mic' && src.kind !== 'iem' && src.kind !== 'p2p') || src.txOf !== undefined || d.links.length >= SCENE_LIMITS.maxLinks) return;
     const link = createDefaultLink(src.kind), taken = new Set(d.links.map((l) => l.name));
     let n = 2; while (taken.has(`${src.name} Rx ${n}`)) n += 1;
     link.name = `${src.name} Rx ${n}`.slice(0, 80); link.txOf = src.id; link.freqMHz = src.freqMHz; link.tx = { ...structuredClone(src.tx), id: link.tx.id };
