@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createStore } from '../js/store.js';
 import { createDefaultScene, validateScene } from '../js/model/scene.js';
-import { addLink, removeLink } from '../js/actions.js';
+import { addLink, removeLink, addReceiverFor } from '../js/actions.js';
 import { addTransmitter, setTxChannelFreq, removeTxChannel, adoptRack, addReceiver, setChannelFreq, removeReceiverChannel, addRackAntenna, removeRackItem } from '../js/actionsRack.js';
 import { rackSections, rackWarnings, unattachedAntennas } from '../js/model/rack.js';
 
@@ -97,4 +97,18 @@ test('transmitter settings live with the transmitter: an edit on the paired link
   assert.equal(tchans(st.getScene()).find((c) => c.id === id).tx.powerDbm, 7);
   setTxChannelFreq(st, id, 999.1); setTxChannelFreq(st, id, st.getScene().links.find((l) => l.id === iem).freqMHz);
   assert.equal(st.getScene().links.find((l) => l.id === iem).tx.powerDbm, 7);
+});
+
+test('a mic extra receiver pairs with the second receiver channel on its frequency, and an unmatched extra warns', () => {
+  const st = createStore(createDefaultScene()); adoptRack(st);
+  const mic = addLink(st, 'mic'), r1 = addReceiver(st);
+  const extra = addReceiverFor(st, mic);
+  let sc = st.getScene();
+  assert.equal(sc.links.find((l) => l.id === extra).txOf, mic);
+  assert.equal(chans(sc).find((c) => c.id === r1).linkId, mic, 'the first channel hears the mic itself');
+  assert.ok(rackWarnings(sc).some((w) => w.key === `mic:${mic}` && /another receiver/.test(w.text)), 'the extra has no channel yet');
+  const r2 = addReceiver(st); sc = st.getScene();
+  assert.equal(chans(sc).find((c) => c.id === r2).linkId, extra, 'the second channel on that frequency hears the extra');
+  assert.ok(!rackWarnings(sc).some((w) => w.key === `mic:${mic}`));
+  assert.deepEqual(validateScene(sc).errors, []);
 });

@@ -33,7 +33,7 @@ function projectRx(l, ch) { if (ch.rx && l.rx) for (const k of Object.keys(ch.rx
  * or null when none is. A channel from before frequencies were stored is tuned where its link was. Returns the set of matched link ids.
  */
 export function matchByFrequency(rack, links) {
-  const taken = new Set(), mics = (links || []).filter((l) => l && l.kind === 'mic' && l.txOf === undefined);
+  const taken = new Set(), mics = (links || []).filter((l) => l && l.kind === 'mic' && (l.txOf === undefined || rack.byFreq === true)); // with frequency pairing an extra receiver of a mic is a mic link like any other: it takes the next receiver channel on its frequency
   for (const r of rack.receivers || []) for (const c of r.channels || []) {
     if (!Number.isFinite(c.freqMHz)) { const old = mics.find((q) => q.id === c.linkId); c.freqMHz = old ? old.freqMHz : 600; }
     const l = mics.find((q) => !taken.has(q.id) && sameFreq(q.freqMHz, c.freqMHz));
@@ -51,6 +51,7 @@ export function matchByFrequency(rack, links) {
 /**
  * deriveSharedTx(scene): with frequency pairing, "another bodypack on the same mix" is just a bodypack on the same frequency. For IEM links the first one on a frequency (scene order) is the
  * mix's primary and every other one on exactly that frequency gets txOf = the primary's id; nothing is ever remembered, so retuning a bodypack changes who it hears. No-op without a frequency-paired rack.
+ * Mics are not merged this way: two mics on one frequency are two transmitters (a clash to flag), so a mic's extra receiver keeps its stored txOf and is paired to a receiver channel by frequency.
  */
 export function deriveSharedTx(scene) {
   if (!scene || !scene.rack || scene.rack.byFreq !== true || !Array.isArray(scene.links)) return scene;
@@ -477,7 +478,7 @@ export function rackWarnings(scene, bwOf, opts) { // opts.erpOf(link) -> { level
   for (const r of rack.receivers || []) { const lh = loopHops(rack, r); if (lh.hops.length && lh.hops.some((h) => !Number.isFinite(h.loopLossDb))) for (const c of r.channels) w.push({ key: `receiver:${channelItemId(c)}`, level: 'info', text: `${c.linkId ? nm(c.linkId) : `${fmtF(c.freqMHz)} MHz`} is fed through ${lh.hops.length} receiver loop-through hop${lh.hops.length === 1 ? '' : 's'}: the loss per hop is assumed (${DEFAULT_LOOP_LOSS_DB} dB); check the receiver data sheet.` }); }
   if (rack.byFreq === true) {
     const heard = new Set((rack.receivers || []).flatMap((r) => r.channels.map((c) => c.linkId)).filter(Boolean));
-    for (const l of links) if (l.kind === 'mic' && l.txOf === undefined && !heard.has(l.id)) w.push({ key: `mic:${l.id}`, level: 'warn', text: `${nm(l.id)} has no receiver tuned to ${fmtF(l.freqMHz)} MHz: it is not heard and no link is solved for it. Add a receiver on exactly this frequency.` });
+    for (const l of links) if (l.kind === 'mic' && !heard.has(l.id)) w.push({ key: `mic:${l.txOf === undefined ? l.id : l.txOf}`, level: 'warn', text: l.txOf === undefined ? `${nm(l.id)} has no receiver tuned to ${fmtF(l.freqMHz)} MHz: it is not heard and no link is solved for it. Add a receiver on exactly this frequency.` : `${nm(l.id)} (another receiver for ${nm(l.txOf)}) has no receiver channel of its own on ${fmtF(l.freqMHz)} MHz: no link is solved for it. Add one more receiver on exactly this frequency.` });
     const hearsTx = new Set((rack.transmitters || []).flatMap((t) => t.channels.map((c) => c.linkId)).filter(Boolean));
     for (const l of links) if (l.kind === 'iem' && l.txOf === undefined && !hearsTx.has(l.id)) w.push({ key: `bodypack:${l.id}`, level: 'warn', text: `${nm(l.id)} has no transmitter tuned to ${fmtF(l.freqMHz)} MHz: nothing is sent to it and no link is solved for it. Add a transmitter on exactly this frequency.` });
     for (const t of rack.transmitters || []) for (const c of t.channels) if (!c.linkId) w.push({ key: `transmitter:${c.id}`, level: 'warn', text: `${t.name} is tuned to ${fmtF(c.freqMHz)} MHz and no bodypack is on exactly that frequency.` });

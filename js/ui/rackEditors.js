@@ -132,7 +132,7 @@ export function makeEditors(ctx) {
     },
     receiver: (it, ess, adv) => {
       const m = find(rack.receivers, it.id); if (!m) return;
-      const lk = link(m.c.linkId) || null, src0 = lk && lk.txOf !== undefined && link(lk.txOf), nm = lk ? lk.name : `${m.c.freqMHz} MHz receiver`, f0 = lk ? lk.freqMHz : m.c.freqMHz;
+      const lk = link(m.c.linkId) || null, src0 = rack.byFreq !== true && lk && lk.txOf !== undefined && link(lk.txOf), nm = lk ? lk.name : `${m.c.freqMHz} MHz receiver`, f0 = lk ? lk.freqMHz : m.c.freqMHz;
       if (src0) fact(ess, 'Frequency', `${lk.freqMHz.toFixed(3)} MHz (follows ${src0.name})`);
       else ess.append(field('Tuned to', num('Receiver frequency for ' + nm, m.c.freqMHz, (v) => setChannelFreq(store, m.c.id, v), 1, 100000, 0.025), 'MHz'));
       ess.append(el('p', 'hint', lk ? `Heard on exactly this frequency: ${lk.name}. Retune the receiver or the mic and the pairing follows the frequencies.` : 'No mic is on exactly this frequency yet. Tune a mic to it (or retune this receiver to a mic): they pair by frequency alone. Its antennas and feed are kept either way.'));

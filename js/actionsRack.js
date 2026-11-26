@@ -308,14 +308,14 @@ export const setReceiverLoopLoss = (store, receiverId, db) => store.update((d) =
 
 /**
  * addReceiver(store, { freqMHz?, unitId?, name?, antA? }) -> channel id. A receiver is its own item: it is tuned to a frequency and listens through the antenna it is given (none by default).
- * Without a frequency it takes that of the first mic nobody listens to yet, so adding one next to a lone mic pairs them; else 600 MHz. unitId adds a further channel to that receiver unit.
+ * Without a frequency it takes that of the first mic (or extra mic receiver) nobody listens to yet, so adding one next to a lone mic pairs them; else 600 MHz. unitId adds a further channel to that receiver unit.
  */
 export function addReceiver(store, { freqMHz, unitId, name, antA = null } = {}) {
   let id = null;
   store.update((d) => {
     const rack = adopt(d); if (rack.byFreq !== true) rack.byFreq = true;
     const linked = new Set(rack.receivers.flatMap((r) => r.channels.map((c) => c.linkId)).filter(Boolean));
-    const lone = d.links.find((l) => l.kind === 'mic' && l.txOf === undefined && !linked.has(l.id));
+    const lone = d.links.find((l) => l.kind === 'mic' && !linked.has(l.id));
     const f = Number.isFinite(freqMHz) && freqMHz > 0 ? freqMHz : lone ? lone.freqMHz : 600;
     let unit = unitId ? rack.receivers.find((r) => r.id === unitId) : null;
     if (unit && unit.channels.length >= RACK_LIMITS.maxChannels) return;
