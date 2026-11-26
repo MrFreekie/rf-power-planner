@@ -266,7 +266,7 @@ test('an extra IEM bodypack shares the transmitter, has no transmitter item and 
   const st = createStore(createDefaultScene());
   const iem = addLink(st, 'iem'), id = addReceiverFor(st, iem);
   assert.ok(id);
-  st.update((d) => { d.links.find((l) => l.id === iem).freqMHz = 590.5; });
+  st.update((d) => { d.links.find((l) => l.id === iem).freqMHz = 590.5; d.links.find((l) => l.id === id).freqMHz = 590.5; }); // pairing is by frequency alone
   const s = st.getScene(), ex = s.links.find((l) => l.id === id);
   assert.equal(ex.kind, 'iem'); assert.equal(ex.freqMHz, 590.5); assert.equal(ex.txOf, iem);
   assert.deepEqual(ex.chain, s.links.find((l) => l.id === iem).chain);
@@ -275,6 +275,11 @@ test('an extra IEM bodypack shares the transmitter, has no transmitter item and 
   assert.ok(items.some((i) => i.kind === 'bodypack' && i.id === id));
   assert.equal(tuningClashes(s).filter((c) => c.a === id || c.b === id).length, 0);
   const v = validateScene(s); assert.ok(v.ok, (v.errors || []).join());
+  st.update((d) => { d.links.find((l) => l.id === iem).freqMHz = 580; });
+  const after = st.getScene().links.find((l) => l.id === id);
+  assert.equal(after.freqMHz, 590.5, 'retuning the first bodypack does not drag the other'); assert.equal(after.txOf, undefined, 'and it no longer hears that mix');
+  st.update((d) => { d.links.find((l) => l.id === id).freqMHz = 580; });
+  assert.equal(st.getScene().links.find((l) => l.id === id).txOf, iem, 'tuned to the same frequency again, it hears it again');
 });
 
 test('rack actions keep receive and transmit antennas in their own pools, and survive a link changing kind and back', async () => {

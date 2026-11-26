@@ -35,7 +35,7 @@ import { validateNoiseSource, wallNoiseSourcesFromReflectors, NOISE_SOURCE_LIMIT
 import { CROWD_MODES, CROWD_LIMITS } from './crowd.js';
 import { ANTENNA_BANDS } from './antenna-band.js';
 import { TV_BLOCK_LEVEL_LIMITS } from './spectrum-map.js';
-import { compileRack, validateRack } from './rack.js';
+import { compileRack, validateRack, deriveSharedTx } from './rack.js';
 import { validateLocks } from './lock.js';
 import { RING_TYPES } from './library.js';
 import { MEASUREMENT_LIMITS, validateMeasurement, CALIBRATION_FIELDS, WALL_ADJUST_BY_MATERIAL } from './measurement-schema.js';
@@ -244,6 +244,7 @@ export function syncSharedTx(scene) {
 
 /** Run syncBranches over every link of a scene (in place), then the shared receive antennas. */
 export function syncScene(scene) {
+  deriveSharedTx(scene); // before the shared-transmitter sync, so a bodypack retuned away from its mix is not pulled back onto it
   syncSharedTx(scene);
   compileRack(scene, { fromPreset: createChainItemFromPreset, item: createChainItem });
   syncSharedTx(scene); // again, so an extra bodypack takes the rack-side chain just compiled

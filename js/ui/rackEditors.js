@@ -126,7 +126,7 @@ export function makeEditors(ctx) {
       ess.append(gearPickers(store, l, 'rx'));
       battery(l, ess);
       const src = l.txOf !== undefined && link(l.txOf);
-      if (src) ess.append(el('p', 'hint', `Listens to ${src.name}: it hears that transmitter and mix, and follows its frequency.`));
+      if (src) ess.append(el('p', 'hint', `Listens to ${src.name}: it is on the same frequency, so it hears that transmitter and mix. Retune it to hear something else.`));
       else if (scene.links.some((q) => q.txOf === it.id)) ess.append(el('p', 'hint', `Also heard by ${scene.links.filter((q) => q.txOf === it.id).map((q) => q.name).join(', ')}.`));
       props(it.id, adv, [2]);
     },

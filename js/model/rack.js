@@ -48,6 +48,21 @@ export function matchByFrequency(rack, links) {
   return taken;
 }
 
+/**
+ * deriveSharedTx(scene): with frequency pairing, "another bodypack on the same mix" is just a bodypack on the same frequency. For IEM links the first one on a frequency (scene order) is the
+ * mix's primary and every other one on exactly that frequency gets txOf = the primary's id; nothing is ever remembered, so retuning a bodypack changes who it hears. No-op without a frequency-paired rack.
+ */
+export function deriveSharedTx(scene) {
+  if (!scene || !scene.rack || scene.rack.byFreq !== true || !Array.isArray(scene.links)) return scene;
+  const prim = [];
+  for (const l of scene.links) {
+    if (!l || l.kind !== 'iem') continue;
+    const p = prim.find((q) => sameFreq(q.freqMHz, l.freqMHz));
+    if (p) l.txOf = p.id; else { delete l.txOf; prim.push(l); }
+  }
+  return scene;
+}
+
 /** deriveRack(scene) -> a rack describing the mic links as they are now (shared antennas become one splitter, antenna B an antenna of its own). */
 export function deriveRack(scene) {
   const links = ((scene && scene.links) || []).filter((l) => l && l.kind === 'mic');
@@ -200,6 +215,7 @@ const freeId = (base, taken) => { let id = base, n = 2; while (taken.includes(id
 export function compileRack(scene, mk) {
   const rack = scene && scene.rack;
   if (!rack || !Array.isArray(rack.receivers)) return scene;
+  deriveSharedTx(scene);
   const links = scene.links || [], used = new Map();
   const zoneIds = new Set((scene.zones || []).map((z) => z.id));
   for (const a of rack.antennas || []) if (Array.isArray(a.zones)) a.zones = a.zones.filter((z) => zoneIds.has(z)); // a deleted zone leaves the list
