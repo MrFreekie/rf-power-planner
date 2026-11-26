@@ -16,13 +16,14 @@ no accounts. Vanilla ES modules and Canvas 2D.
 - Free-space and two-ray (floor) path loss, wall reflections, through-wall loss with thickness, and antenna patterns (directional types include a front-to-back figure).
 - The plan view refits when a scene loads and keeps labels from overlapping.
 - Cable (including RG8X, hardline and 75 ohm RG6 with a mismatch warning), booster, filter, surge arrestor, attenuator and splitter chains with a power-budget waterfall, margin and pass/marginal/fail. Surge arrestor, RG8X and filter figures are assumed class values; hardline and RG6 are datasheet-based with some interpolation. A 75/50 ohm junction adds a small loss (about 0.18 dB) to the waterfall.
-- A "Radio items" sidebar list, grouped by category: microphones by form factor, receive antennas (model, gain, aim, cable/booster/fibre chain, zones, dummy load), splitters (cascade up to 3 stages), receivers (channels, antenna bias, RF loop-through), IEM transmitters (channels, isolator), combiners (cable, fan-out to several transmit antennas) and transmit antennas. Add mic / Add IEM, person assignment (one person can carry several mic and IEM packs), equipment pickers, a Tuning section (frequency, band) and an extra receiver for one mic.
+- A "Radio items" sidebar list, grouped by category: microphones by form factor, receive antennas (model, gain, aim, cable/booster/fibre chain, zones, dummy load), splitters (cascade up to 3 stages), receivers (channels, antenna bias, RF loop-through), IEM transmitters (channels, isolator), combiners (passive, active or isolated, with loss and isolation you can override, a cable, fan-out to several transmit antennas, or feeding into a joining combiner) and transmit antennas. Add mic / Add IEM, person assignment (one person can carry several mic and IEM packs), equipment pickers, a Tuning section (frequency, band) and an extra receiver for one mic.
 - Rack checks: open-output and unused-port warnings, 50 ohm dummy loads and a what-to-pack count, a powering budget, an ERP check, DC voltage-drop warnings on long powered cable runs, and a warning when two transmitters share a frequency, overlap in bandwidth or sit inside a 100 kHz guard band.
 - Builders for the venue (stage, platforms, audience, crowd, ceiling, noise sources, environment, floor, reflectors with Add room walls), People and a Point-to-point link.
 - Cascaded noise figure and sensitivity at the antenna terminals (booster at the antenna versus at the rack).
 - Squelch with hysteresis, RF overload and headroom, receive diversity (switching, true, ratio), set up inside the receiver and mic radio items.
 - Multi-antenna IEM coverage with zones, a coverage heat map and fix suggestions.
 - Intermodulation: front-end, transmitter-to-transmitter and passive products, noise floor and coordination checks, with an Intermod demo form.
+  With a frequency-paired rack the Intermod demo can take its transmitters from the rack (every in-ear and microphone link, at its own antenna and position, through the rack's combiners), so the two cannot disagree. Products are then worked out at each bodypack or microphone receiver in turn, with a table per receiver and a menu to view any one of them in full.
 - Venue underlay: import a venue drawing (SU4SV text) as a grey underlay with layer toggles and height shading.
 - Frequency coordination checks by region and band, a scene compare table and named scenes saved in the browser (both in the Scenes pop-out in the top bar).
 - Printable report sheet, JSON save/load and shareable links (the scene is stored in the link; nothing is uploaded).
@@ -48,7 +49,7 @@ ES modules need an HTTP origin (not `file://`):
 
 `js/model/*` is pure (no DOM), so the physics runs under Node and is covered by unit tests with hand-computed values.
 `tests/app-wiring.test.mjs` also checks the app shell without a browser (element ids, module paths, import cycles, relative URLs).
-The scene has optional `rack` and `link.txOf` fields (schema version still 2); older scenes load unchanged.
+The scene has optional `rack`, `link.txOf` and `imd.fromRack` / `imd.rxLinkId` fields (schema version still 2); older scenes load unchanged.
 Tests that use local venue files in `tests/private-venues/` skip themselves when that folder is absent.
 
 ## Privacy

@@ -1,7 +1,7 @@
 // Example scene builders: even-order products, tone MPX and intermodulation / IEM 8-channel plans.
 import { toneMpxReport } from '../model/tone-mpx.js';
 import { createDefaultScene, createDefaultLink, createChainItem, createDefaultImd, createImdTransmitter, newId, syncScene } from '../model/scene.js';
-import { txDevice } from '../model/rack.js';
+import { txDevice, deriveRack } from '../model/rack.js';
 import { make, iemHall } from './helpers.js';
 
 /**
@@ -125,13 +125,42 @@ export function iem8Scene(variant, { omniDistanceM = 2.5, omniAt = 'front', tx8I
       const a = split ? [0, 2, 4, 6] : [0, 1, 2, 3], b = split ? [1, 3, 5, 7] : [4, 5, 6, 7];
       m.topology = {
         groups: [
-          { id: 'g1', name: '4-way combiner 1', members: pick(a), lossDb: 3, isolationDb: 40, isolatorDb: iso },
-          { id: 'g2', name: '4-way combiner 2', members: pick(b), lossDb: 3, isolationDb: 40, isolatorDb: iso },
+          { id: 'g1', name: '4-way combiner 1', members: pick(a), lossDb: 3, isolationDb: 40, isolatorDb: iso, perChannel: true },
+          { id: 'g2', name: '4-way combiner 2', members: pick(b), lossDb: 3, isolationDb: 40, isolatorDb: iso, perChannel: true },
         ],
         root: { lossDb: 3.5, isolationDb: 25 },
       };
     }
     iem8Rack(s, l, m);
+  });
+}
+
+/** Four microphone frequencies (MHz) for micImdScene: 'clean' has no third-order product on any of them, 'equal' is a 400 kHz comb where 2 f2 - f1 = f3 and 2 f3 - f2 = f4. */
+export const MIC_IMD_PLANS_MHZ = { clean: [606.1, 606.5, 607.3, 608.9], equal: [606.0, 606.4, 606.8, 607.2] };
+
+/**
+ * micImdScene(plan): four microphones in a rack on one omni receive antenna at the front of a 16 x 10 m stage, performers 3 to 7 m from it. The rack takes the intermod
+ * transmitters from the microphone links themselves (imd.fromRack), each at its own performer position, so retuning a mic or moving a performer changes the intermod.
+ * plan 'clean' (default) or 'equal': see MIC_IMD_PLANS_MHZ. Output power 14 dBm (25 mW), assumed.
+ */
+export function micImdScene(plan = 'clean') {
+  const f = MIC_IMD_PLANS_MHZ[plan] || MIC_IMD_PLANS_MHZ.clean;
+  const spots = [{ x: 4, y: 7, z: 1.5 }, { x: 7, y: 4, z: 1.5 }, { x: 9.5, y: 6, z: 1.5 }, { x: 12, y: 3.5, z: 1.5 }];
+  return make('mic', (s, l) => {
+    s.stage = { width: 16, depth: 10 };
+    const ant = { type: 'omni', gainDbi: 0, orientation: { az: 0, el: 90 } };
+    const links = [l, ...[1, 2, 3].map(() => { const k = structuredClone(l); k.id = newId('link'); k.tx.id = newId('tx'); k.rx.id = newId('rx'); return k; })];
+    links.forEach((k, i) => {
+      k.name = `Mic ${i + 1}`; k.tx.name = `Mic ${i + 1}`; k.freqMHz = f[i]; k.tx.powerDbm = 14; k.tx.pos = { ...spots[i] };
+      k.rx.antenna = structuredClone(ant); k.rx.pos = { x: 8, y: 0.5, z: 2 };
+      if (i > 0) k.rx.sharedAntennaOf = links[0].id; else delete k.rx.sharedAntennaOf;
+    });
+    s.links = links;
+    s.rack = deriveRack(s);
+    const m = createDefaultImd();
+    m.enabled = true; m.fromRack = true; m.transmitters = []; m.iip3Dbm = -30; // a receiver front end with a wideband booster ahead of it, assumed
+    s.imd = m;
+    syncScene(s);
   });
 }
 
@@ -154,7 +183,7 @@ function iem8Rack(s, l, m) {
   const antennas = [{ id: 'ta_main', role: 'tx', name: 'Directional antenna', pos: structuredClone(m.transmitters[0].pos), antenna: structuredClone(m.transmitters[0].antenna) }];
   const combiners = [], channels = [];
   groups.filter((g) => g.members.length > 1).forEach((g, gi) => {
-    const cb = { id: `cb_${gi + 1}`, name: g.name, type: g.isolatorDb > 0 && g.isolationDb >= 2 * g.isolatorDb ? 'isolated' : 'passive', antennaId: rootSpec ? null : 'ta_main', ports: g.members.length, lossDb: g.lossDb, isolationDb: g.isolationDb };
+    const cb = { id: `cb_${gi + 1}`, name: g.name, type: !g.perChannel && g.isolatorDb > 0 && g.isolationDb >= 2 * g.isolatorDb ? 'isolated' : 'passive', antennaId: rootSpec ? null : 'ta_main', ports: g.members.length, lossDb: g.lossDb, isolationDb: g.isolationDb };
     if (rootSpec) cb.into = 'cb_root';
     combiners.push(cb);
   });
@@ -164,7 +193,7 @@ function iem8Rack(s, l, m) {
     const own = !cb && !(t.antenna && t.antenna.type === antennas[0].antenna.type && sameSpot(t.pos, antennas[0].pos));
     if (own) antennas.push({ id: `ta_${i + 1}`, role: 'tx', name: `${t.name} antenna`, pos: structuredClone(t.pos), antenna: structuredClone(t.antenna) });
     const ch = { id: `tc_${i + 1}`, linkId: links[i].id, freqMHz: t.freqMHz, tx: txDevice(links[i].tx), combinerId: cb ? cb.id : null, antennaId: cb ? null : own ? `ta_${i + 1}` : 'ta_main' };
-    if (g && g.isolatorDb > 0 && (g.members.length === 1 || !(cb && cb.type === 'isolated'))) { ch.isolator = true; ch.isolatorDb = g.isolatorDb; }
+    if (g && g.isolatorDb > 0 && (g.members.length === 1 || g.perChannel || !(cb && cb.type === 'isolated'))) { ch.isolator = true; ch.isolatorDb = g.isolatorDb; }
     channels.push(ch);
   });
   s.rack = { byFreq: true, antennas, splitters: [], receivers: [], combiners, transmitters: [{ id: 'rt_1', name: 'IEM Tx', channels }] };

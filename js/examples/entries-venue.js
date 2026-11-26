@@ -2,7 +2,7 @@
 import { iemHall } from './helpers.js';
 import { bandScene, audienceScene, ceilingScene, rofScene, rofBranchScene } from './scenes-venue.js';
 import { sosScene, fohScene, videoWallScene } from './scenes-foh.js';
-import { evenScene, toneMpxScene, imdScene, iem8Scene } from './scenes-imd.js';
+import { evenScene, toneMpxScene, imdScene, iem8Scene, micImdScene } from './scenes-imd.js';
 
 export const VENUE_EXAMPLES = [
   {
@@ -60,7 +60,7 @@ export const VENUE_EXAMPLES = [
   {
     id: 'imd-iem-4plus4-combined',
     title: 'Eight IEMs: two 4-way combiners and a passive 2-way to one antenna (C)',
-    note: 'Less ideal: the same eight frequencies in two 4-way isolated combiners (3 dB, 40 dB, each transmitter with its own 20 dB isolator) joined by a passive 2-way hybrid (3.5 dB, 25 dB, assumed) to the same directional antenna. every channel now loses 6.5 dB, 2.0 dB more than the 8-way, so the bodypack gets -39.3 dBm; inside a group the isolation is 40.0 dB; between groups the path is 3 + 25 + 3 + 20 = 51.0 dB because each transmitter is still protected by its own isolator, and the worst product is -99.3 dBm (-59.9 dBc), 3.0 dB worse than the 8-way; take the isolators away (a plain 4-way and hybrid) and the cross-group isolation falls to 31.0 dB and the worst product rises to -90.3 dBm. Pros: modular, cheaper units, a failed module takes out four channels, not eight; Cons: more loss, more connectors, the hybrid is the weak link. Illustrative figures.',
+    note: 'Less ideal: the same eight frequencies in two 4-way combiners (3 dB, 40 dB port isolation, each transmitter with its own 20 dB isolator) joined by a passive 2-way hybrid (3.5 dB, 25 dB, assumed) to the same directional antenna. every channel now loses 6.5 dB, 2.0 dB more than the 8-way, so the bodypack gets -39.3 dBm; inside a group the isolation is 40.0 dB; between groups the path is 3 + 25 + 3 + 20 = 51.0 dB because each transmitter is still protected by its own isolator, and the worst product is -99.3 dBm (-59.9 dBc), 3.0 dB worse than the 8-way; take the isolators away (a plain 4-way and hybrid) and the cross-group isolation falls to 31.0 dB and the worst product rises to -90.3 dBm. Pros: modular, cheaper units, a failed module takes out four channels, not eight; Cons: more loss, more connectors, the hybrid is the weak link. Illustrative figures.',
     build: () => ({ scene: iem8Scene('C') }),
   },
   {
@@ -248,5 +248,17 @@ export const VENUE_EXAMPLES = [
     title: 'Overdeviation: a loud tone plus the pilot passes 100 percent',
     note: 'Problem: a 1 kHz tone at 95 percent of peak deviation plus the 9 percent pilot sums to 104 percent, 0.3 dB over the limit, so the limiter clips (beta 71). The third harmonic sits at -28.4 dB, the J0 J0 carrier term falls to -33.9 dB as the Bessel weights spread over about 186 kHz, and products at 18 and 20 kHz reach -36.9 dB. The pilot cubed lands at 57 kHz (-86.2 dB) in the RDS band. Limit the programme before the pilot is added and keep the tone below 91 percent.',
     build: () => ({ scene: toneMpxScene('overdev') }),
+  },
+  {
+    id: 'imd-mics-rack-clean',
+    title: 'Four mics in the rack: a frequency plan with no third-order product',
+    note: 'Best practice: four microphones on 606.1, 606.5, 607.3 and 608.9 MHz share one omni receive antenna. The intermod demo takes its transmitters from the rack, each at its performer position, and works the products out at every receiver in turn. No third-order product lands on any channel (the closest is 92.2 dB under the wanted signal) with the assumed -30 dBm receiver intercept, and the noise floor rises 15.2 dB. Retune a mic or move a performer and the table follows.',
+    build: () => ({ scene: micImdScene('clean') }),
+  },
+  {
+    id: 'imd-mics-rack-equal',
+    title: 'Four mics in the rack: an equal 400 kHz comb puts products on the channels',
+    note: 'Problem: the same four microphones, tuned 400 kHz apart (606.0, 606.4, 606.8, 607.2 MHz). Third-order products 2f2-f1 and 2f3-f2 land exactly on the next two channels, and with the assumed -30 dBm intercept the worst products sit only 5.0 dB (Mic 1) and 9.3 dB (Mic 3) under the wanted signal, with the noise floor 67.8 dB higher. Moving to the coordinated plan removes the hits, as the clean-plan example shows.',
+    build: () => ({ scene: micImdScene('equal') }),
   },
 ];

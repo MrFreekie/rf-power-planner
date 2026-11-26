@@ -114,3 +114,18 @@ test('the transmitter device sets its own output-stage reverse intermod in a rac
   const other = txReverseImd(s).find((p) => p.pumpTx === s.links[1].id && p.order === 3).levelDbm;
   assert.ok(Number.isFinite(other));
 });
+
+test('mic intermod examples: figures quoted in the notes are recomputed, equal-spacing plan puts products on the channels', async () => {
+  const { micImdScene } = await import('../js/examples/scenes-imd.js');
+  const { imdPerBodypack, imdSummary } = await import('../js/model/imd.js');
+  const { buildExample } = await import('../js/examples.js');
+  const clean = micImdScene('clean'), equal = micImdScene('equal');
+  const rc = imdPerBodypack(clean), re = imdPerBodypack(equal);
+  const f1 = (x) => x.toFixed(1);
+  const noteC = buildExample('imd-mics-rack-clean').note, noteE = buildExample('imd-mics-rack-equal').note;
+  const closest = Math.min(...rc.filter((r) => r.worstCiDb !== null).map((r) => r.worstCiDb));
+  assert.ok(noteC.includes(f1(closest) + ' dB') && noteC.includes(f1(imdSummary(clean).riseDb) + ' dB'), 'clean note numbers');
+  assert.ok(re.every((r) => r.severity === 'warning' || r.severity === 'critical'));
+  assert.ok(noteE.includes(f1(re[0].worstCiDb) + ' dB') && noteE.includes(f1(re[2].worstCiDb) + ' dB') && noteE.includes(f1(imdSummary(equal).riseDb) + ' dB'), 'equal note numbers');
+  assert.ok(rc.every((r) => r.severity === 'ok' || r.severity === 'info'));
+});
