@@ -1,7 +1,7 @@
 // What an open radio item shows: essentials first (what a tech sets on every channel), the rest in its Advanced section.
 // makeEditors(ctx) -> { mic, receiver, transmitter, bodypack, antenna, txantenna, splitter, combiner }: each (item, essentials, advanced) fills the two boxes.
 // Every control from the old single list is still here; edits go through the same actions (one undo step each).
-import { channelRoute, canFeedSplitter, canLoopReceiver, loopLossOf, RACK_LIMITS, DEFAULT_LOOP_LOSS_DB } from '../model/rack.js';
+import { channelRoute, combinerParams, canFeedSplitter, canLoopReceiver, loopLossOf, RACK_LIMITS, DEFAULT_LOOP_LOSS_DB } from '../model/rack.js';
 import { CABLES, ANTENNAS, GROUND_PLANE_LABELS, GROUND_PLANE_GAIN_DBI, allowedPolarisations, defaultPolarisation } from '../model/library.js';
 import { CHAIN_PRESETS } from '../model/chain-presets.js';
 import { chainItemLossDb } from '../model/rf.js';
@@ -213,9 +213,15 @@ export function makeEditors(ctx) {
     combiner: (it, ess, adv) => {
       const c = rack.combiners.find((x) => x.id === it.id); if (!c) return;
       ess.append(field('Name', text('Combiner name', c.name, (v) => renameRackItem(store, 'combiners', c.id, v))),
-        field('Type', select('Combiner type', [['passive', 'Passive'], ['active', 'Active']], c.type, (v) => setCombiner(store, c.id, { type: v }))),
+        field('Type', select('Combiner type', [['passive', 'Passive'], ['active', 'Active'], ['isolated', 'Isolated (circulator or cavity)']], c.type, (v) => setCombiner(store, c.id, { type: v }))),
         field('Ports', select('Combiner ports', portOpts, c.ports ? String(c.ports) : '', (v) => setCombiner(store, c.id, { ports: v || null }))));
-      if (!c.fanout) ess.append(field('Transmit antenna', select('Antenna for ' + c.name, antOpts('tx'), c.antennaId, (v) => setCombiner(store, c.id, { antennaId: v }))));
+      const q = combinerParams(c, Math.max(c.ports || 2, rack.transmitters.reduce((n, t) => n + t.channels.filter((ch) => ch.combinerId === c.id).length, 0), rack.combiners.filter((x) => x.into === c.id).length));
+      const joins = rack.combiners.filter((x) => x !== c && !x.into && !rack.combiners.some((y) => y.into === c.id) && !rack.transmitters.some((t) => t.channels.some((ch) => ch.combinerId === x.id)));
+      ess.append(field('Through loss', num('Through loss for ' + c.name, +q.lossDb.toFixed(2), (v) => setCombiner(store, c.id, { lossDb: v }), 0, 100), 'dB'),
+        field('Port isolation', num('Port isolation for ' + c.name, +q.isolationDb.toFixed(1), (v) => setCombiner(store, c.id, { isolationDb: v }), 0, 100), 'dB'),
+        field('Feeds into', select('Feeds into for ' + c.name, [['', 'Nothing: its own antenna'], ...joins.map((x) => [x.id, x.name])], c.into || '', (v) => setCombiner(store, c.id, { into: v || null }))));
+      ess.append(el('p', 'hint', c.into ? 'Joined into another combiner: its channels pay both losses and see the joining isolation between groups. The antenna comes from the combiner it feeds.' : 'Loss and isolation start from the type (assumed planning figures); typing a value overrides it, changing the type resets it. An isolated combiner puts an isolator at every port, so each port reverse isolation is half the port-to-port figure.'));
+      if (!c.fanout && !c.into) ess.append(field('Transmit antenna', select('Antenna for ' + c.name, antOpts('tx'), c.antennaId, (v) => setCombiner(store, c.id, { antennaId: v }))));
       ess.append(field('Cable to antenna', num('Cable length for ' + c.name, c.cable ? c.cable.lengthM : 0, (v) => setCombiner(store, c.id, { cableM: v }), 0, 500), 'm'),
         field('Cable type', select('Cable type for ' + c.name, cableOpts(), c.cable ? c.cable.type : 'rg58', (v) => setCombiner(store, c.id, { cableType: v }))));
       adv.append(field('Splitter to several antennas', select('Output splitter for ' + c.name, [['', 'None'], ['passive', 'Passive'], ['active', 'Active']], c.fanout ? c.fanout.type : '', (v) => setCombinerFanout(store, c.id, v ? { on: true, type: v } : { on: false }))));

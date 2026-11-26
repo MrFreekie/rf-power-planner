@@ -138,7 +138,14 @@ export function addRackCombiner(store, { type = 'passive', name, cableM = 0, cab
 export function setCombiner(store, id, patch) {
   return store.update((d) => {
     const rack = adopt(d), c = rack.combiners.find((x) => x.id === id); if (!c) return;
-    if (patch.type === 'passive' || patch.type === 'active') c.type = patch.type;
+    if (patch.type === 'passive' || patch.type === 'active' || patch.type === 'isolated') { if (c.type !== patch.type) { delete c.lossDb; delete c.isolationDb; } c.type = patch.type; } // a new type starts from its own defaults
+    for (const k of ['lossDb', 'isolationDb']) if (patch[k] !== undefined) { const v = Number(patch[k]); if (patch[k] === null || !Number.isFinite(v)) delete c[k]; else c[k] = Math.max(0, Math.min(100, v)); }
+    if (patch.into !== undefined) {
+      const r = patch.into ? rack.combiners.find((x) => x.id === patch.into) : null;
+      const takesChannels = (id) => rack.transmitters.some((t) => t.channels.some((ch) => ch.combinerId === id));
+      if (!patch.into) delete c.into;
+      else if (r && r !== c && !r.into && !rack.combiners.some((x) => x.into === c.id) && !takesChannels(r.id)) c.into = r.id;
+    }
     if (patch.ports !== undefined) { const n = Math.round(Number(patch.ports)); if (n >= 2 && n <= 16) c.ports = n; else delete c.ports; }
     if (patch.antennaId !== undefined && hasRole(rack, patch.antennaId, true)) c.antennaId = patch.antennaId || null;
     if (patch.cableM !== undefined) { const m = Math.max(0, Math.min(500, Number(patch.cableM) || 0)); c.cable = m > 0 ? { type: patch.cableType || (c.cable && c.cable.type) || 'rg58', lengthM: m } : null; }

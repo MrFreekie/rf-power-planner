@@ -44,3 +44,22 @@ test('into validation: unknown target, chained roots and a root with channels ar
   const bad2 = structuredClone(s); bad2.imd.fromRack = 'yes';
   assert.equal(validateScene(bad2).ok, false);
 });
+
+test('setCombiner: isolated type, overrides, feeds-into rules', async () => {
+  const { setCombiner } = await import('../js/actionsRack.js');
+  const { createStore } = await import('../js/store.js');
+  const store = createStore(iem8Scene('C'));
+  const [c1, c2, root] = store.getScene().rack.combiners.map((c) => c.id);
+  setCombiner(store, c1, { type: 'isolated' });
+  assert.equal(store.getScene().rack.combiners[0].type, 'isolated');
+  setCombiner(store, c1, { lossDb: 4, isolationDb: 500 });
+  assert.deepEqual([store.getScene().rack.combiners[0].lossDb, store.getScene().rack.combiners[0].isolationDb], [4, 100]);
+  setCombiner(store, c1, { type: 'passive' });
+  assert.equal(store.getScene().rack.combiners[0].lossDb, undefined);
+  setCombiner(store, root, { into: c1 }); // a root that takes feeders cannot itself feed
+  assert.equal(store.getScene().rack.combiners[2].into, undefined);
+  setCombiner(store, c1, { into: c2 }); // c2 takes channels
+  assert.equal(store.getScene().rack.combiners[0].into, 'cb_root');
+  setCombiner(store, c1, { into: null });
+  assert.equal(store.getScene().rack.combiners[0].into, undefined);
+});
