@@ -1,6 +1,7 @@
 // Example scene builders: even-order products, tone MPX and intermodulation / IEM 8-channel plans.
 import { toneMpxReport } from '../model/tone-mpx.js';
-import { createDefaultScene, createDefaultLink, createChainItem, createDefaultImd, createImdTransmitter } from '../model/scene.js';
+import { createDefaultScene, createDefaultLink, createChainItem, createDefaultImd, createImdTransmitter, newId, syncScene } from '../model/scene.js';
+import { txDevice } from '../model/rack.js';
 import { make, iemHall } from './helpers.js';
 
 /**
@@ -130,7 +131,38 @@ export function iem8Scene(variant, { omniDistanceM = 2.5, omniAt = 'front', tx8I
         root: { lossDb: 3.5, isolationDb: 25 },
       };
     }
+    iem8Rack(s, l, m);
   });
+}
+
+/**
+ * iem8Rack(s, l, m): the eight transmitters of an iem8Scene as real links in a frequency-paired rack. Each link sits on its intermod transmitter's exact frequency (so the plan lists the pair once),
+ * every combiner group with several members is a rack combiner on the shared antenna, a transmitter outside any group sits on an antenna of its own, and a single-member group is an isolator on that channel.
+ * The rack's combiner is the generic passive one, so link margins use its loss; the intermod figures still come from scene.imd, whose combiner and isolation values are the assumed ones.
+ */
+const sameSpot = (a, b) => !!a && !!b && a.x === b.x && a.y === b.y && a.z === b.z;
+function iem8Rack(s, l, m) {
+  const links = m.transmitters.map((t, i) => {
+    const k = i === 0 ? l : structuredClone(l);
+    if (i > 0) { k.id = newId('link'); k.tx.id = newId('tx'); k.rx.id = newId('rx'); }
+    k.name = t.name; k.freqMHz = t.freqMHz; k.tx.name = t.name; k.tx.powerDbm = t.powerDbm;
+    return k;
+  });
+  s.links = links;
+  const groups = m.topology && Array.isArray(m.topology.groups) ? m.topology.groups : [];
+  const antennas = [{ id: 'ta_main', role: 'tx', name: 'Directional antenna', pos: structuredClone(m.transmitters[0].pos), antenna: structuredClone(m.transmitters[0].antenna) }];
+  const combiners = [], channels = [];
+  groups.filter((g) => g.members.length > 1).forEach((g, gi) => combiners.push({ id: `cb_${gi + 1}`, name: g.name, type: 'passive', antennaId: 'ta_main', ports: g.members.length }));
+  m.transmitters.forEach((t, i) => {
+    const g = groups.find((q) => q.members.includes(t.id)) || null, cb = g && g.members.length > 1 ? combiners.find((c) => c.name === g.name) : null;
+    const own = !cb && !(t.antenna && t.antenna.type === antennas[0].antenna.type && sameSpot(t.pos, antennas[0].pos));
+    if (own) antennas.push({ id: `ta_${i + 1}`, role: 'tx', name: `${t.name} antenna`, pos: structuredClone(t.pos), antenna: structuredClone(t.antenna) });
+    const ch = { id: `tc_${i + 1}`, linkId: links[i].id, freqMHz: t.freqMHz, tx: txDevice(links[i].tx), combinerId: cb ? cb.id : null, antennaId: cb ? null : own ? `ta_${i + 1}` : 'ta_main' };
+    if (g && g.members.length === 1 && g.isolatorDb > 0) { ch.isolator = true; ch.isolatorDb = g.isolatorDb; }
+    channels.push(ch);
+  });
+  s.rack = { byFreq: true, antennas, splitters: [], receivers: [], combiners, transmitters: [{ id: 'rt_1', name: 'IEM Tx', channels }] };
+  syncScene(s); // compiled now, so the shared and reloaded scene are the same
 }
 
 /**

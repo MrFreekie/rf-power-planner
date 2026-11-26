@@ -285,6 +285,7 @@ function compileTxRack(scene, rack, links, mk) {
     const fan = cb && cb.fanout && Array.isArray(cb.fanout.outputs) ? cb.fanout : null;
     const fanOut = fan ? fan.outputs.find((o) => o && rack.antennas.some((a) => a.id === o.antennaId)) || null : null; // the output this link is solved on: the first one with an antenna
     const ant = rack.antennas.find((a) => a.id === (fan ? (fanOut && fanOut.antennaId) : cb ? cb.antennaId : c.antennaId));
+    const oldIds = (l.chain || []).filter(isRackItem).map((it) => it.id); // the same rack parts keep their ids from one compile to the next
     l.chain = (l.chain || []).filter((it) => !isRackItem(it));
     if (ant) { l.tx.pos = structuredClone(ant.pos); l.tx.antenna = structuredClone(ant.antenna); if (ant.load) l.tx.antenna.gainDbi = DUMMY_LOAD_GAIN_DBI; } // a 50 ohm load radiates nothing
     if (cb) {
@@ -298,6 +299,7 @@ function compileTxRack(scene, rack, links, mk) {
       l.chain.unshift(...items);
     }
     if (c.isolator) l.chain.unshift({ ...mk.item('attenuator', { lossDb: ISOLATOR_LOSS_DB, reverseIsolationDb: isolatorDb(c) }), rackSplitter: true }); // first in the chain: straight after the Tx output stage
+    l.chain.filter(isRackItem).forEach((it, j) => { if (oldIds[j]) it.id = oldIds[j]; });
   }
 }
 

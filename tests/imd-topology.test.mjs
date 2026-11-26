@@ -125,3 +125,24 @@ test('lesson-author queries: wanted-to-product ratio, in-channel count by order,
   // default 4-port splitter: 10log10(4) = 6.02 dB split plus 1 dB excess (was 7 dB excess = 13 dB, wrong)
   near(chainItemLossDb(createChainItem('splitter'), 600), 10 * Math.log10(4) + 1, 1e-9);
 });
+
+test('the eight IEMs are real links in a frequency-paired rack, each on its intermod transmitter\'s frequency and listed once', async () => {
+  const { validateScene } = await import('../js/model/scene.js');
+  const { extraImdTransmitters } = await import('../js/model/plan-export.js');
+  const { rackWarnings } = await import('../js/model/rack.js');
+  for (const v of ['A', 'B', 'C']) {
+    const sc = iem8Scene(v);
+    assert.deepEqual(validateScene(sc).errors, [], v);
+    assert.equal(sc.links.length, 8, v);
+    assert.deepEqual(sc.links.map((l) => l.freqMHz), IEM8_PLAN_MHZ, v);
+    assert.equal(sc.rack.byFreq, true);
+    assert.deepEqual(sc.rack.transmitters[0].channels.map((c) => c.linkId), sc.links.map((l) => l.id), `${v}: every channel pairs with its link`);
+    assert.equal(extraImdTransmitters(sc).length, 0, `${v}: the plan lists each transmitter once`);
+    assert.deepEqual(rackWarnings(sc).filter((w) => w.level === 'warn'), [], v);
+  }
+  const b = iem8Scene('B'), ch = b.rack.transmitters[0].channels;
+  assert.equal(ch.filter((c) => c.combinerId).length, 7, 'seven through the combiner');
+  assert.equal(ch[7].combinerId, null);
+  const ant = b.rack.antennas.find((a) => a.id === ch[7].antennaId);
+  assert.equal(ant.antenna.type, 'omni', 'the eighth goes straight to an omni antenna');
+});
