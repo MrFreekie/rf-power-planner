@@ -100,3 +100,17 @@ test('rack-fed intermod includes microphone links at their own position; actions
   setImdFromRack(store, true);
   assert.equal(store.getScene().imd.fromRack, true);
 });
+
+test('the transmitter device sets its own output-stage reverse intermod in a rack-fed scene (preset and low-intermod mode per link)', async () => {
+  const { txReverseImd } = await import('../js/model/imd.js');
+  const { FM_PRESETS } = await import('../js/model/fm-presets.js');
+  const id = Object.keys(FM_PRESETS).find((k) => FM_PRESETS[k].role === 'tx' && FM_PRESETS[k].params.lowIntermod && FM_PRESETS[k].params.lowIntermod.available);
+  assert.ok(id, 'a preset with a low-intermod mode exists');
+  const s = iem8Scene('A');
+  const base = txReverseImd(s).find((p) => p.pumpTx === s.links[0].id && p.order === 3).levelDbm;
+  s.links[0].tx.fmPreset = id; s.links[0].tx.lowIntermod = true;
+  const low = txReverseImd(s).find((p) => p.pumpTx === s.links[0].id && p.order === 3).levelDbm;
+  assert.ok(low < base - 5, `low-intermod mode lowers link 1 reverse products (${base} -> ${low})`);
+  const other = txReverseImd(s).find((p) => p.pumpTx === s.links[1].id && p.order === 3).levelDbm;
+  assert.ok(Number.isFinite(other));
+});
