@@ -13,6 +13,22 @@ const RACK_COMBINER = Object.freeze({ passive: 'splitter-2', active: 'active-com
 const RACK_SPLITTER = Object.freeze({ passive: 'splitter-2', active: 'active-splitter-4' });
 const passivePreset = (ports) => (ports > 4 ? 'splitter-8' : ports > 2 ? 'splitter-4' : 'splitter-2'); // the excess loss grows with the port count (0.5, 1.0, 1.5 dB)
 const presetFor = (table, type, ports) => (type === 'active' ? table.active : passivePreset(ports));
+/**
+ * Combiner parameters. type: 'passive' (a hybrid network: 10 log N plus excess loss, 20 to 25 dB port isolation, like the chain presets), 'active' (0 dB through, 30 dB isolation) or 'isolated'
+ * (a circulator or cavity combiner: 2 dB through, 50 dB isolation by default, an isolator at every port so each port reverse isolation is half of the port-to-port figure, all assumed).
+ * lossDb and isolationDb override the type figures; into names a combiner this one feeds (one level deep: a root joins combiners and takes no transmitter channels of its own).
+ */
+export const COMBINER_TYPES = Object.freeze(['passive', 'active', 'isolated']);
+export function combinerParams(cb, ports) {
+  const n = Math.max(1, Math.min(16, ports || 2));
+  let lossDb, isolationDb;
+  if (cb && cb.type === 'isolated') { lossDb = 2; isolationDb = 50; }
+  else if (cb && cb.type === 'active') { lossDb = 0; isolationDb = 30; }
+  else { lossDb = 10 * Math.log10(n) + (n > 4 ? 1.5 : n > 2 ? 1 : 0.5); isolationDb = n > 2 ? 20 : 25; }
+  if (cb && Number.isFinite(cb.lossDb)) lossDb = cb.lossDb;
+  if (cb && Number.isFinite(cb.isolationDb)) isolationDb = cb.isolationDb;
+  return { lossDb, isolationDb, isolatorDb: cb && cb.type === 'isolated' ? isolationDb / 2 : 0 };
+}
 /** Gain given to a transmit antenna that is a dummy load: nothing is radiated. */
 export const DUMMY_LOAD_GAIN_DBI = -60;
 const isRackItem = (it) => !!it && it.rackSplitter === true;
@@ -160,7 +176,8 @@ export function feedAntenna(rack, linkId, which) {
     for (const t of rack.transmitters || []) for (const c of t.channels || []) {
       if (c.linkId !== linkId) continue;
       const cb = c.combinerId ? (rack.combiners || []).find((x) => x.id === c.combinerId) : null;
-      return ant(cb ? cb.antennaId : c.antennaId);
+      const end = cb && cb.into ? (rack.combiners || []).find((x) => x.id === cb.into) || cb : cb; // a combiner feeding a root radiates through the root antenna
+      return ant(end ? end.antennaId : c.antennaId);
     }
     return null;
   }
@@ -276,21 +293,29 @@ function compileTxRack(scene, rack, links, mk) {
     const tid = freeId(`rt_${l.id}`, rack.transmitters.map((t) => t.id)), cid = freeId(`tc_${l.id}`, rack.transmitters.flatMap((t) => t.channels.map((c) => c.id)));
     rack.transmitters.push({ id: tid, name: `IEM Tx ${rack.transmitters.length + 1}`, channels: [{ id: cid, linkId: l.id, combinerId: null, antennaId: `ta_${l.id}` }] });
   }
-  const used = new Map();
+  const used = new Map(), feeders = new Map();
   for (const t of rack.transmitters) for (const c of t.channels) if (c.combinerId) used.set(c.combinerId, (used.get(c.combinerId) || 0) + 1);
+  for (const x of rack.combiners) if (x.into && used.get(x.id)) feeders.set(x.into, (feeders.get(x.into) || 0) + 1);
   for (const t of rack.transmitters) for (const c of t.channels) {
     const l = links.find((q) => q.id === c.linkId); if (!l) continue;
     if (byFreq) projectTx(l, c);
     const cb = c.combinerId ? rack.combiners.find((x) => x.id === c.combinerId) : null;
-    const fan = cb && cb.fanout && Array.isArray(cb.fanout.outputs) ? cb.fanout : null;
+    const root = cb && cb.into ? rack.combiners.find((x) => x.id === cb.into) || null : null, end = root || cb; // end: the combiner whose output goes to the antenna
+    const fan = end && end.fanout && Array.isArray(end.fanout.outputs) ? end.fanout : null;
     const fanOut = fan ? fan.outputs.find((o) => o && rack.antennas.some((a) => a.id === o.antennaId)) || null : null; // the output this link is solved on: the first one with an antenna
-    const ant = rack.antennas.find((a) => a.id === (fan ? (fanOut && fanOut.antennaId) : cb ? cb.antennaId : c.antennaId));
+    const ant = rack.antennas.find((a) => a.id === (fan ? (fanOut && fanOut.antennaId) : end ? end.antennaId : c.antennaId));
     const oldIds = (l.chain || []).filter(isRackItem).map((it) => it.id); // the same rack parts keep their ids from one compile to the next
     l.chain = (l.chain || []).filter((it) => !isRackItem(it));
     if (ant) { l.tx.pos = structuredClone(ant.pos); l.tx.antenna = structuredClone(ant.antenna); if (ant.load) l.tx.antenna.gainDbi = DUMMY_LOAD_GAIN_DBI; } // a 50 ohm load radiates nothing
     if (cb) {
-      const items = [{ ...mk.fromPreset(presetFor(RACK_COMBINER, cb.type, Math.min(Math.max(used.get(cb.id) || 2, cb.ports || 2), 16)), { ports: Math.min(Math.max(used.get(cb.id) || 2, cb.ports || 2), 16) }), rackSplitter: true }];
-      if (cb.cable && cb.cable.lengthM > 0) items.push({ ...mk.item('cable', { cableType: cb.cable.type || 'rg58', lengthM: cb.cable.lengthM }), rackSplitter: true });
+      const items = [];
+      for (const x of root ? [cb, root] : [cb]) { // a feeding combiner, then the root it joins
+        const n = Math.min(Math.max(x === root ? feeders.get(x.id) || 2 : used.get(x.id) || 2, x.ports || 2), 16);
+        const it = { ...mk.fromPreset(presetFor(RACK_COMBINER, x.type === 'active' ? 'active' : 'passive', n), { ports: n }), rackSplitter: true };
+        if (x.type !== 'active' && (x.type === 'isolated' || Number.isFinite(x.lossDb) || Number.isFinite(x.isolationDb))) { const q = combinerParams(x, n); it.insertionLossDb = q.lossDb - 10 * Math.log10(n); it.isolationDb = q.isolationDb; }
+        items.push(it);
+        if (x.cable && x.cable.lengthM > 0) items.push({ ...mk.item('cable', { cableType: x.cable.type || 'rg58', lengthM: x.cable.lengthM }), rackSplitter: true });
+      }
       if (fan) { // combiner > (cable) > splitter > that output's own cable > antenna; every output pays the same split loss
         items.push({ ...mk.fromPreset(presetFor(RACK_SPLITTER, fan.type, Math.min(Math.max(fan.outputs.length, fan.ports || 2, 2), 16)), { ports: Math.min(Math.max(fan.outputs.length, fan.ports || 2, 2), 16) }), rackSplitter: true });
         const oc = fanOut && fanOut.cable;
@@ -363,11 +388,19 @@ export function validateRack(scene) {
     });
   }
   if (errors.length) return errors;
-  (rack.combiners || []).forEach((c, i) => { take(c && c.id, `rack.combiners[${i}]`); if (c.type !== 'passive' && c.type !== 'active') errors.push(`rack.combiners[${i}].type must be passive or active`); if (c.cable && !(num(c.cable.lengthM) && c.cable.lengthM >= 0 && safe(c.cable.type))) errors.push(`rack.combiners[${i}].cable invalid`);
+  (rack.combiners || []).forEach((c, i) => { take(c && c.id, `rack.combiners[${i}]`); if (!COMBINER_TYPES.includes(c.type)) errors.push(`rack.combiners[${i}].type must be passive, active or isolated`); for (const k of ['lossDb', 'isolationDb']) if (c[k] !== undefined && !(num(c[k]) && c[k] >= 0 && c[k] <= 100)) errors.push(`rack.combiners[${i}].${k} must be 0 to 100 dB`); if (c.cable && !(num(c.cable.lengthM) && c.cable.lengthM >= 0 && safe(c.cable.type))) errors.push(`rack.combiners[${i}].cable invalid`);
     const f = c.fanout; if (f === undefined) return;
     if (!isObj(f) || (f.type !== 'passive' && f.type !== 'active') || !Array.isArray(f.outputs) || f.outputs.length > 16) { errors.push(`rack.combiners[${i}].fanout must be { type, outputs: [...up to 16] }`); return; }
     if (f.ports !== undefined && !(Number.isInteger(f.ports) && f.ports >= 2 && f.ports <= 16)) errors.push(`rack.combiners[${i}].fanout.ports must be a whole number from 2 to 16`);
     f.outputs.forEach((o, j) => { if (!isObj(o) || (o.antennaId !== null && !safe(o.antennaId)) || (o.cable && !(num(o.cable.lengthM) && o.cable.lengthM >= 0 && safe(o.cable.type)))) errors.push(`rack.combiners[${i}].fanout.outputs[${j}] invalid`); });
+  });
+  const cbs = rack.combiners || [];
+  cbs.forEach((c, i) => {
+    if (c.into === undefined || c.into === null) return;
+    const root = cbs.find((x) => x.id === c.into);
+    if (!root || root === c) errors.push(`rack.combiners[${i}].into must be the id of another combiner`);
+    else if (root.into) errors.push(`rack.combiners[${i}].into: combiners are joined one level deep`);
+    else if ((rack.transmitters || []).some((t) => (t.channels || []).some((ch) => ch.combinerId === root.id))) errors.push(`rack.combiners[${i}].into: a combiner that other combiners feed takes no transmitter channels`);
   });
   (rack.transmitters || []).forEach((t, i) => {
     take(t && t.id, `rack.transmitters[${i}]`);
@@ -424,10 +457,10 @@ export function rackSections(scene, formOf) {
   })) });
   const iem = (rack.transmitters || []);
   if (iem.length) sections.push({ key: 'iems', title: 'In-ear transmitters', items: iem.flatMap((t) => t.channels.map((c, i) => {
-    const b = c.combinerId ? cb(c.combinerId) : null;
-    const fo = b && b.fanout && Array.isArray(b.fanout.outputs) ? b.fanout.outputs : null;
-    const tail = fo ? `splitter > ${fo.map((o) => `${o.cable ? `${o.cable.lengthM} m cable > ` : ''}${an(o.antennaId)}`).join(' and ') || 'no antenna'}` : an(b ? b.antennaId : c.antennaId);
-    const path = b ? `${b.name}${b.cable ? ` > ${b.cable.lengthM} m cable` : ''} > ${tail}` : tail;
+    const b = c.combinerId ? cb(c.combinerId) : null, root = b && b.into ? cb(b.into) || null : null, e = root || b;
+    const fo = e && e.fanout && Array.isArray(e.fanout.outputs) ? e.fanout.outputs : null;
+    const tail = fo ? `splitter > ${fo.map((o) => `${o.cable ? `${o.cable.lengthM} m cable > ` : ''}${an(o.antennaId)}`).join(' and ') || 'no antenna'}` : an(e ? e.antennaId : c.antennaId);
+    const path = b ? `${b.name}${b.cable ? ` > ${b.cable.lengthM} m cable` : ''}${root ? ` > ${root.name}${root.cable ? ` > ${root.cable.lengthM} m cable` : ''}` : ''} > ${tail}` : tail;
     return { id: channelItemId(c), channelId: c.id, linkId: c.linkId || null, freqMHz: c.freqMHz, matched: !!c.linkId, kind: 'transmitter', text: `${t.name} Channel ${i + 1} (${c.linkId ? nameOf(c.linkId) : `${fmtF(c.freqMHz)} MHz, no bodypack on this frequency`}) > ${c.isolator ? `isolator (${ISOLATOR_LOSS_DB} dB loss, ${isolatorDb(c)} dB isolation) > ` : ''}${path}` };
   })) });
   if ((rack.combiners || []).length) sections.push({ key: 'combiners', title: 'Combiners', items: rack.combiners.map((b) => ({ id: b.id, kind: 'combiner', text: `${b.name} (${b.type}) > ${b.cable ? `${b.cable.lengthM} m cable > ` : ''}${b.fanout && Array.isArray(b.fanout.outputs) ? `splitter > ${b.fanout.outputs.map((o) => `${o.cable ? `${o.cable.lengthM} m cable > ` : ''}${an(o.antennaId)}`).join(' and ') || 'no antenna'}` : an(b.antennaId)}` })) });
@@ -442,7 +475,7 @@ function freePorts(rack) {
   const out = [];
   const usedBy = (key, id) => [...(rack.receivers || []), ...(rack.transmitters || [])].reduce((n, r) => n + r.channels.filter((c) => c[key] === id).length, 0);
   for (const s of rack.splitters || []) { const free = (s.ports || 0) - splitterLoad(rack, s.id); if (free > 0) out.push({ id: s.id, kind: 'splitter', name: s.name, free }); }
-  for (const c of rack.combiners || []) { const free = (c.ports || 0) - usedBy('combinerId', c.id); if (free > 0) out.push({ id: c.id, kind: 'combiner', name: c.name, free }); }
+  for (const c of rack.combiners || []) { const free = (c.ports || 0) - usedBy('combinerId', c.id) - (rack.combiners || []).filter((x) => x.into === c.id).length; if (free > 0) out.push({ id: c.id, kind: 'combiner', name: c.name, free }); }
   return out;
 }
 
@@ -464,7 +497,8 @@ export function rackWarnings(scene, bwOf, opts) { // opts.erpOf(link) -> { level
       if (bare) w.push({ key: `combiner:${b.id}`, level: 'warn', text: `${b.name} splitter has ${bare} output${bare === 1 ? '' : 's'} with no antenna or load: ${open}.` });
       const free = (fan.ports || 0) - fan.outputs.length;
       if (free > 0) w.push({ key: `combiner:${b.id}`, level: 'info', text: `${b.name} splitter has ${free} unused output${free === 1 ? '' : 's'}: fit a 50 ohm load on ${free === 1 ? 'it' : 'each'}.` });
-    } else if (n && !ant(b.antennaId)) w.push({ key: `combiner:${b.id}`, level: 'warn', text: `${b.name} output has no antenna or load: ${open}.` });
+    } else if (n && !b.into && !ant(b.antennaId)) w.push({ key: `combiner:${b.id}`, level: 'warn', text: `${b.name} output has no antenna or load: ${open}.` });
+    else if (!n && (rack.combiners || []).some((x) => x.into === b.id) && !ant(b.antennaId)) w.push({ key: `combiner:${b.id}`, level: 'warn', text: `${b.name} output has no antenna or load: ${open}.` });
   }
   const zones = scene.zones || [], rxAnt = (rack.antennas || []).filter((a) => a.role !== 'tx');
   if (zones.length && scene.rack) {
@@ -550,6 +584,7 @@ export function unattachedAntennas(rack) {
   for (const s of rack.splitters || []) if (rack.byFreq !== true || liveSp.has(s.id)) { add(s.antA); add(s.antB); }
   const liveCb = new Set();
   for (const t of rack.transmitters || []) for (const c of t.channels || []) if (live(c)) { add(c.antennaId); if (c.combinerId) liveCb.add(c.combinerId); }
+  for (const cb of rack.combiners || []) if (cb.into && liveCb.has(cb.id)) liveCb.add(cb.into); // a root is live when a combiner feeding it is
   for (const cb of rack.combiners || []) if (rack.byFreq !== true || liveCb.has(cb.id)) { add(cb.antennaId); if (cb.fanout && Array.isArray(cb.fanout.outputs)) for (const o of cb.fanout.outputs) if (o) add(o.antennaId); }
   return rack.antennas.filter((a) => !used.has(a.id));
 }

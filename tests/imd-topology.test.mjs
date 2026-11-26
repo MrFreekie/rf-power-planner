@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { iem8Scene, IEM8_PLAN_MHZ, EXAMPLES } from '../js/examples.js';
-import { imdSummary, imdTopology, txReverseImd, pimImd, couplingLossDb } from '../js/model/imd.js';
+import { imdSummary, imdTransmitters, imdTopology, txReverseImd, pimImd, couplingLossDb } from '../js/model/imd.js';
 import { checkIntermod } from '../js/model/coordination.js';
 import { createDefaultScene, validateScene, SCENE_LIMITS } from '../js/model/scene.js';
 
@@ -21,20 +21,20 @@ test('frequency plan is third-order clean with the 400 kHz guard; all scenes val
 
 test('hand-computed couplings: A 45 dB; C intra 40, cross 3 + 25 + 3 + 20 = 51; B omni 2.5 m in front: 4 + Friis 36.06 - 7 dBi = 33.06 (+/-0.05)', () => {
   const as = iem8Scene('A');
-  near(imdTopology(as).pairCouplingDb(as.imd.transmitters[0].id, as.imd.transmitters[1].id), 45, 1e-9);
+  near(imdTopology(as).pairCouplingDb(imdTransmitters(as)[0].id, imdTransmitters(as)[1].id), 45, 1e-9);
   const cs = iem8Scene('C');
-  const ids = cs.imd.transmitters.map((t) => t.id);
+  const ids = imdTransmitters(cs).map((t) => t.id);
   const C = imdTopology(cs);
   near(C.pairCouplingDb(ids[0], ids[1]), 40, 1e-9);
   near(C.pairCouplingDb(ids[0], ids[4]), 51, 1e-9);
   near(C.pairCouplingDb(ids[4], ids[0]), 51, 1e-9);
   const bs = iem8Scene('B');
-  const bid = bs.imd.transmitters.map((t) => t.id);
+  const bid = imdTransmitters(bs).map((t) => t.id);
   const lambda = 299.792458 / IEM8_PLAN_MHZ[0];
   const air = 20 * Math.log10(4 * Math.PI * 2.5 / lambda) - 7; // omni tx8 as seen from tx1's paddle boresight
   near(imdTopology(bs).pairCouplingDb(bid[7], bid[0]), 4 + air, 0.05);
   assert.equal(imdTopology(bs).groupOf(bid[7]), null);
-  assert.equal(imdTopology(bs).groupOf(bid[0]), 'g1');
+  assert.equal(imdTopology(bs).groupOf(bid[0]), 'cb_1');
 });
 
 test('legacy single shared combiner is unchanged by the topology code (no topology: same numbers as before)', () => {
@@ -94,7 +94,7 @@ test('summary reports sane structure; couplingLossDb is the antenna-to-antenna F
   const s = imdSummary(iem8Scene('A'));
   assert.equal(s.perTx.length, 8);
   assert.ok(s.inChannelCount >= 0 && Number.isFinite(s.riseDb));
-  const t = iem8Scene('B').imd.transmitters;
+  const t = imdTransmitters(iem8Scene('B'));
   const mk = (d) => ({ ...t[7], pos: { x: 3 + d, y: 10, z: 1.5 } });
   near(couplingLossDb(t[0], mk(4), 606.1) - couplingLossDb(t[0], mk(2), 606.1), 6.0206, 1e-3);
 });

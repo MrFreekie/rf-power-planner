@@ -149,19 +149,25 @@ function iem8Rack(s, l, m) {
     return k;
   });
   s.links = links;
-  const groups = m.topology && Array.isArray(m.topology.groups) ? m.topology.groups : [];
+  const groups = m.topology && Array.isArray(m.topology.groups) ? m.topology.groups : [], rootSpec = m.topology && m.topology.root ? m.topology.root : null;
   const antennas = [{ id: 'ta_main', role: 'tx', name: 'Directional antenna', pos: structuredClone(m.transmitters[0].pos), antenna: structuredClone(m.transmitters[0].antenna) }];
   const combiners = [], channels = [];
-  groups.filter((g) => g.members.length > 1).forEach((g, gi) => combiners.push({ id: `cb_${gi + 1}`, name: g.name, type: 'passive', antennaId: 'ta_main', ports: g.members.length }));
+  groups.filter((g) => g.members.length > 1).forEach((g, gi) => {
+    const cb = { id: `cb_${gi + 1}`, name: g.name, type: g.isolatorDb > 0 && g.isolationDb >= 2 * g.isolatorDb ? 'isolated' : 'passive', antennaId: rootSpec ? null : 'ta_main', ports: g.members.length, lossDb: g.lossDb, isolationDb: g.isolationDb };
+    if (rootSpec) cb.into = 'cb_root';
+    combiners.push(cb);
+  });
+  if (rootSpec) combiners.push({ id: 'cb_root', name: 'Joining combiner', type: 'passive', antennaId: 'ta_main', ports: 2, lossDb: rootSpec.lossDb, isolationDb: rootSpec.isolationDb });
   m.transmitters.forEach((t, i) => {
     const g = groups.find((q) => q.members.includes(t.id)) || null, cb = g && g.members.length > 1 ? combiners.find((c) => c.name === g.name) : null;
     const own = !cb && !(t.antenna && t.antenna.type === antennas[0].antenna.type && sameSpot(t.pos, antennas[0].pos));
     if (own) antennas.push({ id: `ta_${i + 1}`, role: 'tx', name: `${t.name} antenna`, pos: structuredClone(t.pos), antenna: structuredClone(t.antenna) });
     const ch = { id: `tc_${i + 1}`, linkId: links[i].id, freqMHz: t.freqMHz, tx: txDevice(links[i].tx), combinerId: cb ? cb.id : null, antennaId: cb ? null : own ? `ta_${i + 1}` : 'ta_main' };
-    if (g && g.members.length === 1 && g.isolatorDb > 0) { ch.isolator = true; ch.isolatorDb = g.isolatorDb; }
+    if (g && g.isolatorDb > 0 && (g.members.length === 1 || !(cb && cb.type === 'isolated'))) { ch.isolator = true; ch.isolatorDb = g.isolatorDb; }
     channels.push(ch);
   });
   s.rack = { byFreq: true, antennas, splitters: [], receivers: [], combiners, transmitters: [{ id: 'rt_1', name: 'IEM Tx', channels }] };
+  delete m.topology; m.combiner = { type: 'none', isolationDb: 0, lossDb: 0 }; m.fromRack = true; m.transmitters = []; // the rack now carries the transmitters, antennas and combiners
   syncScene(s); // compiled now, so the shared and reloaded scene are the same
 }
 

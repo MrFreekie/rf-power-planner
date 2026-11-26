@@ -33,6 +33,7 @@ import { RX_PRESETS, RX_DEFAULTS } from './rx-params.js';
 import { absolutePos } from './floor.js';
 import { FM_PRESETS, fmLowIntermodDb } from './fm-presets.js';
 import { evenOrderProducts, radiatedHarmonics, DEFAULT_IIP2_DBM } from './imd-even.js';
+import { imdFromRack } from './imd-rack.js';
 export { evenOrderFrequencies, evenOrderProducts, radiatedHarmonics, IIP2_PRESETS } from './imd-even.js';
 import {
   IMD_PRESETS, COMBINER_PRESETS, TX_REVERSE_IM_CONVERSION_DB, TX_REVERSE_IM_5TH_EXTRA_DB, PIM_JUNCTIONS, PIM_REFERENCE_DBM,
@@ -100,9 +101,12 @@ function imdOf(scene) {
   return { imd, preset };
 }
 
-function txOf(scene) {
-  return (scene.imd && scene.imd.transmitters) || [];
+/** imdTransmitters(scene) -> every intermod source: the rack's in-ear transmitters when scene.imd.fromRack is set (imd-rack.js), then the manual list. */
+export function imdTransmitters(scene) {
+  const extra = (scene.imd && scene.imd.transmitters) || [], d = imdFromRack(scene);
+  return d ? [...d.transmitters, ...extra] : extra;
 }
+const txOf = imdTransmitters;
 
 function bwKHz(scene) {
   const { imd, preset } = imdOf(scene);
@@ -145,7 +149,7 @@ function conversionDb(scene, a) {
 
 // ---- combiner topology
 function topologyOf(scene) {
-  const topo = scene && scene.imd && scene.imd.topology;
+  const fromRack = imdFromRack(scene), topo = fromRack ? fromRack.topology : scene && scene.imd && scene.imd.topology;
   const tx = txOf(scene);
   const comb = combinerOf(scene);
   if (!topo || !Array.isArray(topo.groups) || !topo.groups.length) {
@@ -166,12 +170,12 @@ function topologyOf(scene) {
   const gOf = (t) => groupOfId.get(t.id) || null;
   const under = (g) => !!root && g.underRoot !== false;
   const through = (t) => { const g = gOf(t); return g ? num(g.lossDb) + (under(g) ? root.lossDb : 0) : 0; };
-  const isoRev = (t) => { const g = gOf(t); return g ? num(g.isolatorDb) : 0; };
+  const isoRev = (t) => { const g = gOf(t); return g ? (g.memberIsolatorDb && Number.isFinite(g.memberIsolatorDb[t.id]) ? g.memberIsolatorDb[t.id] : num(g.isolatorDb)) : 0; };
   const feedOf = (t) => { const g = gOf(t); return g ? (under(g) ? 'root' : `g:${g.id}`) : t.id; };
   const pairCouplingDb = (a, b, scn) => {
     const ga = gOf(a), gb = gOf(b);
     if (ga && ga === gb) return num(ga.isolationDb);
-    if (ga && gb && under(ga) && under(gb)) return num(gb.lossDb) + root.isolationDb + num(ga.lossDb) + num(ga.isolatorDb);
+    if (ga && gb && under(ga) && under(gb)) return num(gb.lossDb) + root.isolationDb + num(ga.lossDb) + isoRev(a);
     return through(b) + couplingLossDb(a, b, b.freqMHz, scn) + through(a) + isoRev(a);
   };
   return { through, isoRev, feedOf, pairCouplingDb, groupOf: (t) => (gOf(t) ? gOf(t).id : null), root };
@@ -183,7 +187,7 @@ export function imdTopology(scene) {
   const tx = txOf(scene);
   const by = (id) => tx.find((t) => t.id === id);
   return {
-    hasTopology: !!(scene.imd && scene.imd.topology && Array.isArray(scene.imd.topology.groups) && scene.imd.topology.groups.length),
+    hasTopology: !!(() => { const r = imdFromRack(scene), tp = r ? r.topology : scene.imd && scene.imd.topology; return tp && Array.isArray(tp.groups) && tp.groups.length; })(),
     throughLossDb: (id) => T.through(by(id)),
     pairCouplingDb: (a, b) => T.pairCouplingDb(by(a), by(b), scene),
     groupOf: (id) => T.groupOf(by(id)),

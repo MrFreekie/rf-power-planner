@@ -1,6 +1,6 @@
 // Example scene builders: the review set and the noise-source set.
 import { createNoiseSource, engCrewSources } from '../model/noise-sources.js';
-import { createChainItem, createBranch, createZone, createChainItemFromPreset, newId } from '../model/scene.js';
+import { createChainItem, createBranch, createZone, createChainItemFromPreset, newId, syncScene } from '../model/scene.js';
 import { omni, make } from './helpers.js';
 import { bandScene, p2pScene } from './scenes-venue.js';
 import { sosScene } from './scenes-foh.js';
@@ -81,8 +81,10 @@ export function reviewScene(id, opts = {}) {
     });
     case 'imd-iem-8-with-fifth-order': {
       const n = opts.channels || 5, sc = iem8Scene('A');
-      sc.imd.transmitters = sc.imd.transmitters.slice(0, n);
-      sc.imd.topology.groups[0].members = sc.imd.transmitters.map((t) => t.id);
+      sc.links = sc.links.slice(0, n); // the first n transmitters stay in the rack and its one combiner
+      sc.rack.transmitters[0].channels = sc.rack.transmitters[0].channels.slice(0, n);
+      sc.rack.combiners[0].ports = n;
+      syncScene(sc);
       return sc;
     }
     case 'pad-on-iem-transmitter': return bandScene('iem-tx-wrong-band', { pad: true });
