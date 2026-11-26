@@ -107,6 +107,14 @@ export function imdTransmitters(scene) {
   return d ? [...d.transmitters, ...extra] : extra;
 }
 const txOf = imdTransmitters;
+/** resolveImd(scene) -> the scene itself, or (rack-fed) a copy whose imd lists the rack transmitters and topology outright, for code that edits or clones imd. */
+export function resolveImd(scene) {
+  const d = imdFromRack(scene);
+  if (!d) return scene;
+  const sc = structuredClone(scene);
+  sc.imd.transmitters = [...d.transmitters, ...(sc.imd.transmitters || [])]; sc.imd.topology = d.topology; sc.imd.fromRack = false;
+  return sc;
+}
 
 function bwKHz(scene) {
   const { imd, preset } = imdOf(scene);
@@ -619,6 +627,7 @@ const unit = (dx, dy, dz, fallback) => {
  * of the distance to the rx when all carriers rise together (3 x 6.02), reverse IM 6.02 dB per halving of the tx-tx distance.
  */
 export function sweepDistance(scene, { txId, from, to, n = 8, what = 'rxAntenna' } = {}) {
+  scene = resolveImd(scene);
   const base = txOf(scene);
   const ti = base.findIndex((t) => t.id === txId);
   const out = { distanceM: [], worstProductDbm: [], worstFrontEndDbm: [], worstReverseDbm: [], worstPimDbm: [], riseDb: [], thermalDbm: NaN, what };

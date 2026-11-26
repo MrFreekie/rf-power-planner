@@ -10,6 +10,7 @@ import { solveLink, chainLossDb } from './model/rf.js';
 import { solveDiversity, diversityStep } from './model/diversity.js';
 import { overloadStep } from './model/overload.js';
 import { RX_PRESETS } from './model/rx-params.js';
+import { imdTransmitters } from './model/imd.js';
 
 const OV_KEYS = ['level', 'headroomDb', 'compressionDb', 'distortionPct', 'agcAttenDb', 'desenseDb', 'inputDbm'];
 const CS_KEYS = ['systemNfDb', 'noiseFloorDbm', 'sensitivityAtAntennaDbm', 'marginAtAntennaDb', 'requiredSnrDb'];
@@ -33,11 +34,12 @@ let othersKey = '', othersVal = [];
  */
 export function otherCarriersAt(scene, link) {
   const m = scene && scene.imd;
-  if (!m || !m.enabled || !Array.isArray(m.transmitters) || m.transmitters.length < 1 || !link || !link.rx || !link.rx.pos) return [];
-  const key = JSON.stringify([m.transmitters, link.rx.pos, link.rx.antenna, link.chain, link.freqMHz, scene.reflectors, scene.stage, m.combiner]);
+  const txs = m && m.enabled ? imdTransmitters(scene) : [];
+  if (!txs.length || !link || !link.rx || !link.rx.pos) return [];
+  const key = JSON.stringify([txs, link.rx.pos, link.rx.antenna, link.chain, link.freqMHz, scene.reflectors, scene.stage, m.combiner]);
   if (key === othersKey) return othersVal;
   const out = [];
-  for (const t of m.transmitters) {
+  for (const t of txs) {
     if (!t || !t.pos || !Number.isFinite(t.freqMHz) || Math.abs(t.freqMHz - link.freqMHz) < 1e-6) continue;
     try {
       const r = solveLink(scene, { id: `imd-${t.id}`, kind: 'mic', freqMHz: t.freqMHz, tx: { pos: t.pos, powerDbm: t.powerDbm, antenna: t.antenna || DEFAULT_ANT }, rx: { ...link.rx, bodyLossDb: 0, diversity: undefined }, chain: link.chain || [] });

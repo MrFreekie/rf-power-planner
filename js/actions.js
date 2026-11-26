@@ -411,7 +411,7 @@ export function setImdEnabled(store, enabled) {
   return store.update((d) => {
     const m = imdOf(d);
     m.enabled = !!enabled;
-    if (m.enabled && !m.transmitters.length) m.transmitters = defaultImdTransmitters();
+    if (m.enabled && !m.fromRack && !m.transmitters.length) m.transmitters = defaultImdTransmitters();
   });
 }
 

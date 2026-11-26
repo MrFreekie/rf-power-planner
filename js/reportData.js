@@ -10,6 +10,7 @@
 import { reportMeasurements } from './ui/measureUi.js';
 import { reportAssumptions } from './ui/assumptionsUi.js';
 import { solveLink, wavePolarisation } from './model/rf.js';
+import { imdTransmitters } from './model/imd.js';
 import { dispX, dispY } from './ui/coords.js';
 import { formatPower, formatLength, formatDb } from './model/units.js';
 
@@ -118,7 +119,7 @@ export function buildReportData(scene, linkId, results = {}) {
 
   const im = results.imd;
   if (im && im.enabled) {
-    const names = new Map(((scene.imd && scene.imd.transmitters) || []).map((t) => [t.id, t.name]));
+    const names = new Map(imdTransmitters(scene).map((t) => [t.id, t.name]));
     for (const c of (im.coordination || []).slice(0, 12)) {
       const label = c.product && c.product.label ? c.product.label : 'product';
       const channel = names.get(c.channelId) || c.channelId;

@@ -676,10 +676,11 @@ export function mountInspector({ container, store }) {
   function buildImd(body, c) {
     const m = c.scene.imd;
     const upd = (id) => (cc, patch, o) => updateImdTransmitter(store, id, patch, o);
+    if (m.fromRack) body.append(el('p', 'hint', 'The in-ear transmitters, their antennas and the combiners come from the rack, so change them there. Transmitters added below are extra sources, such as a neighbouring venue.'));
     body.append(
       selectField({ key: 'imd-preset', label: 'Preset', options: IMD_PRESETS, get: (cc) => cc.scene.imd.preset, set: (cc, v) => setImdPreset(store, v) }),
       selectField({
-        key: 'imd-comb', label: 'Combiner', options: [['none', 'None (separate antennas)'], ['hybrid', 'Passive hybrid'], ['isolated', 'Isolated (cavity / isolators)']],
+        key: 'imd-comb', label: 'Combiner', visible: (cc) => !cc.scene.imd.fromRack, options: [['none', 'None (separate antennas)'], ['hybrid', 'Passive hybrid'], ['isolated', 'Isolated (cavity / isolators)']],
         get: (cc) => cc.scene.imd.combiner?.type || 'none', set: (cc, v) => setImdCombiner(store, { type: v }),
       }),
       numberField({

@@ -9,7 +9,7 @@ import { chainLossDb } from '../model/rf.js';
 import { CABLES } from '../model/library.js';
 import { formatLength } from '../model/units.js';
 import * as icons from './icons.js';
-import { couplingLossDb } from '../model/imd.js';
+import { couplingLossDb, imdTransmitters } from '../model/imd.js';
 import { COMBINER_PRESETS } from '../model/imd-params.js';
 import { extraImdTransmitters } from '../model/plan-export.js';
 
@@ -166,7 +166,7 @@ export function drawBranches(ctx, th, vp, link, handles, tag = true) {
 export function drawImd(ctx, th, vp, scene, sel, handles, placer, w) {
   const m = scene.imd;
   if (!m || !m.enabled || !Array.isArray(m.transmitters)) return;
-  const txs = m.transmitters;
+  const txs = imdTransmitters(scene);
   // coupling lines between close pairs
   for (let i = 0; i < txs.length; i++) {
     for (let j = i + 1; j < txs.length; j++) {

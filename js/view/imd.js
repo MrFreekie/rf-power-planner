@@ -4,7 +4,7 @@ import { setImdEnabled } from '../actions.js';
 import { createCanvasHost, activeLink, setFont, haloText } from './util.js';
 import { imd } from '../imdTracker.js';
 import { formatPower } from '../model/units.js';
-import { evenOrderImd, imdSummary } from '../model/imd.js';
+import { evenOrderImd, imdSummary, imdTransmitters } from '../model/imd.js';
 import { createZoom, decimate } from './spectraZoom.js';
 
 const MIN_SPAN = 0.04;
@@ -159,7 +159,7 @@ export function mountImd({ container, store }) {
       haloText(ctx, th, `squelch ${thr} dBm`, L + pw - 4, y - 4, { align: 'right', px: 11, color: th.fail });
     }
     // carriers: labelled peaks (staggered)
-    const txs = scene.imd.transmitters;
+    const txs = imdTransmitters(scene);
     const byId = new Map(txs.map((t) => [t.id, t]));
     const carriers = s.markers.filter((m) => m.kind === 'carrier').sort((a, b) => a.fMHz - b.fMHz);
     carriers.forEach((m, i) => {
@@ -237,7 +237,7 @@ export function mountImd({ container, store }) {
     // live marker: current distance between the nearest transmitter and the receive antenna
     const r = scene.imd.rxAntennaPos || { x: 0, y: 0, z: 1.5 };
     let best = Infinity;
-    for (const t of scene.imd.transmitters) best = Math.min(best, Math.hypot(t.pos.x - r.x, t.pos.y - r.y, (t.pos.z || 0) - (r.z || 0)));
+    for (const t of imdTransmitters(scene)) best = Math.min(best, Math.hypot(t.pos.x - r.x, t.pos.y - r.y, (t.pos.z || 0) - (r.z || 0)));
     if (Number.isFinite(best) && best >= d0 && best <= d1) {
       const mx = Math.round(X(best)) + 0.5;
       ctx.strokeStyle = th.fail; ctx.lineWidth = 1.5; ctx.setLineDash([2, 3]); ctx.beginPath(); ctx.moveTo(mx, T); ctx.lineTo(mx, h - 36); ctx.stroke(); ctx.setLineDash([]);
@@ -294,7 +294,7 @@ export function mountImd({ container, store }) {
     if (!state) return 'The intermod demo is off.';
     const n = state.noise, unit = scene.units.power;
     if (id === 'sweep') return `Worst product level and noise floor rise against the distance between the receive antenna and the nearest transmitter. ${slopes.textContent} ${viewText(id)}`.trim();
-    return `${scene.imd.transmitters.length} carriers, noise floor rise ${n.riseDb.toFixed(1)} dB, total floor ${fmtDbm(n.totalDbm, unit)}, ${distinctThird(scene, state)} distinct third-order products land on wanted channels (${state.coordination.length} in all mechanisms and orders). ${viewText(id)}`;
+    return `${imdTransmitters(scene).length} carriers, noise floor rise ${n.riseDb.toFixed(1)} dB, total floor ${fmtDbm(n.totalDbm, unit)}, ${distinctThird(scene, state)} distinct third-order products land on wanted channels (${state.coordination.length} in all mechanisms and orders). ${viewText(id)}`;
   }
   function tableOf(id) {
     if (!state) return { caption: '', cols: [], rows: [] };
@@ -328,7 +328,7 @@ export function mountImd({ container, store }) {
     nEls.th.textContent = fmtDbm(n.thermalDbm, unit); nEls.im.textContent = fmtDbm(n.imSumDbm, unit);
     nEls.sk.textContent = fmtDbm(n.txNoiseSkirtDbm, unit); nEls.de.textContent = `${n.desenseDb.toFixed(1)} dB`;
     nEls.tot.textContent = fmtDbm(n.totalDbm, unit); nEls.rise.textContent = `+${n.riseDb.toFixed(1)} dB`;
-    spec.setAttribute('aria-label', `Intermod spectrum with ${scene.imd.transmitters.length} carriers. Noise floor rise ${n.riseDb.toFixed(1)} dB. ${distinctThird(scene, state)} distinct third-order products land on wanted channels. Press Enter to enlarge.`);
+    spec.setAttribute('aria-label', `Intermod spectrum with ${imdTransmitters(scene).length} carriers. Noise floor rise ${n.riseDb.toFixed(1)} dB. ${distinctThird(scene, state)} distinct third-order products land on wanted channels. Press Enter to enlarge.`);
     const sp = state.sweep;
     const parts = [];
     if (sp) {
@@ -340,7 +340,7 @@ export function mountImd({ container, store }) {
     slopes.textContent = parts.length ? parts.join('; ') + '.' : '';
     { const d3 = distinctThird(scene, state); coordHead.textContent = `${d3} distinct third-order product${d3 === 1 ? '' : 's'} land${d3 === 1 ? 's' : ''} on wanted channels.`; coordSub.textContent = `All mechanisms and orders, one row per mechanism: ${state.coordination.length} (the same frequency is counted again for each mechanism that makes it, and fifth-order products are included).`; }
     tbody.textContent = '';
-    const byId = new Map(scene.imd.transmitters.map((t) => [t.id, t]));
+    const byId = new Map(imdTransmitters(scene).map((t) => [t.id, t]));
     const rows = state.coordination.slice(0, 12);
     if (!rows.length) { const tr = el('tr'); const td = el('td', null, 'No product lands on a wanted channel.'); td.colSpan = 5; tr.append(td); tbody.append(tr); }
     for (const r of rows) {

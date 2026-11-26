@@ -16,7 +16,7 @@
 
 import { migrateScene } from './scene.js';
 import { solveLink } from './rf.js';
-import { coordinationCheck } from './imd.js';
+import { coordinationCheck, imdTransmitters } from './imd.js';
 import { tvBlockLevelDbm } from './spectrum-map.js';
 
 export const MAX_RESOLVES = 40;
@@ -172,7 +172,7 @@ function revertOn(scene, change) {
 // ---------------------------------------------------------------- results
 const imdCount = (scene) => {
   try {
-    if (!scene.imd || !scene.imd.enabled || !Array.isArray(scene.imd.transmitters) || scene.imd.transmitters.length < 2) return 0;
+    if (!scene.imd || !scene.imd.enabled || imdTransmitters(scene).length < 2) return 0;
     return coordinationCheck(scene, scene.imd.rxAntennaPos).filter((h) => h.severity === 'critical' || h.severity === 'warning').length;
   } catch { return 0; }
 };

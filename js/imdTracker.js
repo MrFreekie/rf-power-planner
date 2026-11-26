@@ -7,7 +7,7 @@
 //                                 noise rise at the wanted link's channel as extra desense (gate reason 'imd')
 //   imd.desenseFor(link, scene)   that rise in dB (0 when the demo is off or the link's frequency is not one of the channels)
 // The whole computation is a few dozen products, cheap enough to run while dragging.
-import { frontEndImd, txReverseImd, pimImd, noiseFloor, coordinationCheck, spectrum, sweepDistance } from './model/imd.js';
+import { frontEndImd, txReverseImd, pimImd, noiseFloor, coordinationCheck, spectrum, sweepDistance, resolveImd, imdTransmitters } from './model/imd.js';
 
 export const DEBOUNCE_MS = 100;
 
@@ -24,6 +24,7 @@ function nearestTx(scene) {
 
 /** Full analysis of scene.imd, or null when the demo is off or has no transmitters. */
 export function analyse(scene) {
+  scene = resolveImd(scene);
   const m = scene && scene.imd;
   if (!m || !m.enabled || !Array.isArray(m.transmitters) || !m.transmitters.length) return null;
   const products = [...frontEndImd(scene), ...txReverseImd(scene), ...pimImd(scene)];
@@ -45,7 +46,7 @@ export function createImdTracker({
   let store = null, off = null, timer = null, lastSig = null;
   let memoKey = null, memoNoise = null;
 
-  const sigOf = (scene) => JSON.stringify([scene.imd, (scene.links || []).map((l) => l && l.rx && l.rx.antenna)]);
+  const sigOf = (scene) => JSON.stringify([scene.imd, scene.imd && scene.imd.fromRack ? [scene.rack, (scene.links || []).map((l) => l && [l.freqMHz, l.kind, l.tx && l.tx.powerDbm])] : 0, (scene.links || []).map((l) => l && l.rx && l.rx.antenna)]);
   const emit = () => { for (const cb of [...subs]) cb(state); };
 
   function compute() {
@@ -64,7 +65,7 @@ export function createImdTracker({
   /** Noise rise (dB) at the channel of the link's frequency; memoised on the imd settings so drags stay cheap. */
   function desenseFor(link, scene) {
     const m = scene.imd;
-    if (!m || !m.enabled || !Array.isArray(m.transmitters) || !m.transmitters.length) return 0;
+    if (!m || !m.enabled || !imdTransmitters(scene).length) return 0;
     const key = sigOf(scene);
     if (key !== memoKey) {
       memoKey = key;
