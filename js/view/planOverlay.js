@@ -11,6 +11,7 @@ import { formatLength } from '../model/units.js';
 import * as icons from './icons.js';
 import { couplingLossDb } from '../model/imd.js';
 import { COMBINER_PRESETS } from '../model/imd-params.js';
+import { extraImdTransmitters } from '../model/plan-export.js';
 
 const TINTS = [[74, 120, 181], [201, 120, 40], [120, 90, 170], [40, 150, 150]]; // dominant-antenna palette (optional view)
 const ALPHA = 105;
@@ -182,18 +183,23 @@ export function drawImd(ctx, th, vp, scene, sel, handles, placer, w) {
       haloText(ctx, th, txt, mx, placer.place(ctx.measureText(txt).width, mx, my - 4), { align: 'center', px: 11, weight: '600' });
     }
   }
+  // With a frequency-paired rack the links are real: an intermod transmitter that is a link's own transmitter is drawn by that link (its antenna), and the receive antenna at a link's receiver is that link's end.
+  const real = !!(scene.rack && scene.rack.byFreq === true), extra = real ? extraImdTransmitters(scene) : [], own = new Set(real ? txs.filter((t) => !extra.includes(t)) : []);
+  const r = m.rxAntennaPos, atLinkRx = real && !!r && (scene.links || []).some((l) => l.rx && l.rx.pos && l.rx.pos.x === r.x && l.rx.pos.y === r.y);
   // receive antenna
-  const r = m.rxAntennaPos;
   let rp = null;
   if (r) {
     rp = vp.worldToScreen(r);
-    icons.drawStand(ctx, vp, r.x, r.y, { view: 'plan', ink: th.ink, fill: th.paper });
-    icons.drawAntenna(ctx, vp, r.x, r.y, { view: 'plan', ink: th.ink, fill: th.paper, type: (m.rxAntenna && m.rxAntenna.type) || 'paddle', angleDeg: 180 });
-    setFont(ctx, th, 11, '600');
-    haloText(ctx, th, 'Rx antenna', rp.x, placer.place(ctx.measureText('Rx antenna').width, rp.x, rp.y + 26), { align: 'center', px: 11, weight: '600' });
+    if (!atLinkRx) {
+      icons.drawStand(ctx, vp, r.x, r.y, { view: 'plan', ink: th.ink, fill: th.paper });
+      icons.drawAntenna(ctx, vp, r.x, r.y, { view: 'plan', ink: th.ink, fill: th.paper, type: (m.rxAntenna && m.rxAntenna.type) || 'paddle', angleDeg: 180 });
+      setFont(ctx, th, 11, '600');
+      haloText(ctx, th, 'Rx antenna', rp.x, placer.place(ctx.measureText('Rx antenna').width, rp.x, rp.y + 26), { align: 'center', px: 11, weight: '600' });
+    }
   }
   // transmitters
   for (const t of txs) {
+    if (own.has(t)) continue;
     const p = vp.worldToScreen(t.pos);
     icons.drawMic(ctx, vp, t.pos.x, t.pos.y, { view: 'plan', ink: th.ink, fill: th.paper, angleDeg: 180 });
     if (sel === t.id) { ctx.save(); ctx.setLineDash([3, 3]); ctx.strokeStyle = th.ink; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.arc(p.x, p.y, 15, 0, Math.PI * 2); ctx.stroke(); ctx.restore(); }

@@ -161,6 +161,7 @@ export function createPlanView(canvas, store) {
       if (role === 'rx' && link.rx.sharedAntennaOf !== undefined) continue; // a shared receive antenna is drawn once, with its source link
       if (frameHidden(link, role)) continue; // bundled into the person's icon
       if (!endPlaced(scene, link, role)) continue; // no antenna feeds this end: there is nothing to draw or delete there
+      if (sharedFeed(scene, link, role).dup) continue; // drawn once with the first link on that antenna
       const e = link[role], p = vp.worldToScreen(e.pos), tw = ctx.measureText(e.name).width;
       placer.reserve({ x: p.x - tw / 2 - 2, y: p.y + Math.max(22, 0.35 * vp.pxPerM + 12) - 12, w: tw + 4, h: 16 });
     }
@@ -176,7 +177,7 @@ export function createPlanView(canvas, store) {
     for (const link of scene.links) drawLinkEnds(ctx, th, scene, link, sel, w);
     drawFreeAntennas(ctx, th, scene, sel, w);
     const placedLabels = [...linkLabelRects];
-    for (const lk of scene.links) for (const role of ['tx', 'rx']) { if (role === 'rx' && lk.rx.sharedAntennaOf !== undefined) continue; if (frameHidden(lk, role)) continue; const q = vp.worldToScreen(lk[role].pos); placedLabels.push({ x: q.x - 45, y: q.y + 8, w: 90, h: 30 }, { x: q.x - 16, y: q.y - 16, w: 32, h: 32 }); }
+    for (const lk of scene.links) for (const role of ['tx', 'rx']) { if (role === 'rx' && lk.rx.sharedAntennaOf !== undefined) continue; if (frameHidden(lk, role)) continue; if (endPlaced(scene, lk, role) && sharedFeed(scene, lk, role).dup) continue; const q = vp.worldToScreen(lk[role].pos); placedLabels.push({ x: q.x - 45, y: q.y + 8, w: 90, h: 30 }, { x: q.x - 16, y: q.y - 16, w: 32, h: 32 }); }
     drawPeoplePlan(ctx, th, vp, scene, sel, handles, hoverKey, w, placedLabels, { collapsed: frameCollapsed, statusOf: (ids) => { const rank = { fail: 3, marginal: 2, pass: 1 }; let worst = null; for (const id of ids) { const l = scene.links.find((q) => q.id === id), st = l && (solveCached(scene, l) || {}).status; if (st && (!worst || (rank[st] || 0) > (rank[worst] || 0))) worst = st; } return worst ? { color: statusColor(th, worst), word: worst } : null; } });
     drawNoiseSources(ctx, th, vp, scene, sel, handles, hoverKey, w, placedLabels);
     drawMeasurementsPlan(ctx, th, vp, scene, placedLabels, w, h);
@@ -276,6 +277,15 @@ export function createPlanView(canvas, store) {
     return link.kind !== 'iem' || link.txOf !== undefined || !!feedAntenna(scene.rack, link.id, 'tx');
   }
 
+  /** With a rack, several links can be fed by one antenna (an IEM combiner's, a mic splitter's): that antenna is drawn once, with the first link on it. -> { dup: this link is not the first, n: how many other links share it, ant }. */
+  function sharedFeed(scene, link, role) {
+    const none = { dup: false, n: 0, ant: null };
+    if (!scene.rack || (role === 'tx' ? link.kind !== 'iem' : link.kind !== 'mic')) return none;
+    const ant = feedAntenna(scene.rack, link.id, role); if (!ant) return none;
+    const same = scene.links.filter((q) => q.kind === link.kind && feedAntenna(scene.rack, q.id, role) === ant);
+    return { dup: same[0] !== link, n: same.length - 1, ant };
+  }
+
   function drawLinkLine(ctx, th, scene, link, isActive, w) {
     if (!endPlaced(scene, link, 'tx') || !endPlaced(scene, link, 'rx')) return; // an end with no antenna: no ray to draw
     const res = solveCached(scene, link);
@@ -369,6 +379,7 @@ export function createPlanView(canvas, store) {
       if (!endPlaced(scene, link, role)) continue;
       if (role === 'rx' && link.rx.sharedAntennaOf !== undefined) continue; // drawn once, with the link that owns the antenna; its line still ends here
       if (frameHidden(link, role)) continue; // bundled into the person's icon
+      const feed = sharedFeed(scene, link, role); if (feed.dup) continue; // an antenna several links use is drawn once
       const e = link[role], p = vp.worldToScreen(e.pos);
       const selected = sel === e.id;
       const sharers = role === 'rx' ? scene.links.filter((q) => q.rx.sharedAntennaOf === link.id).length : 0;
@@ -391,7 +402,7 @@ export function createPlanView(canvas, store) {
         icons.drawAntenna(ctx, vp, e.pos.x, e.pos.y, { view: 'plan', ink, fill, type: ant.type, pol: ant.polarisation, rollDeg: ant.rollDeg, groundPlane: ant.groundPlane, angleDeg: 180 - az });
       }
       if (selected) ringAt(ctx, th, p.x, p.y, 17); else hoverRingAt(ctx, th, p.x, p.y, role + ':' + e.id);
-      if (w >= 520 || selected) haloText(ctx, th, sharers ? `${e.name} (+${sharers} shared)` : e.name, p.x, p.y + Math.max(22, 0.35 * vp.pxPerM + 12), { align: 'center', color: selected ? th.ink : th.inkSoft, weight: selected ? '600' : '' });
+      if (w >= 520 || selected) haloText(ctx, th, feed.n > 0 ? `${feed.ant.name} (${feed.n + 1} links)` : sharers ? `${e.name} (+${sharers} shared)` : e.name, p.x, p.y + Math.max(22, 0.35 * vp.pxPerM + 12), { align: 'center', color: selected ? th.ink : th.inkSoft, weight: selected ? '600' : '' });
       if (role === 'rx') {
         const inf = rxInfo(link);
         drawOverloadHalo(ctx, th, p.x, p.y, inf.overload);
