@@ -113,8 +113,16 @@ export function resolveImd(scene) {
   if (!d) return scene;
   const sc = structuredClone(scene);
   sc.imd.transmitters = [...d.transmitters, ...(sc.imd.transmitters || [])]; sc.imd.topology = d.topology; sc.imd.fromRack = false;
+  const rl = rxLinkOf(scene);
+  if (rl && rl.rx) { sc.imd.rxAntennaPos = structuredClone(rl.rx.pos); sc.imd.rxAntenna = structuredClone(rl.rx.antenna); }
   return sc;
 }
+/** The link whose receiver the intermod is evaluated at: scene.imd.rxLinkId, else the first link. */
+function rxLinkOf(scene) {
+  const links = scene.links || [], id = scene.imd && scene.imd.rxLinkId;
+  return links.find((l) => l.id === id) || links[0] || null;
+}
+const rackFed = (scene) => !!(scene.imd && scene.imd.fromRack === true && scene.rack && scene.rack.byFreq === true);
 
 function bwKHz(scene) {
   const { imd, preset } = imdOf(scene);
@@ -123,7 +131,7 @@ function bwKHz(scene) {
 
 function receiver(scene) {
   const { imd, preset } = imdOf(scene);
-  const link = (scene.links || [])[0];
+  const link = rxLinkOf(scene);
   const rxPreset = (link && link.rx && RX_PRESETS[link.rx.rxPreset]) || (preset && RX_PRESETS[preset.rxPresetId]) || RX_DEFAULTS;
   const iip3 = [imd.iip3Dbm, link && link.rx && link.rx.overload && link.rx.overload.iip3Dbm, rxPreset && rxPreset.iip3Dbm, preset && preset.iip3Dbm]
     .find(Number.isFinite) ?? -8;
@@ -204,12 +212,30 @@ export function imdTopology(scene) {
 
 function rxAntenna(scene) {
   const { imd } = imdOf(scene);
-  const link = (scene.links || [])[0];
+  const link = rxLinkOf(scene);
+  if (rackFed(scene) && link && link.rx && link.rx.antenna) return link.rx.antenna; // the bodypack's own antenna
   return imd.rxAntenna || (link && link.rx && link.rx.antenna) || DEFAULT_ANT;
 }
 
 function rxPointOf(scene, rxPoint) {
-  return rxPoint || (scene.imd && scene.imd.rxAntennaPos) || { x: 0, y: 0, z: 1.5 };
+  const rl = rackFed(scene) ? rxLinkOf(scene) : null;
+  return rxPoint || (rl && rl.rx && rl.rx.pos) || (scene.imd && scene.imd.rxAntennaPos) || { x: 0, y: 0, z: 1.5 };
+}
+
+/**
+ * imdPerBodypack(scene) -> null (not rack-fed) or one row per in-ear link in the rack: the third-order and fifth-order products are worked out at THAT bodypack's
+ * position and antenna, and the worst one landing on its own channel (not made from its own transmitter) is reported:
+ *   { linkId, name, freqMHz, wantedDbm, worstCiDb (null when nothing lands), severity: 'ok' | 'info' | 'warning' | 'critical', label, hits }.
+ */
+export function imdPerBodypack(scene) {
+  const d = imdFromRack(scene);
+  if (!d) return null;
+  return d.transmitters.map((t) => {
+    const sc = { ...scene, imd: { ...scene.imd, rxLinkId: t.id } };
+    const hits = coordinationCheck(sc).filter((h) => h.channelId === t.id && !h.ownTone);
+    const w = hits[0];
+    return { linkId: t.id, name: t.name, freqMHz: t.freqMHz, wantedDbm: toneLevels(sc).find((_, i) => txOf(sc)[i].id === t.id)?.levelDbm ?? null, worstCiDb: w ? w.ciDb : null, severity: w ? w.severity : 'ok', label: w ? w.product.label : '', hits: hits.length };
+  });
 }
 
 // ---------------------------------------------------------------- coupling and received levels

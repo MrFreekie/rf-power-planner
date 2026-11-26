@@ -185,7 +185,8 @@ export function drawImd(ctx, th, vp, scene, sel, handles, placer, w) {
   }
   // With a frequency-paired rack the links are real: an intermod transmitter that is a link's own transmitter is drawn by that link (its antenna), and the receive antenna at a link's receiver is that link's end.
   const real = !!(scene.rack && scene.rack.byFreq === true), extra = real ? extraImdTransmitters(scene) : [], own = new Set(real ? txs.filter((t) => !extra.includes(t)) : []);
-  const r = m.rxAntennaPos, atLinkRx = real && !!r && (scene.links || []).some((l) => l.rx && l.rx.pos && l.rx.pos.x === r.x && l.rx.pos.y === r.y);
+  const fed = m.fromRack === true && real, r = fed ? ((scene.links || [])[0] || {}).rx && scene.links[0].rx.pos : m.rxAntennaPos; // rack-fed: the bodypacks are the receivers, no separate marker
+  const atLinkRx = fed || (real && !!r && (scene.links || []).some((l) => l.rx && l.rx.pos && l.rx.pos.x === r.x && l.rx.pos.y === r.y));
   // receive antenna
   let rp = null;
   if (r) {

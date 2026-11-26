@@ -63,3 +63,17 @@ test('setCombiner: isolated type, overrides, feeds-into rules', async () => {
   setCombiner(store, c1, { into: null });
   assert.equal(store.getScene().rack.combiners[0].into, undefined);
 });
+
+test('imdPerBodypack: one row per in-ear link, evaluated at that bodypack; null when not rack-fed', async () => {
+  const { imdPerBodypack } = await import('../js/model/imd.js');
+  const c = iem8Scene('C'), rows = imdPerBodypack(c);
+  assert.equal(rows.length, 8);
+  assert.deepEqual(rows.map((r) => r.linkId), c.links.map((l) => l.id));
+  for (const r of rows) assert.ok(['ok', 'info', 'warning', 'critical'].includes(r.severity));
+  const off = structuredClone(c); off.imd.fromRack = false;
+  assert.equal(imdPerBodypack(off), null);
+  // moving one bodypack changes only that row's wanted level
+  const moved = structuredClone(c); moved.links[3].rx.pos = { x: moved.links[3].rx.pos.x + 6, y: moved.links[3].rx.pos.y, z: 1.2 };
+  const after = imdPerBodypack(moved);
+  assert.notEqual(after[3].wantedDbm, rows[3].wantedDbm);
+});

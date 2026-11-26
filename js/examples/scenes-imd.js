@@ -142,6 +142,7 @@ export function iem8Scene(variant, { omniDistanceM = 2.5, omniAt = 'front', tx8I
  */
 const sameSpot = (a, b) => !!a && !!b && a.x === b.x && a.y === b.y && a.z === b.z;
 function iem8Rack(s, l, m) {
+  l.rx.antenna = structuredClone(m.rxAntenna); // the bodypacks are the intermod receivers: same antenna as the figures were worked out with
   const links = m.transmitters.map((t, i) => {
     const k = i === 0 ? l : structuredClone(l);
     if (i > 0) { k.id = newId('link'); k.tx.id = newId('tx'); k.rx.id = newId('rx'); }

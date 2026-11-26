@@ -731,6 +731,7 @@ export function validateScene(scene) {
       if (m.rxAntenna !== undefined) checkAntenna(m.rxAntenna, 'imd.rxAntenna', errors);
       const c = m.combiner;
       if (m.fromRack !== undefined && typeof m.fromRack !== 'boolean') errors.push('imd.fromRack must be true or false');
+      if (m.rxLinkId !== undefined && typeof m.rxLinkId !== 'string') errors.push('imd.rxLinkId must be a link id');
       if (m.topology !== undefined) checkImdTopology(m.topology, 'imd.topology', errors);
       if (!isObj(c) || !IMD_COMBINER_TYPES.includes(c.type) || !isDbPos(c.isolationDb) || !isDbPos(c.lossDb)) errors.push('imd.combiner must be {type: none|hybrid|isolated, isolationDb >= 0, lossDb >= 0}');
       const q = m.pim;
