@@ -865,7 +865,7 @@ export function polarisationLossDb(txAnt, rxAnt, departure, arrival, { envPolari
   return -10 * Math.log10(Math.min(1, Math.max(plf, 1e-12)));
 }
 
-export function solveLink(scene, link) {
+function solveLinkOne(scene, link) {
   const f = link.freqMHz;
   const env = scene.environment || {};
   const pol = wavePolarisation(scene, link);
@@ -1120,6 +1120,31 @@ export function branchLinkOf(link, branch, rxPoint, powerOffsetDb = 0) {
     rx: rxPoint ? { ...link.rx, pos: rxPoint } : link.rx,
     chain: branch.chain || [],
     branches: undefined,
+  };
+}
+
+/**
+ * solveLink(scene, link) -> the link budget at link.rx.pos. A link with several transmit antennas (link.branches, fed through a splitter) is solved as the combination of
+ * every branch at the receiver, in the scene coverage combine mode (power sum by default, or coherent or best antenna): the same level the coverage map shows at that point.
+ * The result then also carries branchCombine { mode, perBranchDbm, dominantBranch, splitterLossDb, deltaDb } and the waterfall ends with one step for the combining.
+ * paths, distance and the per-path detail stay those of the first branch.
+ */
+export function solveLink(scene, link) {
+  const base = solveLinkOne(scene, link);
+  if (!Array.isArray(link.branches) || link.branches.length < 2 || link.kind === 'p2p' || !link.rx || !link.rx.pos) return base;
+  const m = scene && scene.coverage && scene.coverage.mode;
+  const mode = m === 'coherent' || m === 'best' ? m : 'power';
+  const r = evalPrepared(prepareBranches(scene, link), scene, link.rx.pos, mode);
+  const delta = r.combinedDbm - base.inputPowerDbm;
+  if (!Number.isFinite(delta)) return base;
+  const marginDb = base.marginDb + delta;
+  const label = `Antennas combined (${mode === 'power' ? 'power sum' : mode === 'best' ? 'best antenna' : 'coherent'}, splitter loss ${r.splitterLossDb.toFixed(1)} dB)`;
+  return {
+    ...base,
+    rxPowerDbm: base.rxPowerDbm + delta, inputPowerDbm: r.combinedDbm, marginDb, status: marginDb >= 6 ? 'pass' : marginDb >= 0 ? 'marginal' : 'fail',
+    cascade: { ...base.cascade, marginAtAntennaDb: base.cascade.marginAtAntennaDb + delta },
+    waterfall: [...base.waterfall, { label, valueDbm: r.combinedDbm, deltaDb: delta }],
+    branchCombine: { mode, perBranchDbm: r.perBranchDbm, dominantBranch: r.dominantBranch, splitterLossDb: r.splitterLossDb, deltaDb: delta },
   };
 }
 

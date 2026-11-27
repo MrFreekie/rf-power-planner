@@ -172,7 +172,7 @@ export const CORE_EXAMPLES = [
   {
     id: 'zones-dead-spot',
     title: 'Two antennas: covering a dead spot behind a wall',
-    note: 'Problem: a heavy wall splits the venue in two. With one transmit antenna the room behind the wall is a dead spot; a second antenna on the far side, fed through a splitter from the same transmitter, covers it. Remove or move antenna 2 and watch the zone fail.',
+    note: 'Problem: a heavy wall splits the venue in two. With one transmit antenna the room behind the wall is a dead spot; a second antenna on the far side, fed through a splitter from the same transmitter, covers it. The zone needs -75 dBm (the -85 dBm squelch threshold plus 10 dB of margin): with antenna 2 its worst spot is about -61 dBm and every cell passes; with one antenna it averages about -97 dBm and none pass. Antenna 2 pays for the splitter loss and a 30 m cable and still wins by a wide margin. Remove antenna 2, or drag it to the near side of the wall, and watch the zone fail.',
     build: () => ({
       scene: make('iem', (s, l) => {
         s.stage = { width: 24, depth: 12 };
