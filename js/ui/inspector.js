@@ -6,7 +6,7 @@ import { findItem, activeLink, solveCached } from '../view/util.js';
 import { setLinkDock, LINK_DOCK_SECTIONS, setVenueDock, VENUE_DOCK_SECTIONS } from './linkDock.js';
 import { chainItemLossDb } from '../model/rf.js';
 import { CABLES, ANTENNAS, SURFACES, MATERIALS, BANDS, GROUND_PLANE_LABELS, GROUND_PLANE_GAIN_DBI, ANTENNA_CONTACT_LABELS, ANTENNA_DAMPNESS_LABELS, allowedPolarisations, defaultPolarisation } from '../model/library.js';
-import { setAntennaField, setAntennaType, antennaOf, setLocked } from '../actions.js';
+import { setAntennaField, setAntennaType, antennaOf, setLocked, addBranch, removeBranch, updateBranch } from '../actions.js';
 import { findLockable } from '../model/lock.js';
 import { wrapAngle } from './angleWrap.js';
 import { POLARISATION_LABELS, ORIENTATION_HINT, POLARISATION_HINT, isRingAntenna } from './antennaFields.js';
@@ -362,6 +362,32 @@ export function mountInspector({ container, store }) {
     return frag;
   }
 
+  /** The extra transmit antennas of an in-ear link (branch 1 and up), each fed through the splitter, with an Add button. */
+  function branchBlock(link) {
+    const frag = document.createDocumentFragment();
+    const brs = Array.isArray(link.branches) ? link.branches : [];
+    const bOf = (c, id) => (c.link.branches || []).find((b) => b.id === id);
+    brs.forEach((b0, i) => {
+      if (i === 0) return;
+      const id = b0.id, k = `txb${i}`;
+      const posNum = (ax, label, lo, hi) => numberField({
+        key: `${k}-${ax}`, label: `${b0.name || 'Antenna ' + (i + 1)}: ${label}`, decimals: 2, min: (c) => lengthToUi(lo, c.lu), max: (c) => lengthToUi(hi, c.lu), step: (c) => (c.lu === 'ft' ? 0.5 : 0.1), unit: (c) => c.lu,
+        get: (c) => { const b = bOf(c, id); return b ? lengthToUi(ax === 'z' ? b.pos.z : dispAxis(c.scene, ax, b.pos[ax]), c.lu) : 0; },
+        set: (c, v, o) => updateBranch(store, c.link.id, id, { pos: { [ax]: ax === 'z' ? lengthFromUi(v, c.lu) : internalAxis(c.scene, ax, lengthFromUi(v, c.lu)) } }, o),
+      });
+      frag.append(el('p', 'hint', `${b0.name || 'Antenna ' + (i + 1)}: another transmit antenna, fed from the same transmitter through the splitter.`),
+        posNum('x', 'position x', -50, 100), posNum('y', 'position y', -50, 100), posNum('z', 'height above floor', 0, 50),
+        numberField({ key: `${k}-gain`, label: `${b0.name || 'Antenna ' + (i + 1)}: gain`, min: -20, max: 40, step: 0.5, unit: 'dBi', decimals: 1,
+          get: (c) => { const b = bOf(c, id); return b ? b.antenna.gainDbi : 0; }, set: (c, v, o) => updateBranch(store, c.link.id, id, { antenna: { gainDbi: v } }, o) }),
+        numberField({ key: `${k}-cable`, label: `${b0.name || 'Antenna ' + (i + 1)}: cable length`, min: 0, max: 200, step: 1, unit: 'm', decimals: 1,
+          get: (c) => { const b = bOf(c, id), x = b && b.chain.find((q) => q.kind === 'cable'); return x ? x.lengthM : 0; },
+          set: (c, v, o) => { const b = bOf(c, id); if (!b) return; const ch = structuredClone(b.chain); const x = ch.find((q) => q.kind === 'cable'); if (x) x.lengthM = v; updateBranch(store, c.link.id, id, { chain: ch }, o); } }),
+        button(`Remove ${b0.name || 'Antenna ' + (i + 1)}`, `${k}-remove`, () => { removeBranch(store, link.id, id); }, { cls: 'danger', label: 'Remove this transmit antenna' }));
+    });
+    frag.append(button('Add transmit antenna', 'tx-branch-add', () => { addBranch(store, link.id); }, { label: 'Add another transmit antenna fed through a splitter, for example to cover a dead spot' }));
+    return frag;
+  }
+
   // ---- build -----------------------------------------------------------------------------
   function build(c) {
     container.textContent = '';
@@ -462,6 +488,7 @@ export function mountInspector({ container, store }) {
       fmBlock((cc) => cc.link.tx.fmPreset, (cc) => cc.link, cc2 => cc2.link.freqMHz),
       antennaFields('tx', 'tx'),
       posFields('tx'),
+      ...(link.kind === 'iem' ? [branchBlock(link)] : []),
     );
 
     // Receiver
@@ -1528,6 +1555,7 @@ export function mountInspector({ container, store }) {
     return JSON.stringify([
       c.found?.type ?? null, c.sel ?? null, c.link.id, c.link.kind,
       c.link.chain.map((x, i) => `${x.id || i}:${x.kind}`),
+      c.link.kind === 'iem' ? (c.link.branches || []).map((b) => b.id) : null,
       c.link.kind === 'iem' ? (c.link.rx.chain || []).map((x, i) => `${x.id || i}:${x.kind}`) : null,
       c.link.kind !== 'iem' && c.link.rx.diversity && c.link.rx.diversity.enabled && c.link.rx.diversity.antennaB ? (Array.isArray(c.link.rx.diversity.antennaB.chain) ? c.link.rx.diversity.antennaB.chain.map((x, i) => `${x.id || i}:${x.kind}`) : 'same') : null,
       c.scene.reflectors.map((r) => `${r.id}:${r.id === c.sel || (c.found?.type === 'noise' && c.found.item.reflectorId === r.id) ? `${r.construction || ''}/${(r.noise && r.noise.preset) || ''}` : ''}`),
