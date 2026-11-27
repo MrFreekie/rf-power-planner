@@ -222,7 +222,7 @@ export const CORE_EXAMPLES = [
   {
     id: 'zones-backstage-corridor',
     title: 'Zone check: backstage corridor',
-    note: 'Compare: the backstage corridor needs reliable IEM coverage with 10 dB of margin. The zone table shows the worst point and the share of the corridor that passes; the suggestions list what would help most, such as moving an antenna or adding gain.',
+    note: 'Compare: a brick wall (40 dB) shuts the backstage corridor off from the stage, and the corridor needs -75 dBm (the -85 dBm squelch threshold plus 10 dB of margin). With antenna 2 inside the corridor its worst spot is about -68 dBm and every cell passes; with one antenna the corridor averages about -83 dBm and none pass. Remove antenna 2 in the inspector and the zone table lists what would help most, such as moving an antenna or adding gain.',
     build: () => ({
       scene: make('iem', (s, l) => {
         s.stage = { width: 24, depth: 12 };
