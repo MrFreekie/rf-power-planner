@@ -471,8 +471,7 @@ export function mountSpectra({ container, store, now = () => performance.now() }
   const setImdView = (on) => {
     imdOn = !!on; imdBtn.setAttribute('aria-pressed', String(imdOn)); imdPanel.hidden = !imdOn || !imdHost; grid.hidden = imdOn && !!imdHost; tabs.hidden = imdOn;
     container.classList.toggle('spectra-imd-on', imdOn && !!imdHost);
-    try { localStorage.setItem('rf-spectra-view.v1', imdOn ? 'imd' : 'spectra'); } catch { /* not kept */ }
-    if (!imdOn) invalidateAll();
+      if (!imdOn) invalidateAll();
   };
   imdBtn.addEventListener('click', () => setImdView(!imdOn));
 
@@ -685,8 +684,8 @@ export function mountSpectra({ container, store, now = () => performance.now() }
   }) : null;
   if (ro) ro.observe(container);
   syncTabs();
-  try { if (localStorage.getItem('rf-spectra-view.v1') === 'imd') setImdView(true); } catch { /* default view */ }
-  const unsub = [store.subscribe(() => { const on = !!(store.getScene().imd && store.getScene().imd.enabled); if (on && !imdWas) setImdView(true); imdWas = on; invalidateAll(); })]; // turning the intermod demo on shows it
+  if (imdWas) setImdView(true); // a scene that opens with the intermod demo on starts on it
+  const unsub = [store.subscribe(() => { const on = !!(store.getScene().imd && store.getScene().imd.enabled); if (on !== imdWas) setImdView(on); imdWas = on; invalidateAll(); })]; // turning the intermod demo on shows it
   if (S.running) loop = requestAnimationFrame(tick);
   return {
     setRunning, invalidate: invalidateAll, panels, zoom, openZoom,
