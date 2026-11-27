@@ -108,7 +108,7 @@ export function findItem(scene, id) {
     if (link.rx?.id === id) return { type: 'rx', link, item: link.rx };
     if (link.id === id) return { type: 'link', link, item: link };
     const br = Array.isArray(link.branches) ? link.branches.find((b) => b && b.id === id) : null;
-    if (br) return { type: 'rx', link, item: br };
+    if (br) return { type: 'branch', link, item: br };
   }
   for (const r of scene.reflectors || []) if (r.id === id) return { type: 'reflector', item: r };
   for (const p of scene.platforms || []) if (p.id === id) return { type: 'platform', item: p };

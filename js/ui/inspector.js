@@ -69,7 +69,7 @@ const KIND_NAMES = {
   rof: 'RF over fibre', coupler: 'Directional coupler', biastee: 'Bias tee', dcblock: 'DC block', activesplitter: 'Active splitter', activecombiner: 'Active combiner',
 };
 const PREVIEW_KINDS = new Set(['splitter', 'combiner']);
-const SECTION_FOR = { tx: 'tx', rx: 'rx', reflector: 'refl', link: 'link', platform: 'plats', crowd: 'crowd', panel: 'ovh', person: 'ppl', noise: 'noise' };
+const SECTION_FOR = { tx: 'tx', branch: 'tx', rx: 'rx', reflector: 'refl', link: 'link', platform: 'plats', crowd: 'crowd', panel: 'ovh', person: 'ppl', noise: 'noise' };
 
 export function mountInspector({ container, store }) {
   container.classList.add('inspector');
@@ -402,7 +402,7 @@ export function mountInspector({ container, store }) {
     const heading = el('h2', null, 'Inspector');
     const who = c.found
       ? el('p', 'insp-who', c.found.type === 'platform' ? `Selected: platform "${c.found.item.name}"` : c.found.type === 'crowd' ? `Selected: crowd zone "${c.found.item.name}"` : c.found.type === 'panel' ? `Selected: overhead panel "${c.found.item.name}"` : c.found.type === 'reflector' ? `Selected: reflector "${c.found.item.name}"`
-        : c.found.type === 'link' ? `Selected: link "${link.name}"` : `Selected: ${c.found.type === 'tx' ? 'transmitter' : 'receiver'} "${c.found.item.name}"`)
+        : c.found.type === 'link' ? `Selected: link "${link.name}"` : c.found.type === 'branch' ? `Selected: transmit antenna "${c.found.item.name}" of link "${link.name}"` : `Selected: ${c.found.type === 'tx' ? 'transmitter' : 'receiver'} "${c.found.item.name}"`)
       : el('p', 'insp-who', `Nothing selected: editing link "${link.name}"`);
     container.append(heading, who);
     if (c.found && c.found.type !== 'link' && findLockable(c.scene, c.found.item.id)) { // position lock: the item can still be selected, edited and aimed, but not dragged or nudged

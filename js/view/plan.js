@@ -610,7 +610,7 @@ export function createPlanView(canvas, store) {
     store.update((s) => {
       const g = findItem(s, id), bd = bounds(s.stage);
       if (!g) return;
-      if (g.type === 'tx' || g.type === 'rx') { g.item.pos.x = round2(clamp(g.item.pos.x + dx * step, bd.x0, bd.x1)); g.item.pos.y = round2(clamp(g.item.pos.y + dy * step, bd.y0, bd.y1)); }
+      if (g.type === 'tx' || g.type === 'rx' || g.type === 'branch') { g.item.pos.x = round2(clamp(g.item.pos.x + dx * step, bd.x0, bd.x1)); g.item.pos.y = round2(clamp(g.item.pos.y + dy * step, bd.y0, bd.y1)); }
       else if (g.type === 'reflector') for (const p of [g.item.p1, g.item.p2]) { p.x = round2(p.x + dx * step); p.y = round2(p.y + dy * step); }
       else if (g.type === 'platform' || g.type === 'panel') { g.item.x = round2(g.item.x + dx * step); g.item.y = round2(g.item.y + dy * step); }
     }, { coalesce: `plan-nudge-${id}` });
