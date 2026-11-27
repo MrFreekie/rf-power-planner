@@ -235,7 +235,7 @@ export function mountRack({ container, store }) {
   }
 
   reveal = (keys, sel) => { for (const k of keys) open.add(k); if (sel) store.select(sel); else queue(); };
-  body.append(el('p', 'hint', 'Every radio item in signal order. The dot and numbers show how each is doing; open one for its signal flow and essentials, with the rest under Advanced.'), bar.node, msg, status, out, pack);
+  body.append(el('p', 'hint', 'Every radio item in signal order. The coloured dot shows how each link is doing (green passes, amber is marginal, red will drop out) and the figure beside it is its margin in dB. Open one for its signal flow and essentials; the rest is under Advanced.'), bar.node, msg, status, out, pack);
   let timer = null, pending = false;
   const queue = () => {
     clearTimeout(timer);

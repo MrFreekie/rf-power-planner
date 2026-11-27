@@ -65,7 +65,7 @@ export function mountDigital({ container, store }) {
     const isDig = !!(link && link.modulation && link.modulation.type === 'digital');
     st = isDig ? digital.get(link.id) : null;
     msg.hidden = isDig; body.hidden = !isDig;
-    msg.textContent = link ? 'This link uses analog FM. Choose Digital in the toolbar to see the constellation, bit error curve and adaptive modulation.' : 'No link selected.';
+    msg.textContent = link ? 'This link uses analog FM. Set Modulation to Digital in the transmitter radio item to see the constellation, bit error curve and adaptive modulation.' : 'No link selected.';
     if (!isDig) return;
     stateChip.textContent = st ? stateText(st.state) : '-';
     stateChip.dataset.state = st ? st.state : 'none';

@@ -6,7 +6,7 @@ export const PANEL_IDS = Object.freeze(['left', 'right', 'bottom']);
 export const STORE_KEY = 'rf-panels.v1';
 export const WIDE_QUERY = '(min-width: 1100px)';
 export const PANEL_KEYS = Object.freeze({ b: 'left', i: 'right', m: 'bottom' });
-export const PANEL_TITLES = Object.freeze({ left: 'Budgets', right: 'Inspector', bottom: 'Meters, timeline and spectra' });
+export const PANEL_TITLES = Object.freeze({ left: 'Budgets', right: 'Inspector', bottom: 'Meters, timeline, spectra and intermod' });
 
 /** { left, right, bottom } of booleans (true = collapsed) plus focus: null | saved state. Unknown or bad input gives all open. */
 export function normaliseState(raw) {

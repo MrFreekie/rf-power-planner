@@ -40,7 +40,7 @@ const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const E = (label, behaviour, params, flags, note, group = 'other') => Object.freeze({ label, behaviour, params: Object.freeze(params), flags: Object.freeze(flags), note, group });
 const BB = (field, tilt = -20, lo = 30, hi = 1000) => ({ type: 'broadband', fieldDbuvmAt10m: field, tiltDbPerDecade: tilt, bandMinMHz: lo, bandMaxMHz: hi });
 export const NOISE_CATALOGUE = Object.freeze({
-  'video-wall': E('Video / LED wall', 'continuous', { ...BB(47, 0, 30, 1000) }, { fieldDbuvmAt10m: 'I' }, 'Class A limit at 10 m (47 dBuV/m above 230 MHz). The wall block on a reflector (ledwall.js) is the source of truth; this entry mirrors it.', 'display'),
+  'video-wall': E('Video / LED wall', 'continuous', { ...BB(47, 0, 30, 1000) }, { fieldDbuvmAt10m: 'I' }, 'Class A limit at 10 m (47 dBuV/m above 230 MHz, the usual EMC limit for display equipment). Edit it on the reflector entry of the wall; this row follows it.', 'display'),
   'led-light-pwm': E('LED light or tape with PWM dimming', 'continuous', { ...BB(38, -20) }, { fieldDbuvmAt10m: 'U' }, 'Switching driver plus PWM edges: broadband hash falling with frequency. Camera lights and cheap LED tape are the usual offenders.', 'lighting'),
   'switch-mode-psu': E('Switch-mode power supply or laptop charger', 'continuous', { ...BB(32, -20) }, { fieldDbuvmAt10m: 'U' }, 'Class B limit class of noise at its harmonic comb; worse when cheap or damaged.', 'power'),
   'generator-inverter': E('Generator or inverter (van, tour power)', 'continuous', { ...BB(45, -30, 30, 500) }, { fieldDbuvmAt10m: 'U' }, 'Alternator and inverter switching: strongest at VHF, falling above 500 MHz.', 'power'),

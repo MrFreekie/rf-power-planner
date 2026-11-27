@@ -514,7 +514,7 @@ export function mountSpectra({ container, store, now = () => performance.now() }
   const mp = panels.mpx;
   const mpxEl = document.getElementById('mpx'), digEl = document.getElementById('digital');
   const mpxWrap = el('div', 'slot-extra slot-mpx'), digWrap = el('div', 'slot-extra slot-digital');
-  const digNote = el('p', 'hint', 'This link is analogue FM, so the digital link panel has nothing to show. Switch the link to Digital in the toolbar.');
+  const digNote = el('p', 'hint', 'This link is analogue FM, so the digital link panel has nothing to show. Set Modulation to Digital in the transmitter radio item.');
   if (mpxEl) mpxWrap.append(mpxEl);
   if (digEl) digWrap.append(digEl);
   digWrap.append(digNote);

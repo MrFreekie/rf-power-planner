@@ -6,7 +6,7 @@ import { createZoom } from './spectraZoom.js';
 import { PLAN_COLUMNS, frequencyPlanRows, frequencyPlanCsv, frequencyPlanText, planSummary, coordinationSummary } from '../model/plan-export.js';
 
 export const DELIMITERS = Object.freeze({ comma: ',', semicolon: ';', tab: '\t' });
-export const BW_NOTE = 'Analogue occupied bandwidth is inferred (Carson’s rule at the default ±40 kHz deviation and 15 kHz audio), not read from the transmitter. Digital figures come from the preset.';
+export const BW_NOTE = 'Analogue occupied bandwidth is inferred, not read from the transmitter: Carson’s rule (2 × (deviation + audio bandwidth)) gives 110 kHz at the default ±40 kHz deviation and 15 kHz audio. Digital figures come from the preset.';
 const ROLE = { mic: 'Microphone', iem: 'In-ear monitor', other: 'Other' };
 
 export function todayISO(d = new Date()) { const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; }
@@ -126,8 +126,8 @@ export function mountPlanExport({ doc = document, button, store, hostFactory = (
     const ul = el('ul'); v.lines.forEach((t, i) => ul.append(el('li', i === v.lines.length - 1 && !v.coord.ok ? 'plan-bad' : null, t))); sumBox.append(ul);
     printTitle.textContent = `${v.summary.projectName || 'Frequency plan'}${v.summary.date ? `, ${v.summary.date}` : ''}`;
     tableWrap.textContent = '';
-    if (!v.rows.length) { tableWrap.append(el('p', 'hint', 'No links or IMD transmitters in this project yet.')); zoom.update(); return; }
-    const t = el('table', 'meas-table plan-table'), cap = el('caption', null, 'Frequency plan: one row per link and per IMD transmitter');
+    if (!v.rows.length) { tableWrap.append(el('p', 'hint', 'No links or intermod transmitters in this project yet.')); zoom.update(); return; }
+    const t = el('table', 'meas-table plan-table'), cap = el('caption', null, 'Frequency plan: one row per link and per intermod transmitter');
     const hr = el('tr'); v.table.cols.forEach((c) => hr.append(el('th', null, c, { scope: 'col' })));
     const th = el('thead'); th.append(hr); const tb = el('tbody');
     v.table.rows.forEach((r) => { const tr = el('tr'); r.forEach((c, i) => tr.append(el(i === 0 ? 'th' : 'td', null, c, i === 0 ? { scope: 'row' } : undefined))); tb.append(tr); });

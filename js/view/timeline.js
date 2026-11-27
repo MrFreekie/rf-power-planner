@@ -9,7 +9,7 @@ import { rxState } from '../rxTracker.js';
 import { distortionFromLink } from '../model/spectrum-views.js';
 import { drawDistortionBadge } from './distortionDraw.js';
 
-const RANGES = [[10, '10 s'], [30, '30 s'], [120, '2 min']];
+const RANGES = [[10, '10 s'], [30, '30 s'], [120, '2 min']]; // how much history the plot shows
 
 /** Contiguous runs of equal `key(sample)`: [{t0, t1, value}]. Pure. */
 export function runsBy(samples, key) {
@@ -58,7 +58,7 @@ export function mountTimeline({ container, store }) {
   rangeGroup.className = 'group'; rangeGroup.setAttribute('role', 'group'); rangeGroup.setAttribute('aria-label', 'Timeline range');
   let span = 30;
   const rbtns = RANGES.map(([sec, label]) => {
-    const b = document.createElement('button'); b.type = 'button'; b.textContent = label;
+    const b = document.createElement('button'); b.type = 'button'; b.textContent = label; b.title = `Show the last ${label} of RF level and squelch`;
     b.setAttribute('aria-pressed', String(sec === span));
     b.addEventListener('click', () => {
       span = sec;
@@ -69,7 +69,7 @@ export function mountTimeline({ container, store }) {
     return [sec, b];
   });
   const pauseBtn = document.createElement('button');
-  pauseBtn.type = 'button'; pauseBtn.textContent = 'Pause'; pauseBtn.setAttribute('aria-pressed', 'false');
+  pauseBtn.type = 'button'; pauseBtn.title = 'Freeze the timeline to look at a dropout; press again to carry on'; pauseBtn.textContent = 'Pause'; pauseBtn.setAttribute('aria-pressed', 'false');
   let pausedAt = null;
   pauseBtn.addEventListener('click', () => {
     pausedAt = pausedAt == null ? history.now() : null;

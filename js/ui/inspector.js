@@ -715,7 +715,7 @@ export function mountInspector({ container, store }) {
     // even-order products (second and fourth order, imd-even.js): receiver or booster intercepts, other bands in use, filters before and after
     const iip2 = (cc) => (Number.isFinite(cc.scene.imd.iip2Dbm) ? cc.scene.imd.iip2Dbm : DEFAULT_IIP2_DBM);
     const evenHead = el('h3', 'cv-sug-h', 'Even-order intermod (second and fourth order)');
-    body.append(evenHead, el('p', 'hint', 'Products such as f1 + f2 and 2f land far from the carriers, so they matter for wideband boosters, mixed bands on one antenna and harmonics. Intercepts are assumed planning numbers (flag U).'));
+    body.append(evenHead, el('p', 'hint', 'Products such as f1 + f2 and 2f land far from the carriers, so they matter for wideband boosters, mixed bands on one antenna and harmonics. The intercept figures are assumed planning numbers, not measurements.'));
     body.append(
       selectField({
         key: 'imd-iip2p', label: 'Nonlinear stage', options: [['custom', 'Custom IIP2'], ...Object.entries(IIP2_PRESETS).map(([id, p]) => [id, `${p.label} [${p.flag}]`])],

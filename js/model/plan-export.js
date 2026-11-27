@@ -66,7 +66,7 @@ export function frequencyPlanRows(scene, results) {
     const ch = tvChannelOf(t.freqMHz, w);
     rows.push({
       source: 'imd', id: t.id, name: clean(t.name || t.id), role: 'other', freqMHz: t.freqMHz, tvChannel: ch ? ch.n : null, occupiedBwKHz: analogOccupiedBwKHz(),
-      txPowerMw: sig3(Math.pow(10, t.powerDbm / 10)), rxLevelDbm: null, marginDb: null, status: '', personName: '', assumptionFlag: '', notes: 'IMD transmitter',
+      txPowerMw: sig3(Math.pow(10, t.powerDbm / 10)), rxLevelDbm: null, marginDb: null, status: '', personName: '', assumptionFlag: '', notes: 'Intermod transmitter',
     });
   }
   return rows;

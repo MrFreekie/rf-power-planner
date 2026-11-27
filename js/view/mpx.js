@@ -52,7 +52,7 @@ export function mountMpx({ container, store, tracker = null }) {
   meters.setAttribute('role', 'img');
   meters.setAttribute('aria-label', 'Left and right audio meters with stereo separation bar');
   const cap = el('p', 'hint mpx-caption',
-    'The spectrum of this multiplex is in the bottom bar (MPX spectrum). The left-minus-right (L−R) signal rides on a 38 kHz subcarrier, higher up the spectrum where FM noise is strongest, so it is the first thing to sink into the noise as the signal weakens. The 19 kHz pilot tone tells the receiver that stereo is present and gives it the phase reference to decode L−R; when the pilot is lost the receiver falls back to mono (L+R). Values are illustrative.');
+    'The left-minus-right (L−R) signal rides on a 38 kHz subcarrier, higher up the spectrum where FM noise is strongest, so it is the first thing to sink into the noise as the signal weakens. The 19 kHz pilot tone tells the receiver that stereo is present and gives it the phase reference to decode L−R; when the pilot is lost the receiver falls back to mono (L+R). Values are illustrative.');
   body.append(top, nums, cap, meters);
   container.append(h2, msg, body);
 
