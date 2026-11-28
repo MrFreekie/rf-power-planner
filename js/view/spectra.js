@@ -168,6 +168,18 @@ export const mpxSummary = (st) => (st
   : 'MPX baseband spectrum');
 
 /** Which view the MPX slot shows: automatic: digital links get the digital panel, others the MPX view. The override argument is kept for old callers (the UI always passes null). Pure. */
+/** Examples whose point is in the audio or the MPX; every other example opens on the RF spectrum. */
+const EXAMPLE_SPECTRUM = Object.freeze({
+  'audio-bandwidth-iem-vs-mic': 'audio',
+  'iem-stereo-mono': 'mpx', 'pilot-vs-carrier-squelch': 'mpx', 'fm-deviation-compare': 'mpx', 'fm-deviation-g3-vs-skm': 'mpx',
+  'tone-pilot-products': 'mpx', 'tone-pilot-beat': 'mpx', 'tone-sweep-pilot': 'mpx', 'tone-key-harmonics': 'mpx', 'tone-overdeviation': 'mpx',
+});
+/** exampleSpectrum(id, link) -> 'audio' | 'mpx' | 'rf': the spectrum tab an example opens on when the bar shows one at a time. A digital link opens on its digital link panel (the MPX slot). Pure. */
+export function exampleSpectrum(id, link) {
+  if (EXAMPLE_SPECTRUM[id]) return EXAMPLE_SPECTRUM[id];
+  return slotMode(link, null) === 'digital' ? 'mpx' : 'rf';
+}
+
 export function slotMode(link, override) {
   if (override === 'mpx' || override === 'digital') return override;
   return link && link.modulation && link.modulation.type === 'digital' ? 'digital' : 'mpx';
@@ -476,7 +488,7 @@ export function mountSpectra({ container, store, now = () => performance.now() }
   imdBtn.addEventListener('click', () => setImdView(!imdOn));
 
   const panels = {};
-  let active = 'audio';
+  let active = 'rf';
   for (const sp of SPECTRA) {
     const tab = el('button', null, sp.label, { type: 'button', role: 'tab', id: `spectra-tab-${sp.id}`, 'aria-controls': `spectra-panel-${sp.id}` });
     tab.addEventListener('click', () => { active = sp.id; syncTabs(); invalidateAll(); });
@@ -685,10 +697,12 @@ export function mountSpectra({ container, store, now = () => performance.now() }
   if (ro) ro.observe(container);
   syncTabs();
   if (imdWas) setImdView(true); // a scene that opens with the intermod demo on starts on it
+  const onExample = (e) => { const id = e.detail && e.detail.id; if (!id) return; active = exampleSpectrum(id, ctxInfo().link); syncTabs(); invalidateAll(); };
+  document.addEventListener('rf-example-loaded', onExample);
   const unsub = [store.subscribe(() => { const on = !!(store.getScene().imd && store.getScene().imd.enabled); if (on !== imdWas) setImdView(on); imdWas = on; invalidateAll(); })]; // turning the intermod demo on shows it
   if (S.running) loop = requestAnimationFrame(tick);
   return {
     setRunning, invalidate: invalidateAll, panels, zoom, openZoom,
-    destroy() { S.running = false; if (loop) cancelAnimationFrame(loop); document.removeEventListener('visibilitychange', onVis); if (ro) ro.disconnect(); unsub.forEach((u) => u && u()); zoom.destroy(); zoomSliders.destroy(); sourceBar.destroy(); pauseBtn.remove(); for (const sp of SPECTRA) panels[sp.id].host.destroy(); container.textContent = ''; },
+    destroy() { S.running = false; if (loop) cancelAnimationFrame(loop); document.removeEventListener('visibilitychange', onVis); document.removeEventListener('rf-example-loaded', onExample); if (ro) ro.disconnect(); unsub.forEach((u) => u && u()); zoom.destroy(); zoomSliders.destroy(); sourceBar.destroy(); pauseBtn.remove(); for (const sp of SPECTRA) panels[sp.id].host.destroy(); container.textContent = ''; },
   };
 }

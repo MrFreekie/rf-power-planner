@@ -144,6 +144,7 @@ function applyExample(id) {
   if (!ex) return false;
   if (TONE_EXAMPLE_KEYS[id]) { const { tonePct, pilotPct, overloadDb } = TONE_MPX_EXAMPLES[TONE_EXAMPLE_KEYS[id]].settings; toneState.set({ tonePct, pilotPct, overloadDb }); } else toneState.reset(); // the tone sliders follow the example
   history.clear();
+  document.dispatchEvent(new CustomEvent('rf-example-loaded', { detail: { id } })); // the spectra open on the tab that suits the example
   $('example-title').textContent = ex.title + '.';
   $('example-text').textContent = ex.note;
   $('example-note').hidden = false;
