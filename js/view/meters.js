@@ -8,7 +8,7 @@ import { setSquelchThreshold, SQUELCH_RANGE_DBM } from '../actions.js';
 
 const LATCH_S = 2.5;
 
-export const RF_RANGE = { min: -110, max: 0 };
+export const RF_RANGE = { min: -120, max: 0 }; // matches the squelch slider range (SQUELCH_RANGE_DBM), so a -120 dBm threshold and a transmitter-off noise floor stay on the scale
 export const AUDIO_RANGE = { min: -60, max: 0 };
 const HOLD_S = 1.2;
 const FALL_DB_PER_S = 20;

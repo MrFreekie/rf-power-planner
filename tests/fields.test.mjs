@@ -78,7 +78,7 @@ test('timeline range helpers', () => {
   assert.ok(r.min <= -95 && r.max >= -57 && r.max - r.min >= 30);
 });
 test('meter helpers', () => {
-  assert.equal(frac(-110, RF_RANGE), 0); assert.equal(frac(0, RF_RANGE), 1); assert.equal(frac(-55, RF_RANGE), 0.5);
+  assert.equal(frac(-120, RF_RANGE), 0); assert.equal(frac(0, RF_RANGE), 1); assert.equal(frac(-60, RF_RANGE), 0.5);
   const p = peakHold(null, -50, 0, RF_RANGE);
   assert.equal(peakHold(p, -80, 1, RF_RANGE).v, -50);
   assert.ok(peakHold(p, -80, 2, RF_RANGE).v < -50);
